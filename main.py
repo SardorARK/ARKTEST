@@ -42,6 +42,7 @@ store = UserStore(Path(__file__).with_name("users.db"), legacy_json=USERS_FILE,
 import achives  # noqa: E402  (импорты ниже намеренно после создания хранилища)
 import admin
 import boss
+import bonus             # +10% к урону по боссам за юзернейм бота в описании (bonus.py)
 import cases
 import donate
 import equipment
@@ -787,8 +788,11 @@ def menu_kb() -> InlineKeyboardMarkup:
             ],
             # Достижения: 60 заданий в шести разделах, награды монетами, мясом и фруктами
             [btn("Достижения", "menu:ach", ButtonStyle.PRIMARY, ACH_EMOJI[0])],
-            # Донат: внизу меню, на всю ширину
-            [btn("Донат", "menu:donate", ButtonStyle.SUCCESS, DONATE_EMOJI[0])],
+            # Донат и Бонус (+10% к урону за юзернейм бота в описании): внизу меню в одном ряду
+            [
+                btn("Донат", "menu:donate", ButtonStyle.SUCCESS, DONATE_EMOJI[0]),
+                btn("Бонус", "menu:bonus", ButtonStyle.PRIMARY, INFO_EMOJI[0]),
+            ],
         ]
     )
 
@@ -1321,7 +1325,7 @@ dp.include_router(market.router)
 boss.setup(
     user_stats=donate.boss_stats(lab_user_stats),  # характеристики с артефактами и эликсиром мощи
     bonus=donate.boss_bonus(equipment.bonus),   # бонусы артефактов и привилегии: перезарядка, восстановление
-    damage_boost=lambda user: donate.total_perk(user, "boss_damage"),   # привилегия + эликсир ярости
+    damage_boost=lambda user: donate.total_perk(user, "boss_damage") + bonus.damage_pct(user),   # привилегия + эликсир ярости + бонус за описание
     damage_taken=donate.damage_taken_factor,   # эликсир стойкости: босс бьёт слабее
     award_fragments=cases.award_fragments,  # фрагменты за урон по боссам
     get_user=get_user,
@@ -1339,6 +1343,18 @@ boss.setup(
     name_plain_of=lambda uid: settings.public_name_plain_by_id(uid),
 )
 dp.include_router(boss.router)
+
+# Раздел «Бонус» живёт в bonus.py: +10% к урону по боссам, пока юзернейм бота стоит в описании профиля
+bonus.setup(
+    get_user=get_user,
+    save_users=save_users,
+    show_rich_card=show_rich_card,
+    custom_emoji=custom_emoji,
+    INFO_EMOJI=INFO_EMOJI,
+    DONATE_EMOJI=DONATE_EMOJI,
+    BACK_EMOJI_ID=BACK_EMOJI_ID,
+)
+dp.include_router(bonus.router)
 
 # Раздел «Исследователи» живёт в exrn.py
 exrn.setup(
@@ -2206,12 +2222,14 @@ async def main():
     owners_task = asyncio.create_task(owners_saver(OWNERS_FILE))
     maintenance = asyncio.create_task(store.run_maintenance())   # пачечная запись, бэкапы, выгрузка из памяти
     notifier = asyncio.create_task(settings.notifier_loop(bot))  # «отряд вернулся из экспедиции»
+    bonus_task = asyncio.create_task(bonus.recheck_loop(bot))   # раз в 2 часа проверяет только активные бонусы
     logging.info("Игроков в базе: %d", len(store))
     try:
         await dp.start_polling(bot)
     finally:
         maintenance.cancel()
         notifier.cancel()
+        bonus_task.cancel()
         owners_task.cancel()
         await save_owners(OWNERS_FILE)
         store.close()   # финальная запись всего, что не успело уйти на диск
