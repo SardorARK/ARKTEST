@@ -54,7 +54,7 @@ import friends
 import store as market   # раздел «Рынок» (store.py); имя store в main.py занято базой игроков
 from guard import Guard, OwnerTracker, load_owners, on_error, owners_saver, save_owners
 
-BOT_TOKEN = "9278809468:AAEA4c2cJA-ihpmljMVtrwK73r1PpKKuyps"
+BOT_TOKEN = "8867617327:AAGP427kiEOg1aI8hRIUOyiH3Mu7eQGaEbE"
 
 # Telegram ID админов (свой ID можно узнать у @userinfobot)
 ADMIN_IDS: set[int] = {8118184388, 5655417455}
