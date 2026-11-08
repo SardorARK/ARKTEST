@@ -28,6 +28,13 @@ take_mine_boost (подключение: см. комментарии у эти�
      доставка того же платежа кристаллы не удваивает.
   6. Каждый платёж пишется в журнал audit.log и в donations.jsonl (для возвратов и споров).
 
+Оплата через xRocket Pay (@xrocket): второй способ оплаты пакетов кристаллов. Курс: 100 кристаллов = 1,30 $
+(USD_CENTS_PER_100), счёт выставляется в USDT. Игрок выбирает способ на экране пакета, бот создаёт
+счёт xRocket (POST /tg-invoices) и каждые XROCKET_POLL_SEC секунд спрашивает его статус (xrocket_loop,
+веб-сервер для вебхуков не нужен). Счёт хранится в xrocket_pending.json, поэтому после перезапуска бота
+оплата не теряется. Начисление идемпотентно: id счёта «xr:<id>» запоминается в PAID_FIELD.
+Ключ приложения: переменная окружения XROCKET_API_KEY (получить в @xrocket: Rocket Pay, Создать приложение).
+
 Подключение (см. инструкцию в конце ответа): donate.setup(...) и dp.include_router(donate.router).
 
 Для будущих разделов (кейсы, бусты, привилегии) есть готовые функции работы с балансом:
@@ -40,11 +47,13 @@ import asyncio
 import copy
 import json
 import logging
+import os
 import random
 import time
 from html import escape
 from pathlib import Path
 
+import aiohttp
 from aiogram import F, Router
 from aiogram.enums import ButtonStyle
 from aiogram.exceptions import TelegramAPIError
@@ -106,6 +115,16 @@ PACKS: dict[str, tuple[int, int, str]] = {
     "p7500":  (7500,  7500,  "Королевский"),
     "p15000": (15000, 15000, "Легендарный"),
 }
+
+# ---------- Оплата через xRocket Pay ----------
+EM_ROCKET = ("5798534328698805312", "🚀")    # xRocket Pay
+XROCKET_API_KEY = os.getenv("XROCKET_API_KEY", "")
+XROCKET_API_URL = os.getenv("XROCKET_API_URL", "https://pay.xrocket.tg").rstrip("/")
+XROCKET_CURRENCY = "USDT"          # валюта счёта
+USD_CENTS_PER_100 = 130            # курс: 100 кристаллов = 1,30 $ (в центах)
+XROCKET_TTL = 30 * 60              # сколько секунд счёт можно оплатить
+XROCKET_POLL_SEC = 8               # как часто бот спрашивает статус неоплаченных счетов
+XROCKET_FILE = Path(__file__).with_name("xrocket_pending.json")
 
 # Привилегии. Действуют PRIVILEGE_DAYS дней с момента оплаты; повторная покупка продлевает срок.
 # Бонусы разных привилегий не складываются: действует сильнейшая из активных (Premium выше VIP).
@@ -648,8 +667,18 @@ def shop_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def pack_kb() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[_back_btn("donate:shop")])
+def pack_kb(pack_id: str) -> InlineKeyboardMarkup:
+    """Выбор способа оплаты пакета."""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [_btn("Telegram Stars", f"donate:stars:{pack_id}", ButtonStyle.SUCCESS, EM_STAR[0])],
+        [_btn("xRocket Pay", f"donate:rocket:{pack_id}", ButtonStyle.PRIMARY, EM_ROCKET[0])],
+        _back_btn("donate:shop"),
+    ])
+
+
+def pay_kb(pack_id: str) -> InlineKeyboardMarkup:
+    """Экран оплаты выбранным способом: назад к выбору способа."""
+    return InlineKeyboardMarkup(inline_keyboard=[_back_btn(f"donate:pack:{pack_id}")])
 
 
 def success_kb() -> InlineKeyboardMarkup:
@@ -674,7 +703,7 @@ def home_html(user_id: int, with_image: bool = False) -> str:
         f"{_balance_line(user)}"
         + _tree(
             f"{_ce(EM_STAR)} Разделы",
-            ["<b>Магазин кристаллов</b>: пополнение за Telegram Stars",
+            ["<b>Магазин кристаллов</b>: пополнение за Telegram Stars или xRocket Pay",
              f"{_ce(EM_PRIV)} <b>Привилегии</b>: {_tier_ce('vip')} VIP и {_tier_ce('premium')} Premium",
              "<b>Кейсы</b>: артефакты Эпик, Миф и Лега за кристаллы",
              "<b>Временные бусты</b>: эликсиры на несколько часов за кристаллы",
@@ -688,22 +717,31 @@ def shop_html(user_id: int, with_image: bool = False) -> str:
     user = _cfg["get_user"](user_id)
     image = '<img src="tg://photo?id=pet"/>' if with_image else ""
     packs = _tree(
-        f"{_ce(EM_STAR)} Пакеты (1 {_ce(EM_STAR)} = 1 {_ce(EM_CRYSTAL)})",
-        [f"{_ce(EM_STAR)} <b>{_fmt(stars)}</b> → {_ce(EM_CRYSTAL)} {_fmt(coins)} {_plural(coins)}"
+        f"{_ce(EM_STAR)} Пакеты (1 {_ce(EM_STAR)} = 1 {_ce(EM_CRYSTAL)}, 100 {_ce(EM_CRYSTAL)} = {_usd(USD_CENTS_PER_100)})",
+        [f"{_ce(EM_STAR)} <b>{_fmt(stars)}</b> / {_ce(EM_ROCKET)} <b>{_usd(_cents(coins))}</b> → {_ce(EM_CRYSTAL)} {_fmt(coins)} {_plural(coins)}"
          for stars, coins, _name in PACKS.values()],
     )
     return (
         f"{image}"
         f"<p><b>{_ce(_cfg['DONATE_EMOJI'])} МАГАЗИН КРИСТАЛЛОВ</b></p>"
-        "<blockquote><i>Выбери пакет, чтобы увидеть его описание и оплатить Telegram Stars. "
+        "<blockquote><i>Выбери пакет, чтобы увидеть его описание и оплатить Telegram Stars или через xRocket Pay. "
         "Кристаллы поступят на баланс сразу после оплаты.</i></blockquote>"
         f"{_balance_line(user)}"
         f"{packs}"
     )
 
 
-def pack_html(user_id: int, pack_id: str, url: str, with_image: bool = False) -> str:
-    """Окно пакета: описание и кнопка «Купить» (ссылка на счёт) прямо в теле сообщения."""
+def _cents(coins: int) -> int:
+    """Цена пакета в центах по курсу USD_CENTS_PER_100 (округление вверх до цента)."""
+    return -(-(int(coins) * USD_CENTS_PER_100) // 100)
+
+
+def _usd(cents: int) -> str:
+    return f"${cents // 100}.{cents % 100:02d}"
+
+
+def pack_html(user_id: int, pack_id: str, with_image: bool = False) -> str:
+    """Окно пакета: описание и выбор способа оплаты (кнопки под сообщением)."""
     user = _cfg["get_user"](user_id)
     stars, coins, name = PACKS[pack_id]
     image = '<img src="tg://photo?id=pet"/>' if with_image else ""
@@ -712,6 +750,30 @@ def pack_html(user_id: int, pack_id: str, url: str, with_image: bool = False) ->
         f"<p><b>{_ce(_cfg['DONATE_EMOJI'])} ПАКЕТ «{escape(name.upper())}»</b></p>"
         f"<blockquote><i>{_fmt(coins)} {_plural(coins)} для твоего баланса. "
         "Кристаллы пригодятся в привилегиях, кейсах и временных бустах.</i></blockquote>"
+        + _GAP
+        + _tree(
+            f"{_ce(EM_PACK)} Состав пакета",
+            [f"Кристаллы: {_ce(EM_CRYSTAL)} <b>{_fmt(coins)}</b>",
+             f"Цена: {_ce(EM_STAR)} <b>{_fmt(stars)}</b> или {_ce(EM_ROCKET)} <b>{_usd(_cents(coins))}</b>",
+             f"Баланс после покупки: {_ce(EM_CRYSTAL)} <b>{_fmt(get_balance(user) + coins)}</b>"],
+        )
+        + _GAP
+        + "<p><b>Выбери способ оплаты</b></p>"
+        f"<p>{_ce(EM_STAR)} <b>Telegram Stars</b>: оплата звёздами прямо в Telegram<br>"
+        f"{_ce(EM_ROCKET)} <b>xRocket Pay</b>: оплата криптовалютой ({XROCKET_CURRENCY})</p>"
+    )
+
+
+def stars_html(user_id: int, pack_id: str, url: str, with_image: bool = False) -> str:
+    """Оплата Telegram Stars: описание и кнопка «Купить» (ссылка на счёт) прямо в теле сообщения."""
+    user = _cfg["get_user"](user_id)
+    stars, coins, name = PACKS[pack_id]
+    image = '<img src="tg://photo?id=pet"/>' if with_image else ""
+    return (
+        f"{image}"
+        f"<p><b>{_ce(EM_STAR)} ОПЛАТА TELEGRAM STARS</b></p>"
+        f"<blockquote><i>Пакет «{escape(name)}»: {_fmt(coins)} {_plural(coins)}. "
+        "Нажми «Купить», подтверди оплату, и кристаллы сразу придут на баланс.</i></blockquote>"
         + _GAP
         + _tree(
             f"{_ce(EM_PACK)} Состав пакета",
@@ -724,6 +786,35 @@ def pack_html(user_id: int, pack_id: str, url: str, with_image: bool = False) ->
         f'<tg-button type="url" url="{escape(url, quote=True)}" style="success">'
         f"{_ce(EM_BUY)} Купить за {_ce(EM_STAR)} {_fmt(stars)}</tg-button>"
         "</tg-button-row>"
+    )
+
+
+def rocket_html(user_id: int, pack_id: str, invoice_id: str, rec: dict, with_image: bool = False) -> str:
+    """Оплата xRocket Pay: сумма, срок счёта, кнопки «Оплатить» и «Проверить оплату» в теле сообщения."""
+    user = _cfg["get_user"](user_id)
+    _stars, coins, name = PACKS[pack_id]
+    image = '<img src="tg://photo?id=pet"/>' if with_image else ""
+    mins = max(1, int((rec["expires"] - time.time()) // 60))
+    return (
+        f"{image}"
+        f"<p><b>{_ce(EM_ROCKET)} ОПЛАТА XROCKET PAY</b></p>"
+        f"<blockquote><i>Пакет «{escape(name)}»: {_fmt(coins)} {_plural(coins)}. "
+        "Нажми «Оплатить», заплати в @xrocket, а затем вернись сюда. "
+        "Кристаллы придут сами, кнопка проверки нужна, если хочешь не ждать.</i></blockquote>"
+        + _GAP
+        + _tree(
+            f"{_ce(EM_PACK)} Счёт",
+            [f"К оплате: {_ce(EM_ROCKET)} <b>{_usd(rec['cents'])}</b> ({XROCKET_CURRENCY})",
+             f"Кристаллы: {_ce(EM_CRYSTAL)} <b>{_fmt(coins)}</b>",
+             f"Баланс после покупки: {_ce(EM_CRYSTAL)} <b>{_fmt(get_balance(user) + coins)}</b>",
+             f"Счёт действует ещё: <b>{mins} мин.</b>"],
+        )
+        + _GAP
+        + "<tg-button-row>"
+        f'<tg-button type="url" url="{escape(rec["link"], quote=True)}" style="success">'
+        f"{_ce(EM_ROCKET)} Оплатить {_usd(rec['cents'])}</tg-button>"
+        "</tg-button-row>"
+        + _rrows([_rbtn("Проверить оплату", f"donate:rchk:{invoice_id}", "primary")])
     )
 
 
@@ -1845,7 +1936,24 @@ async def _checked_url(callback: CallbackQuery, kind: str, item: str) -> str | N
 
 @router.callback_query(F.data.startswith("donate:pack:"))
 async def on_pack(callback: CallbackQuery):
-    """Окно пакета: правим то же сообщение, кнопка «Купить» с ссылкой на счёт внутри него."""
+    """Окно пакета: правим то же сообщение, под ним выбор способа оплаты."""
+    uid = callback.from_user.id
+    pack_id = callback.data.rsplit(":", 1)[-1]
+    if pack_id not in PACKS:
+        await callback.answer("Такого пакета нет.", show_alert=True)
+        return
+    if _cfg["get_user"](uid) is None:
+        await callback.answer("Сначала выбери питомца: /start", show_alert=True)
+        return
+    await callback.answer()
+    await _cfg["show_rich_card"](
+        callback, _img("donate_shop"), lambda wi: pack_html(uid, pack_id, wi), pack_kb(pack_id)
+    )
+
+
+@router.callback_query(F.data.startswith("donate:stars:"))
+async def on_pay_stars(callback: CallbackQuery):
+    """Оплата Telegram Stars: ссылка на счёт лежит в кнопке «Купить» внутри сообщения."""
     uid = callback.from_user.id
     pack_id = callback.data.rsplit(":", 1)[-1]
     if pack_id not in PACKS:
@@ -1856,8 +1964,252 @@ async def on_pack(callback: CallbackQuery):
         return
     await callback.answer()
     await _cfg["show_rich_card"](
-        callback, _img("donate_shop"), lambda wi: pack_html(uid, pack_id, url, wi), pack_kb()
+        callback, _img("donate_shop"), lambda wi: stars_html(uid, pack_id, url, wi), pay_kb(pack_id)
     )
+
+
+# ---------- Оплата xRocket Pay ----------
+
+_XR: dict[str, dict] = {}        # неоплаченные счета: id счёта -> {uid, pack, cents, link, created, expires}
+_XR_BUSY: set[int] = set()       # игроки, у которых прямо сейчас создаётся счёт (защита от двойного клика)
+
+
+def _xr_key() -> str:
+    return _cfg.get("XROCKET_API_KEY") or XROCKET_API_KEY
+
+
+def _xr_load() -> None:
+    try:
+        data = json.loads(XROCKET_FILE.read_text(encoding="utf-8"))
+        if isinstance(data, dict):
+            _XR.update({str(k): v for k, v in data.items() if isinstance(v, dict)})
+    except FileNotFoundError:
+        pass
+    except (OSError, ValueError):
+        log.exception("не удалось прочитать %s", XROCKET_FILE)
+
+
+def _xr_save() -> None:
+    try:
+        tmp = XROCKET_FILE.with_suffix(".tmp")
+        tmp.write_text(json.dumps(_XR, ensure_ascii=False), encoding="utf-8")
+        os.replace(tmp, XROCKET_FILE)
+    except OSError:
+        log.exception("не удалось записать %s", XROCKET_FILE)
+
+
+_xr_load()
+
+
+async def _xr_request(method: str, path: str, body: dict | None = None) -> dict:
+    key = _xr_key()
+    if not key:
+        raise RuntimeError("не задан XROCKET_API_KEY")
+    timeout = aiohttp.ClientTimeout(total=15)
+    async with aiohttp.ClientSession(timeout=timeout) as http:
+        async with http.request(method, f"{XROCKET_API_URL}{path}", json=body,
+                                headers={"Rocket-Pay-Key": key}) as resp:
+            try:
+                data = await resp.json(content_type=None)
+            except Exception:
+                data = {}
+            if resp.status >= 400 or not isinstance(data, dict) or not data.get("success", False):
+                raise RuntimeError(f"xRocket {resp.status}: {str(data)[:300]}")
+            return data
+
+
+async def _xr_create(uid: int, pack_id: str) -> tuple[str, dict]:
+    """Счёт на пакет. Если у игрока уже есть живой счёт на этот пакет, отдаёт его, а не создаёт новый."""
+    now = time.time()
+    for inv, rec in _XR.items():
+        if rec.get("uid") == uid and rec.get("pack") == pack_id and rec.get("expires", 0) > now + 120:
+            return inv, rec
+    _stars, coins, name = PACKS[pack_id]
+    cents = _cents(coins)
+    data = await _xr_request("POST", "/tg-invoices", {
+        "amount": round(cents / 100, 2),
+        "currency": XROCKET_CURRENCY,
+        "numPayments": 1,
+        "description": f"{coins} кристаллов, пакет «{name}»",
+        "hiddenMessage": "Спасибо за поддержку! Кристаллы придут на баланс в игре.",
+        "payload": _payload(KIND_PACK, pack_id, uid),
+        "expiredIn": XROCKET_TTL,
+    })
+    d = data.get("data") or {}
+    inv, link = str(d.get("id", "")), d.get("link")
+    if not inv or not link:
+        raise RuntimeError(f"xRocket: в ответе нет id или ссылки: {str(data)[:300]}")
+    rec = {"uid": uid, "pack": pack_id, "cents": cents, "link": link,
+           "created": int(now), "expires": int(now) + XROCKET_TTL}
+    _XR[inv] = rec
+    _xr_save()
+    return inv, rec
+
+
+async def _xr_status(invoice_id: str) -> str:
+    data = await _xr_request("GET", f"/tg-invoices/{invoice_id}")
+    return str((data.get("data") or {}).get("status", "")).lower()
+
+
+async def _xr_credit(bot, invoice_id: str, rec: dict) -> None:
+    """Начисляет кристаллы за оплаченный счёт xRocket. Повторно один и тот же счёт не начисляется."""
+    uid, pack_id = rec["uid"], rec["pack"]
+    charge_id = f"xr:{invoice_id}"
+    record = {"ts": int(time.time()), "user": uid, "charge_id": charge_id,
+              "payload": _payload(KIND_PACK, pack_id, uid), "usd_cents": rec["cents"],
+              "currency": XROCKET_CURRENCY, "method": "xrocket"}
+    user = _cfg["get_user"](uid)
+    if user is None or pack_id not in PACKS:
+        await _xr_report_uncredited(bot, record, "нет игрока или неизвестный пакет")
+        return
+    paid: list = user.setdefault(PAID_FIELD, [])
+    if charge_id in paid:
+        log.warning("повторная доставка платежа %s, пропускаю", charge_id)
+        return
+    coins = PACKS[pack_id][1]
+    # Начисление без await: либо выдано всё и платёж отмечен, либо состояние игрока откатывается
+    snapshot = copy.deepcopy(user)
+    try:
+        paid.append(charge_id)
+        del paid[:-PAID_KEEP]
+        user[BALANCE_FIELD] = get_balance(user) + coins
+        _bump(user, pays=1, coins_bought=coins, usd_cents=rec["cents"])
+    except Exception:
+        user.clear()
+        user.update(snapshot)
+        log.exception("не удалось начислить платёж %s", charge_id)
+        await _xr_report_uncredited(bot, record, "ошибка при начислении")
+        return
+    _cfg["save_users"]()
+    if not commit_now(uid):
+        log.critical("платёж %s начислен в памяти, но запись в базу не удалась (повторится автоматически)", charge_id)
+    balance = user[BALANCE_FIELD]
+    record.update(status="OK", kind="crystals", pack=pack_id, coins=coins, balance=balance)
+    await _write_donation_log(record)
+    ledger("donate", **{k: v for k, v in record.items() if k != "ts"})
+    await _notify_admins(
+        bot,
+        f"<b>💰 Новый донат (xRocket)</b>\nИгрок: <code>{uid}</code>\n"
+        f"Сумма: <b>{_usd(rec['cents'])}</b> ({XROCKET_CURRENCY})\nПокупка: <b>{_fmt(coins)}</b> {_plural(coins)} "
+        f"(пакет «{escape(PACKS[pack_id][2])}»)\nБаланс игрока: {_fmt(balance)}",
+    )
+    try:
+        await _cfg["send_rich_card"](
+            bot, uid, IMG_KEY, lambda wi: success_html(coins, balance), success_kb(),
+        )
+    except TelegramAPIError:
+        log.warning("не удалось отправить игроку %s сообщение об успешной оплате", uid)
+
+
+async def _xr_report_uncredited(bot, record: dict, reason: str) -> None:
+    record["status"] = "UNCREDITED"
+    record["reason"] = reason
+    await _write_donation_log(record)
+    ledger("donate_uncredited", **{k: v for k, v in record.items() if k != "ts"})
+    log.critical("платёж без начисления: %s", record)
+    await _notify_admins(
+        bot,
+        f"<b>⚠ Платёж xRocket без начисления</b>\nИгрок: <code>{record['user']}</code>\n"
+        f"Сумма: <b>{_usd(record['usd_cents'])}</b>\nПричина: {escape(reason)}\n"
+        f"Платёж: <code>{escape(record['charge_id'])}</code>\n<i>Нужен ручной разбор или возврат.</i>",
+    )
+
+
+async def _xr_settle(bot, invoice_id: str) -> str:
+    """Спрашивает статус счёта и при оплате начисляет. Возвращает: paid, active, expired, gone, error."""
+    if invoice_id not in _XR:
+        return "gone"
+    try:
+        status = await _xr_status(invoice_id)
+    except Exception:
+        log.exception("xRocket: не удалось получить статус счёта %s", invoice_id)
+        return "error"
+    rec = _XR.get(invoice_id)
+    if rec is None:          # пока ждали ответ, счёт уже обработал другой вызов
+        return "gone"
+    if status == "paid":
+        _XR.pop(invoice_id, None)
+        _xr_save()
+        await _xr_credit(bot, invoice_id, rec)
+        return "paid"
+    if status in ("expired", "deleted", "cancelled") or time.time() > rec.get("expires", 0) + 300:
+        _XR.pop(invoice_id, None)
+        _xr_save()
+        return "expired"
+    return "active"
+
+
+async def xrocket_loop(bot) -> None:
+    """Фоновая задача: проверяет неоплаченные счета xRocket и начисляет оплаченные. Запускается из main.py."""
+    while True:
+        try:
+            for inv in list(_XR):
+                await _xr_settle(bot, inv)
+                await asyncio.sleep(0.3)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            log.exception("ошибка в цикле проверки счетов xRocket")
+        await asyncio.sleep(XROCKET_POLL_SEC)
+
+
+@router.callback_query(F.data.startswith("donate:rocket:"))
+async def on_pay_rocket(callback: CallbackQuery):
+    """Оплата xRocket Pay: создаёт счёт и показывает его в том же сообщении."""
+    uid = callback.from_user.id
+    pack_id = callback.data.rsplit(":", 1)[-1]
+    if pack_id not in PACKS:
+        await callback.answer("Такого пакета нет.", show_alert=True)
+        return
+    if _cfg["get_user"](uid) is None:
+        await callback.answer("Сначала выбери питомца: /start", show_alert=True)
+        return
+    if not _xr_key():
+        await callback.answer("Оплата через xRocket Pay пока не подключена. Выбери Telegram Stars.",
+                              show_alert=True)
+        return
+    if uid in _XR_BUSY:
+        await callback.answer("Счёт уже создаётся, секунду…")
+        return
+    _XR_BUSY.add(uid)
+    try:
+        inv, rec = await _xr_create(uid, pack_id)
+    except Exception:
+        log.exception("xRocket: не удалось создать счёт для игрока %s", uid)
+        await callback.answer("Не удалось создать счёт xRocket. Попробуй чуть позже или выбери Stars.",
+                              show_alert=True)
+        return
+    finally:
+        _XR_BUSY.discard(uid)
+    await callback.answer()
+    await _cfg["show_rich_card"](
+        callback, _img("donate_shop"), lambda wi: rocket_html(uid, pack_id, inv, rec, wi), pay_kb(pack_id)
+    )
+
+
+@router.callback_query(F.data.startswith("donate:rchk:"))
+async def on_rocket_check(callback: CallbackQuery):
+    """Кнопка «Проверить оплату»: не ждём очередного круга фоновой проверки."""
+    inv = callback.data.rsplit(":", 1)[-1]
+    rec = _XR.get(inv)
+    if rec is None:
+        await callback.answer("Этот счёт уже обработан или истёк. Если ты оплатил, кристаллы уже на балансе.",
+                              show_alert=True)
+        return
+    if rec.get("uid") != callback.from_user.id:
+        await callback.answer("Этот счёт выставлен другому игроку.", show_alert=True)
+        return
+    res = await _xr_settle(callback.bot, inv)
+    if res == "paid":
+        await callback.answer("Оплата получена, кристаллы начислены!", show_alert=True)
+    elif res == "active":
+        await callback.answer("Оплата ещё не поступила. Оплати счёт в @xrocket и нажми снова.", show_alert=True)
+    elif res == "expired":
+        await callback.answer("Счёт истёк. Создай новый в магазине.", show_alert=True)
+    elif res == "gone":
+        await callback.answer("Этот счёт уже обработан. Загляни в баланс.", show_alert=True)
+    else:
+        await callback.answer("Не удалось проверить оплату. Попробуй чуть позже.", show_alert=True)
 
 
 @router.callback_query(F.data == "donate:priv")
