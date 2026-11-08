@@ -8,8 +8,8 @@
 
 Откроется окно: выбор ресурса, количество кнопками или своим числом (кнопка ✍️), кнопка «Передать».
 
-Лимиты в сутки зависят от УРОВНЯ ПИТОМЦА ОТПРАВИТЕЛЯ (см. TIERS). Кристаллы без лимита.
-Считается то, что игрок ОТДАЛ за сегодня. Счётчик обнуляется в полночь (RESET_UTC_OFFSET).
+Лимиты в сутки зависят от УРОВНЯ ПИТОМЦА ПОЛУЧАТЕЛЯ (см. TIERS): сколько игроку могут передать за день.
+Кристаллы без лимита. Считается то, что игрок ПОЛУЧИЛ за сегодня. Счётчик обнуляется в полночь (RESET_UTC_OFFSET).
 
 Подключение в main.py (после donate.setup и market):
     import gift
@@ -166,16 +166,19 @@ def _seconds_to_reset() -> int:
     return int(86400 - (time.time() + RESET_UTC_OFFSET * 3600) % 86400)
 
 
+COUNT_FIELD = "gift_in"      # в профиле ПОЛУЧАТЕЛЯ: сколько он получил в подарок за сегодня
+
+
 def _counters(user: dict) -> dict:
-    g = user.get("gift")
+    g = user.get(COUNT_FIELD)
     if not isinstance(g, dict) or g.get("day") != _today():
         g = {"day": _today(), "coins": 0, "meat": 0, "fruit": 0}
-        user["gift"] = g
+        user[COUNT_FIELD] = g
     return g
 
 
 def used(user: dict, res: str) -> int:
-    g = user.get("gift")
+    g = user.get(COUNT_FIELD)
     if not isinstance(g, dict) or g.get("day") != _today():
         return 0
     return _int(g.get(res))
@@ -186,11 +189,20 @@ def left(user: dict, res: str) -> int | None:
     return None if lim is None else max(0, lim - used(user, res))
 
 
-def can_send(user: dict, res: str) -> int:
-    """Сколько игрок может передать прямо сейчас: баланс с учётом остатка лимита."""
-    lf = left(user, res)
-    have = _have(user, res)
+def can_send(sender: dict, receiver: dict | None, res: str) -> int:
+    """Сколько можно передать прямо сейчас: у отправителя на руках, но не больше, чем получатель
+    ещё может принять сегодня (лимит считается по уровню ПОЛУЧАТЕЛЯ)."""
+    have = _have(sender, res)
+    lf = left(receiver, res) if receiver else None
     return have if lf is None else min(have, lf)
+
+
+def _blocked(sender: dict, receiver: dict | None, res: str) -> str:
+    """Почему передать нельзя: пусто у отправителя или получатель набрал дневной лимит."""
+    if _have(sender, res) <= 0:
+        return f"У тебя нет ресурса «{RES_NAME[res].lower()}»."
+    return ("Получатель сегодня уже набрал дневной лимит на этот ресурс. "
+            "Передай другой ресурс или попробуй завтра.")
 
 
 def _left_text() -> str:
@@ -220,11 +232,11 @@ def stock_hint(user: dict | None = None) -> str:
              f"{_em('crystals')} кристаллы"]
     lvl = _int((user or {}).get("level")) or None
     if user and tier(lvl or 1) is None:
-        lines.append("У тебя лимитов на передачу нет")
+        lines.append("Тебе можно передавать без лимитов")
     elif user:
         t = tier(lvl or 1)
-        lines.append(f"Твой лимит в день: {_em('coins')} {_fmt(t[1])} · {_em('meat')} {_fmt(t[2])} · "
-                     f"{_em('fruit')} {_fmt(t[3])}")
+        lines.append(f"Сколько тебе могут передать за день: {_em('coins')} {_fmt(t[1])} · "
+                     f"{_em('meat')} {_fmt(t[2])} · {_em('fruit')} {_fmt(t[3])}")
     return donate._tree("Как передать другу", lines)
 
 
@@ -292,7 +304,8 @@ _CMD = re.compile(r"^\s*(/)?(?:дать|передать|подарить|give|g
 USAGE = (
     _head("КАК ПЕРЕДАТЬ ИГРОКУ")
     + _quote("Ответь на сообщение игрока словом «дать» или напиши «дать @ник». "
-             "Откроется окно, где выбираешь, что и сколько передать.")
+             "Откроется окно, где выбираешь, что и сколько передать. "
+             "Лимит на день зависит от уровня питомца ПОЛУЧАТЕЛЯ.")
 )
 
 
@@ -303,7 +316,7 @@ def _usage_html(user: dict | None, with_image: bool = False) -> str:
                                        "<code>give</code>, <code>gift</code>",
                                        "Со слэшем или без"])
             + donate._GAP
-            + donate._tree("Лимиты в день (по уровню питомца)", limits_lines(lvl) + [
+            + donate._tree("Сколько игроку можно передать в день (по уровню получателя)", limits_lines(lvl) + [
                 f"{_em('crystals')} Кристаллы: <b>без лимита</b>"]))
 
 
@@ -383,7 +396,7 @@ async def on_command(message: Message):
     if _banned(target):
         await message.answer("Этому игроку передавать нельзя.")
         return
-    first = next((r for r in RES if can_send(sender, r) > 0), "coins")
+    first = next((r for r in RES if can_send(sender, receiver, r) > 0), "coins")
     _DRAFTS[uid] = {"to": target, "to_tg": tg_name, "res": first, "amt": 0, "ts": time.time()}
     d = _DRAFTS[uid]
     await donate._cfg["send_rich_card"](message.bot, message.chat.id, _img(),
@@ -431,29 +444,30 @@ def _draft(uid: int) -> dict | None:
 
 def draft_html(uid: int, d: dict, with_image: bool = False) -> str:
     user = _user(uid) or {}
+    to = _user(d["to"]) or {}
     res, amt = d["res"], d["amt"]
-    mx = can_send(user, res)
+    mx = can_send(user, to, res)
     amt = d["amt"] = min(amt, mx)
-    lvl = _int(user.get("level")) or 1
+    lvl = _int(to.get("level")) or 1
     who = _name(d["to"], d.get("to_tg", ""))
 
-    lf = left(user, res)
+    lf = left(to, res)
     if lf is None:
         cap = "без лимита"
     else:
-        cap = f"осталось <b>{_fmt(lf)}</b> из {_fmt(limit(user, res))}"
-    pick = [f"Кому: <b>{who}</b>",
+        cap = f"может принять ещё <b>{_fmt(lf)}</b> из {_fmt(limit(to, res))}"
+    pick = [f"Кому: <b>{who}</b> · {lvl} ур.",
             f"Что: {_em(res)} <b>{RES_NAME[res]}</b>",
             f"Количество: {_em(res)} <b>{_fmt(amt)}</b>" if amt else "Количество: <b>выбери ниже</b>"]
-    mine = [f"На руках: {_em(res)} <b>{_fmt(_have(user, res))}</b>",
-            f"Лимит на сегодня: {cap}",
+    mine = [f"У тебя на руках: {_em(res)} <b>{_fmt(_have(user, res))}</b>",
+            f"Лимит получателя на сегодня: {cap}",
             f"Можно передать сейчас: {_em(res)} <b>{_fmt(mx)}</b>"]
 
     lim_lines = []
     for r in LIMITED:
-        l2 = left(user, r)
+        l2 = left(to, r)
         lim_lines.append(f"{_em(r)} {RES_NAME[r]}: " + ("<b>без лимита</b>" if l2 is None else
-                                                         f"<b>{_fmt(l2)}</b> из {_fmt(limit(user, r))}"))
+                                                         f"<b>{_fmt(l2)}</b> из {_fmt(limit(to, r))}"))
     lim_lines.append(f"{_em('crystals')} Кристаллы: <b>без лимита</b>")
     if tier(lvl) is not None:
         lim_lines.append(f"Обновление через <b>{_left_text()}</b>")
@@ -471,12 +485,12 @@ def draft_html(uid: int, d: dict, with_image: bool = False) -> str:
         f"{donate._image(with_image)}"
         + _head("ПЕРЕДАЧА ИГРОКУ")
         + _quote("Выбери, что передать, и сколько: кнопками или своим числом. "
-                 "Передача необратима, комиссии нет.")
+                 "Лимит на день зависит от уровня получателя. Передача необратима, комиссии нет.")
         + donate._tree("Передача", pick)
         + donate._GAP
-        + donate._tree("У тебя", mine)
+        + donate._tree("Баланс и лимит", mine)
         + donate._GAP
-        + donate._tree(f"Лимиты на сегодня · {lvl} ур.", lim_lines)
+        + donate._tree(f"Сколько получатель ещё может принять сегодня ({lvl} ур.)", lim_lines)
         + donate._GAP
         + "".join(buttons)
     )
@@ -503,7 +517,7 @@ async def _need(callback: CallbackQuery) -> tuple[dict, dict] | None:
         _DRAFTS.pop(uid, None)
         await callback.answer("Получатель не найден.", show_alert=True)
         return None
-    d["amt"] = min(d["amt"], can_send(user, d["res"]))
+    d["amt"] = min(d["amt"], can_send(user, _user(d["to"]), d["res"]))
     return user, d
 
 
@@ -540,9 +554,9 @@ async def on_amount(callback: CallbackQuery):
     if got is None:
         return
     user, d = got
-    mx = can_send(user, d["res"])
+    mx = can_send(user, _user(d["to"]), d["res"])
     if mx <= 0:
-        await callback.answer("Нечего передавать: пусто или лимит на сегодня исчерпан.", show_alert=True)
+        await callback.answer(_blocked(user, _user(d["to"]), d["res"]), show_alert=True)
         return
     new = min(mx, max(0, d["amt"] + int(callback.data.rsplit(":", 1)[-1])))
     if new == d["amt"]:
@@ -559,9 +573,9 @@ async def on_max(callback: CallbackQuery):
     if got is None:
         return
     user, d = got
-    mx = can_send(user, d["res"])
+    mx = can_send(user, _user(d["to"]), d["res"])
     if mx <= 0:
-        await callback.answer("Нечего передавать: пусто или лимит на сегодня исчерпан.", show_alert=True)
+        await callback.answer(_blocked(user, _user(d["to"]), d["res"]), show_alert=True)
         return
     if d["amt"] == mx:
         await callback.answer("Уже выбрано максимум.")
@@ -599,7 +613,7 @@ def _parse_amount(text: str) -> int | None:
 def _input_html(uid: int, d: dict, error: str = "", with_image: bool = False) -> str:
     user = _user(uid) or {}
     res = d["res"]
-    mx = can_send(user, res)
+    mx = can_send(user, _user(d["to"]), res)
     return (
         f"{donate._image(with_image)}"
         + _head("СВОЁ КОЛИЧЕСТВО")
@@ -607,7 +621,8 @@ def _input_html(uid: int, d: dict, error: str = "", with_image: bool = False) ->
                  "Можно писать 1500, 1 500 или 1.5к.")
         + donate._tree("Передача", [f"Кому: <b>{_name(d['to'], d.get('to_tg', ''))}</b>",
                                     f"Что: {_em(res)} <b>{RES_NAME[res]}</b>",
-                                    f"Можно передать сейчас: {_em(res)} <b>{_fmt(mx)}</b>"])
+                                    f"Можно передать сейчас: {_em(res)} <b>{_fmt(mx)}</b> "
+                                    "(с учётом лимита получателя)"])
         + (donate._GAP + f"⚠️ <b>{error}</b>" if error else "")
     )
 
@@ -624,8 +639,8 @@ async def on_input_start(callback: CallbackQuery):
     if got is None:
         return
     user, d = got
-    if can_send(user, d["res"]) <= 0:
-        await callback.answer("Нечего передавать: пусто или лимит на сегодня исчерпан.", show_alert=True)
+    if can_send(user, _user(d["to"]), d["res"]) <= 0:
+        await callback.answer(_blocked(user, _user(d["to"]), d["res"]), show_alert=True)
         return
     await callback.answer()
     d["ts"] = time.time()
@@ -670,7 +685,7 @@ async def on_input_text(message: Message):
         _AWAIT.pop(uid, None)
         await message.answer("Окно устарело. Напиши «дать» ещё раз.")
         return
-    mx = can_send(user, d["res"])
+    mx = can_send(user, _user(d["to"]), d["res"])
     val = _parse_amount(message.text)
     if val is None:
         res = await _show_input(fake, d, "Это не похоже на целое число. Попробуй ещё раз.")
@@ -693,9 +708,10 @@ def done_html(d: dict, sender: dict, sender_id: int) -> str:
     lines = [f"Кому: <b>{_name(d['to'], d.get('to_tg', ''))}</b>",
              f"Передано: {_em(res)} <b>{_fmt(n)}</b> {RES_NAME[res].lower()}"]
     rest = [f"{_em(res)} {RES_NAME[res]}: <b>{_fmt(_have(sender, res))}</b>"]
-    lf = left(sender, res)
+    to = _user(d["to"]) or {}
+    lf = left(to, res)
     if lf is not None:
-        rest.append(f"Лимит на сегодня: осталось <b>{_fmt(lf)}</b> из {_fmt(limit(sender, res))}")
+        rest.append(f"Получатель сегодня ещё может принять: <b>{_fmt(lf)}</b> из {_fmt(limit(to, res))}")
     return (_head("ПЕРЕДАЧА ВЫПОЛНЕНА")
             + _quote("Готово. Игрок уже получил подарок и увидит уведомление.")
             + donate._tree("Итог", lines)
@@ -725,15 +741,16 @@ async def on_go(callback: CallbackQuery):
     if _have(sender, res) < n:
         await callback.answer("Не хватает ресурса.", show_alert=True)
         return
-    lf = left(sender, res)
+    lf = left(receiver, res)
     if lf is not None and n > lf:
-        await callback.answer(f"Лимит на сегодня: осталось {_fmt(lf)}.", show_alert=True)
+        await callback.answer(f"Лимит получателя на сегодня: он может принять ещё {_fmt(lf)}.",
+                              show_alert=True)
         return
     f = _field(res)
     sender[f] = _have(sender, res) - n
     receiver[f] = _have(receiver, res) + n
     if res in LIMITED:
-        g = _counters(sender)
+        g = _counters(receiver)
         g[res] = _int(g.get(res)) + n
     donate._cfg["save_users"]()
     ledger("gift", sender=uid, to=to_id, res=res, n=n)
