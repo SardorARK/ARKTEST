@@ -197,23 +197,33 @@ async def _notify_lost(bot: Bot, user_id: int) -> None:
 
 # ---------- Экран ----------
 
-def _status_block(user: dict | None) -> str:
-    if is_active(user):
-        return (
-            "<p><b>Статус: бонус активен</b></p>"
-            f"<blockquote><i>Твой урон по боссам выше на <b>{BONUS_PCT}%</b>. "
-            "Раз в 2 часа мы проверяем, что юзернейм всё ещё в описании. "
-            "Убрал его, и бонус отключится.</i></blockquote>"
-        )
+def _gap() -> str:
+    return "<br>&nbsp;<br>"
+
+
+def _active_html(with_image: bool) -> str:
+    """Экран после успешной активации: сразу видно, что бонус включён."""
+    image = '<img src="tg://photo?id=pet"/>' if with_image else ""
+    ok = D.custom_emoji(CHECK_EMOJI)
     return (
-        "<p><b>Статус: бонус не активен</b></p>"
-        "<blockquote><i>Добавь юзернейм бота в описание профиля, нажми «Проверить», "
-        f"и получишь <b>+{BONUS_PCT}%</b> к урону по боссам.</i></blockquote>"
+        f"{image}"
+        f"<p><b>{D.custom_emoji(BONUS_EMOJI)} БОНУС АКТИВИРОВАН</b></p>"
+        f"<blockquote><i>{ok} Юзернейм бота найден в твоём описании. "
+        f"Награда уже работает.</i></blockquote>"
+        f"<p><b>{ok} Успешно активировано</b>{_gap()}"
+        f"{ok} Урон по боссам: <b>+{BONUS_PCT}%</b><br>"
+        f"{ok} Действует на всех боссов<br>"
+        f"{ok} Проверка описания: раз в 2 часа</p>"
+        f"<p><b>{D.custom_emoji(D.INFO_EMOJI)} Важно</b>{_gap()}"
+        "Пока юзернейм стоит в описании, бонус с тобой. "
+        "Если убрать его, бонус отключится при ближайшей проверке.</p>"
     )
 
 
 def bonus_html(user_id: int | None, with_image: bool = False, note: str = "") -> str:
     user = D.get_user(user_id) if user_id else None
+    if is_active(user):
+        return _active_html(with_image)
     image = '<img src="tg://photo?id=pet"/>' if with_image else ""
     uname = f"@{escape(_bot_username)}" if _bot_username else "@юзернейм_бота"
     note_html = f"<p><b>{note}</b></p>" if note else ""
@@ -223,24 +233,25 @@ def bonus_html(user_id: int | None, with_image: bool = False, note: str = "") ->
         f"<blockquote><i>Расскажи о боте в своём профиле и получи "
         f"<b>+{BONUS_PCT}% к урону</b> по всем боссам. Бесплатно и без ограничений по времени, "
         "пока юзернейм стоит в описании.</i></blockquote>"
-        f"<p><b>{D.custom_emoji(D.INFO_EMOJI)} Как получить</b></p>"
-        f"<p>{D.custom_emoji(NUM_EMOJI[0])} Открой Telegram: Настройки, затем «Изменить профиль».<br>"
+        "<p><b>Статус: бонус не активен</b></p>"
+        f"<p><b>{D.custom_emoji(D.INFO_EMOJI)} Как получить</b>{_gap()}"
+        f"{D.custom_emoji(NUM_EMOJI[0])} Открой Telegram: Настройки, затем «Изменить профиль».<br>"
         f"{D.custom_emoji(NUM_EMOJI[1])} В поле «О себе» впиши <b>{uname}</b>.<br>"
         f"{D.custom_emoji(NUM_EMOJI[2])} Вернись сюда и нажми «Проверить».</p>"
-        f"{_status_block(user)}"
         f"{note_html}"
         "<p><i>Подсказка: юзернейм можно писать в любом месте описания и в любом регистре. "
         "Если описание скрыто настройками приватности, бот его не увидит.</i></p>"
     )
 
 
-def bonus_kb() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="Проверить", callback_data="bonus:check",
-                              style=ButtonStyle.SUCCESS, icon_custom_emoji_id=CHECK_EMOJI[0])],
-        [InlineKeyboardButton(text="Назад", callback_data="menu:back",
-                              style=ButtonStyle.PRIMARY, icon_custom_emoji_id=D.BACK_EMOJI_ID)],
-    ])
+def bonus_kb(active: bool = False) -> InlineKeyboardMarkup:
+    rows = []
+    if not active:
+        rows.append([InlineKeyboardButton(text="Проверить", callback_data="bonus:check",
+                                          style=ButtonStyle.SUCCESS, icon_custom_emoji_id=CHECK_EMOJI[0])])
+    rows.append([InlineKeyboardButton(text="Назад", callback_data="menu:back",
+                                      style=ButtonStyle.PRIMARY, icon_custom_emoji_id=D.BACK_EMOJI_ID)])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 async def _show(callback: CallbackQuery, note: str = "", force_new: bool = False) -> None:
@@ -249,7 +260,7 @@ async def _show(callback: CallbackQuery, note: str = "", force_new: bool = False
         await D.show_rich_card(
             callback, "menu",
             lambda with_image: bonus_html(uid, with_image, note),
-            bonus_kb(), force_new=force_new,
+            bonus_kb(is_active(D.get_user(uid))), force_new=force_new,
         )
     except TelegramBadRequest as e:
         if "not modified" not in str(e):
@@ -282,7 +293,7 @@ async def on_check(callback: CallbackQuery):
 
     res = await check_user(callback.bot, uid)
     if res == "on":
-        note = f"Готово! Юзернейм найден, бонус +{BONUS_PCT}% к урону активирован."
+        note = ""   # экран сам станет «Бонус активирован»
     elif res == "off":
         note = "Юзернейм бота в описании не найден. Проверь, что он сохранён в профиле, и попробуй снова."
     else:
