@@ -979,9 +979,19 @@ RESEND_IN_GROUPS = True
 LIVE_EDIT_KEYS = {"arena_battle", "arena_find"}
 
 
+# Экраны, которые ВСЕГДА удаляются и отправляются заново, даже в личке (правка на месте у них
+# теряет кастомные эмодзи). Впиши сюда ключи экранов (те же, что в IMG_TARGETS: "menu", "stock",
+# "lab", "market", "boss" ...). Ключи из LIVE_EDIT_KEYS сюда добавлять нельзя.
+ALWAYS_RESEND_KEYS: set[str] = set()
+
+
 def _edit_in_place_ok(msg, key: str) -> bool:
     """Можно ли обновить сообщение правкой (а не удалять и слать новое)."""
-    if not RESEND_IN_GROUPS or key in LIVE_EDIT_KEYS:
+    if key in LIVE_EDIT_KEYS:
+        return True
+    if key in ALWAYS_RESEND_KEYS:
+        return False
+    if not RESEND_IN_GROUPS:
         return True
     return getattr(msg.chat, "type", "private") == "private"
 
