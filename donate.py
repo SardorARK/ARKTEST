@@ -633,6 +633,12 @@ def _rbtn(label_html: str, data: str, style: str = "success") -> str:
             f"{label_html}</tg-button>")
 
 
+def _ubtn(label_html: str, url: str, style: str = "success") -> str:
+    """Кнопка-ссылка прямо в теле сообщения (счёт на оплату открывается по ней поверх чата)."""
+    return (f'<tg-button type="url" url="{escape(url, quote=True)}" style="{style}">'
+            f"{label_html}</tg-button>")
+
+
 def _rrows(buttons: list[str], per_row: int = 1) -> str:
     """Кнопки в теле сообщения по per_row в ряд."""
     return "".join(
@@ -656,15 +662,12 @@ def home_kb() -> InlineKeyboardMarkup:
 
 
 def shop_kb() -> InlineKeyboardMarkup:
-    """Пакеты по два в ряд."""
-    buttons = [
-        _btn(f"{_fmt(coins)}  ·  ⭐ {_fmt(stars)}", f"donate:pack:{pack_id}",
-             ButtonStyle.SUCCESS, EM_CRYSTAL[0])
-        for pack_id, (stars, coins, _name) in PACKS.items()
-    ]
-    rows = [buttons[i:i + 2] for i in range(0, len(buttons), 2)]
-    rows.append(_back_btn("donate:home"))
-    return InlineKeyboardMarkup(inline_keyboard=rows)
+    """Выбор способа и пакеты лежат кнопками в теле сообщения, снизу только «Назад»."""
+    return InlineKeyboardMarkup(inline_keyboard=[_back_btn("donate:home")])
+
+
+def method_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[_back_btn("donate:shop")])
 
 
 def pack_kb(pack_id: str) -> InlineKeyboardMarkup:
@@ -676,9 +679,10 @@ def pack_kb(pack_id: str) -> InlineKeyboardMarkup:
     ])
 
 
-def pay_kb(pack_id: str) -> InlineKeyboardMarkup:
-    """Экран оплаты выбранным способом: назад к выбору способа."""
-    return InlineKeyboardMarkup(inline_keyboard=[_back_btn(f"donate:pack:{pack_id}")])
+def pay_kb(pack_id: str, method: str = "") -> InlineKeyboardMarkup:
+    """Экран оплаты: назад к списку пакетов этого способа (или к описанию пакета)."""
+    back = f"donate:shop:{method}" if method else f"donate:pack:{pack_id}"
+    return InlineKeyboardMarkup(inline_keyboard=[_back_btn(back)])
 
 
 def success_kb() -> InlineKeyboardMarkup:
@@ -724,10 +728,46 @@ def shop_html(user_id: int, with_image: bool = False) -> str:
     return (
         f"{image}"
         f"<p><b>{_ce(_cfg['DONATE_EMOJI'])} МАГАЗИН КРИСТАЛЛОВ</b></p>"
-        "<blockquote><i>Выбери пакет, чтобы увидеть его описание и оплатить Telegram Stars или через xRocket Pay. "
+        "<blockquote><i>Сначала выбери способ оплаты, затем пакет. "
         "Кристаллы поступят на баланс сразу после оплаты.</i></blockquote>"
         f"{_balance_line(user)}"
         f"{packs}"
+        + _GAP
+        + "<p><b>Выбери способ оплаты</b></p>"
+        + _rrows([
+            _rbtn(f"{_ce(EM_STAR)} Telegram Stars", "donate:shop:stars", "success"),
+            _rbtn(f"{_ce(EM_ROCKET)} xRocket Pay", "donate:shop:rocket", "primary"),
+        ], per_row=2)
+    )
+
+
+def method_html(user_id: int, method: str, links: dict[str, str] | None = None,
+                with_image: bool = False) -> str:
+    """Пакеты выбранного способа кнопками в теле сообщения.
+    Stars: каждая кнопка сразу открывает счёт. xRocket: кнопка создаёт счёт и показывает его."""
+    user = _cfg["get_user"](user_id)
+    image = '<img src="tg://photo?id=pet"/>' if with_image else ""
+    buttons = []
+    for pack_id, (stars, coins, _name) in PACKS.items():
+        if method == "stars":
+            label = f"{_ce(EM_CRYSTAL)} {_fmt(coins)} · {_ce(EM_STAR)} {_fmt(stars)}"
+            buttons.append(_ubtn(label, (links or {})[pack_id], "success"))
+        else:
+            label = f"{_ce(EM_CRYSTAL)} {_fmt(coins)} · {_ce(EM_ROCKET)} {_usd(_cents(coins))}"
+            buttons.append(_rbtn(label, f"donate:rocket:{pack_id}", "primary"))
+    if method == "stars":
+        title = f"{_ce(EM_STAR)} ОПЛАТА TELEGRAM STARS"
+        hint = "Нажми на пакет, подтверди оплату в окне Telegram, и кристаллы сразу придут на баланс."
+    else:
+        title = f"{_ce(EM_ROCKET)} ОПЛАТА XROCKET PAY"
+        hint = (f"Нажми на пакет, и появится счёт в {XROCKET_CURRENCY}. Оплати его в @xrocket, "
+                f"кристаллы придут сами. Курс: 100 {_ce(EM_CRYSTAL)} = {_usd(USD_CENTS_PER_100)}.")
+    return (
+        f"{image}"
+        f"<p><b>{title}</b></p>"
+        f"<blockquote><i>{hint}</i></blockquote>"
+        f"{_balance_line(user)}"
+        + _rrows(buttons, per_row=2)
     )
 
 
@@ -1951,6 +1991,35 @@ async def on_pack(callback: CallbackQuery):
     )
 
 
+@router.callback_query(F.data.in_({"donate:shop:stars", "donate:shop:rocket"}))
+async def on_shop_method(callback: CallbackQuery):
+    """Выбран способ оплаты: показываем пакеты кнопками в сообщении (у Stars это сразу счета)."""
+    uid = callback.from_user.id
+    method = callback.data.rsplit(":", 1)[-1]
+    if _cfg["get_user"](uid) is None:
+        await callback.answer("Сначала выбери питомца: /start", show_alert=True)
+        return
+    links = None
+    if method == "stars":
+        try:
+            urls = await asyncio.gather(*[
+                _invoice_url(callback.bot, KIND_PACK, pack_id, uid) for pack_id in PACKS
+            ])
+        except TelegramAPIError:
+            log.exception("не удалось создать счета Stars для игрока %s", uid)
+            await callback.answer("Не удалось создать счета. Попробуй чуть позже.", show_alert=True)
+            return
+        links = dict(zip(PACKS, urls))
+    elif not _xr_key():
+        await callback.answer("Оплата через xRocket Pay пока не подключена. Выбери Telegram Stars.",
+                              show_alert=True)
+        return
+    await callback.answer()
+    await _cfg["show_rich_card"](
+        callback, _img("donate_shop"), lambda wi: method_html(uid, method, links, wi), method_kb()
+    )
+
+
 @router.callback_query(F.data.startswith("donate:stars:"))
 async def on_pay_stars(callback: CallbackQuery):
     """Оплата Telegram Stars: ссылка на счёт лежит в кнопке «Купить» внутри сообщения."""
@@ -2183,7 +2252,7 @@ async def on_pay_rocket(callback: CallbackQuery):
         _XR_BUSY.discard(uid)
     await callback.answer()
     await _cfg["show_rich_card"](
-        callback, _img("donate_shop"), lambda wi: rocket_html(uid, pack_id, inv, rec, wi), pay_kb(pack_id)
+        callback, _img("donate_shop"), lambda wi: rocket_html(uid, pack_id, inv, rec, wi), pay_kb(pack_id, "rocket")
     )
 
 
