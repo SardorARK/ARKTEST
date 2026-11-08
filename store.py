@@ -42,10 +42,13 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import time
 from dataclasses import dataclass
+from decimal import Decimal, InvalidOperation
 from html import escape
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Callable
 
 from aiogram import F, Router
@@ -83,6 +86,7 @@ EM_ALL = ("5854908544712707500", "📦")     # «Все лоты»
 EM_BOOST = ("5438571934210082705", "⚡")   # бусты
 EM_ART = ("5339290256174770336", "🍴")     # артефакты
 EM_SELL = ("5264713049637409446", "🪙")    # кнопка «Продать»
+EM_EDIT = ("5197269100878907942", "✍️")    # кнопки «Своё количество» / «Своя цена»
 # «Купить» берётся из donate.EM_BUY
 MAX_LOTS = 10                # сколько лотов (с истёкшими) может держать один игрок
 LOT_DAYS = 3                 # сколько дней лот висит на рынке
@@ -553,6 +557,9 @@ def _nav(page: int, total: int, prefix: str) -> str:
 _DRAFTS: dict[int, dict] = {}
 _FILTER: dict[int, str] = {}        # фильтр валюты в списке лотов: all / coins / crystals
 _VIEW: dict[int, str] = {}          # последний список лотов игрока: «куда вести кнопку Назад»
+# Ждём число от игрока: uid -> {"field": "n" | "p", "msg": сообщение-карточка, "ts": время}
+_AWAIT: dict[int, dict] = {}
+AWAIT_TTL = 5 * 60                  # сколько секунд бот ждёт число
 
 
 def _draft(uid: int) -> dict | None:
@@ -612,6 +619,7 @@ def home_html(uid: int, with_image: bool = False) -> str:
 async def open_home(callback: CallbackQuery, force_new: bool = False) -> None:
     if await donate._require_user(callback) is None:
         return
+    _AWAIT.pop(callback.from_user.id, None)
     await callback.answer()
     uid = callback.from_user.id
     await donate._cfg["show_rich_card"](
@@ -619,6 +627,7 @@ async def open_home(callback: CallbackQuery, force_new: bool = False) -> None:
 
 
 async def _show(callback: CallbackQuery, html, back: str) -> None:
+    _AWAIT.pop(callback.from_user.id, None)
     await callback.answer()
     await donate._cfg["show_rich_card"](callback, _img(), html, _kb(back))
 
@@ -1076,17 +1085,22 @@ def draft_html(uid: int, d: dict, with_image: bool = False) -> str:
     if prov.stackable and d["max"] > 1:
         buttons.append(_rows([_b("−10", "market:q:-10", "primary"), _b("−1", "market:q:-1", "primary"),
                               _b("+1", "market:q:1", "primary"), _b("+10", "market:q:10", "primary")], 4))
-        buttons.append(_rows([_b(f"Всё ({donate._fmt(d['max'])})", "market:qmax", "primary")]))
+        buttons.append(_rows([_b(f"Всё ({donate._fmt(d['max'])})", "market:qmax", "primary"),
+                              _b(f"{donate._ce(EM_EDIT)} Своё количество", "market:in:n", "primary")], 2))
     steps = STEPS[cur]
     buttons.append(_rows([_b(f"−{_short(x)}", f"market:p:-{x}", "danger") for x in reversed(steps)], 4))
     buttons.append(_rows([_b(f"+{_short(x)}", f"market:p:{x}", "success") for x in steps], 4))
+    own = _b(f"{donate._ce(EM_EDIT)} Своя цена", "market:in:p", "primary")
     if sug and sug != price:
-        buttons.append(_rows([_b(f"По рынку: {donate._fmt(sug)}", f"market:pset:{sug}", "primary")]))
+        buttons.append(_rows([_b(f"По рынку: {donate._fmt(sug)}", f"market:pset:{sug}", "primary"), own], 2))
+    else:
+        buttons.append(_rows([own]))
     buttons.append(_rows([_b("✅ Выставить на рынок", "market:go")]))
     return (
         f"{donate._image(with_image)}"
         + _head("ВЫСТАВИТЬ ЛОТ")
-        + _quote("Выбери валюту, настрой количество и цену кнопками. Цена задаётся за весь лот целиком.")
+        + _quote("Выбери валюту, настрой количество и цену кнопками или впиши своё значение. "
+                 "Цена задаётся за весь лот целиком.")
         + donate._tree("Лот", rows)
         + _GAP
         + donate._tree("Расчёт", [f"Комиссия {FEE_PERCENT}%: {_cr(fee, cur)}",
@@ -1098,10 +1112,12 @@ def draft_html(uid: int, d: dict, with_image: bool = False) -> str:
     )
 
 
-async def _show_draft(callback: CallbackQuery, d: dict) -> None:
+async def _show_draft(callback, d: dict):
+    """Показывает черновик лота. callback может быть и «подделкой» (SimpleNamespace) после ввода текстом."""
     uid = callback.from_user.id
     d["ts"] = time.time()
-    await donate._cfg["show_rich_card"](
+    _AWAIT.pop(uid, None)
+    return await donate._cfg["show_rich_card"](
         callback, _img(), lambda wi: draft_html(uid, d, wi), _kb(f"market:sp:{d['kind']}:0"))
 
 
@@ -1224,6 +1240,150 @@ async def on_price_set(callback: CallbackQuery):
     await _show_draft(callback, d)
 
 
+# ---------- Свои количество и цена (ввод числом) ----------
+
+_NUM_TEXT = re.compile(r"^[\s\-+\d.,_]+[kKкК]{0,2}$")   # похоже на число: 150, 1 500, 2.5к, 1кк
+_GROUPED = re.compile(r"^\d{1,3}(?:[.,]\d{3})+$")       # 1.500 / 1,500,000: разделители тысяч
+
+
+def _parse_amount(text: str) -> int | None:
+    """«150», «1 500», «1.500», «2,5к», «1кк» -> целое число; None, если не число."""
+    s = text.strip().lower().replace(" ", "").replace("_", "")
+    mult = 1
+    while s and s[-1] in "kк" and mult < 1_000_000:
+        s, mult = s[:-1], mult * 1000
+    if not s or s[0] in "+-":
+        return None
+    if _GROUPED.match(s):
+        s = s.replace(".", "").replace(",", "")
+    elif mult == 1 and ("." in s or "," in s):
+        return None                  # дробное количество или цена без «к» не принимаем
+    try:
+        val = Decimal(s.replace(",", ".")) * mult
+    except InvalidOperation:
+        return None
+    return int(val) if val == val.to_integral_value() else None
+
+
+def input_html(d: dict, field: str, error: str = "", with_image: bool = False) -> str:
+    cur = d["cur"]
+    if field == "n":
+        title, lo, hi = "СВОЁ КОЛИЧЕСТВО", 1, d["max"]
+        hint = f"Отправь сообщением, сколько штук выставить (от {lo} до {donate._fmt(hi)})."
+        now = f"Сейчас: <b>{donate._fmt(d['n'])}</b> шт."
+    else:
+        title = "СВОЯ ЦЕНА"
+        lo, hi = LIMITS[cur]
+        hint = (f"Отправь сообщением цену за весь лот в валюте «{_cur_name(cur)}» "
+                f"(от {donate._fmt(lo)} до {donate._fmt(hi)}). Можно писать 1500, 1 500 или 1.5к.")
+        now = f"Сейчас: {_cr(d['price'], cur)}"
+    lines = [f"Предмет: {_item_text({'kind': d['kind'], 'name': d['name'], 'sub': d.get('sub'), 'n': d['n']})}", now]
+    return (
+        f"{donate._image(with_image)}"
+        + _head(title)
+        + _quote(hint)
+        + donate._tree("Лот", lines)
+        + (_GAP + f"⚠️ <b>{error}</b>" if error else "")
+    )
+
+
+async def _show_input(callback, d: dict, field: str, error: str = ""):
+    return await donate._cfg["show_rich_card"](
+        callback, _img(), lambda wi: input_html(d, field, error, wi), _kb("market:in:x"))
+
+
+@router.callback_query(F.data.regexp(r"^market:in:(n|p)$"))
+async def on_input_start(callback: CallbackQuery):
+    """Кнопки «Своё количество» / «Своя цена»: бот ждёт число сообщением."""
+    got = await _need_draft(callback)
+    if got is None:
+        return
+    _, d = got
+    field = callback.data.rsplit(":", 1)[-1]
+    if field == "n" and not (_prov(d["kind"]).stackable and d["max"] > 1):
+        await callback.answer("Количество у этого предмета не меняется.", show_alert=True)
+        return
+    await callback.answer()
+    d["ts"] = time.time()
+    res = await _show_input(callback, d, field)
+    _AWAIT[callback.from_user.id] = {
+        "field": field, "ts": time.time(),
+        "msg": res if isinstance(res, Message) else callback.message,
+    }
+
+
+@router.callback_query(F.data == "market:in:x")
+async def on_input_cancel(callback: CallbackQuery):
+    """Отмена ввода: назад к черновику лота."""
+    uid = callback.from_user.id
+    _AWAIT.pop(uid, None)
+    got = await _need_draft(callback)
+    if got is None:
+        return
+    await callback.answer()
+    await _show_draft(callback, got[1])
+
+
+def _waiting(message: Message) -> bool:
+    """Фильтр: бот ждёт число от этого игрока, и текст похож на число. Остальной текст (кнопки
+    нижней клавиатуры вроде «Меню») пропускаем дальше, его обработают другие разделы."""
+    uid = message.from_user.id if message.from_user else 0
+    aw = _AWAIT.get(uid)
+    if aw is None or not message.text:
+        return False
+    if time.time() - aw["ts"] > AWAIT_TTL or aw["msg"].chat.id != message.chat.id:
+        _AWAIT.pop(uid, None)
+        return False
+    return bool(_NUM_TEXT.match(message.text.strip()))
+
+
+async def _drop(message: Message) -> None:
+    try:
+        await message.delete()        # чистим чат; в группе нужны права админа, иначе просто оставим
+    except TelegramAPIError:
+        pass
+
+
+@router.message(F.text, _waiting)
+async def on_input_text(message: Message):
+    uid = message.from_user.id
+    aw = _AWAIT.get(uid)
+    d = _draft(uid)
+    user = donate._cfg["get_user"](uid)
+    fake = SimpleNamespace(message=aw["msg"], bot=message.bot, from_user=message.from_user)
+    await _drop(message)
+    if d is None or user is None:
+        _AWAIT.pop(uid, None)
+        await message.answer("Черновик устарел. Открой «Рынок» → «Продать» и выбери предмет заново.")
+        return
+    st = _stack(user, d["kind"], d["key"])
+    if st is None:
+        _AWAIT.pop(uid, None)
+        _DRAFTS.pop(uid, None)
+        await message.answer("Этого предмета у тебя больше нет.")
+        return
+    d["max"] = _int(st["count"])
+    d["n"] = min(max(1, d["n"]), d["max"])
+    field = aw["field"]
+    val = _parse_amount(message.text)
+    if field == "n":
+        lo, hi = 1, d["max"]
+    else:
+        lo, hi = LIMITS[d["cur"]]
+    if val is None:
+        res = await _show_input(fake, d, field, "Это не похоже на целое число. Попробуй ещё раз.")
+    elif not lo <= val <= hi:
+        res = await _show_input(fake, d, field, f"Допустимо от {donate._fmt(lo)} до {donate._fmt(hi)}.")
+    else:
+        d["n" if field == "n" else "price"] = val
+        _AWAIT.pop(uid, None)
+        await _show_draft(fake, d)
+        return
+    if isinstance(res, Message):
+        aw["msg"] = res               # карточка могла быть отправлена заново
+    aw["ts"] = time.time()
+
+
 def listed_html(lot: dict) -> str:
     cur = _lot_cur(lot)
     fee = _fee(lot["price"])
@@ -1274,6 +1434,7 @@ async def on_publish(callback: CallbackQuery):
     donate._cfg["save_users"]()
     _save(uid, commit=True)    # предмет ушёл из инвентаря и появился в лоте: одной транзакцией
     _DRAFTS.pop(uid, None)
+    _AWAIT.pop(uid, None)
     ledger("market_list", lot=lot["id"], kind=lot["kind"], item=lot["key"], n=lot["n"],
            cur=lot["cur"], price=lot["price"], user=uid)
     await callback.answer("Лот выставлен!")
