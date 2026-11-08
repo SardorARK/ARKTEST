@@ -35,6 +35,14 @@ log = logging.getLogger(__name__)
 # Заполняется в setup()
 D = SimpleNamespace()
 
+BONUS_EMOJI = ("5913600088856334619", "🎁")    # кнопка «Бонус» и заголовок экрана
+CHECK_EMOJI = ("5390846416530716134", "✅")    # кнопка «Проверить»
+NUM_EMOJI = (
+    ("5794164805065514131", "1️⃣"),
+    ("5794085322400733645", "2️⃣"),
+    ("5794280000383358988", "3️⃣"),
+)                                              # цифры 1-3 в инструкции
+
 BONUS_PCT = 10                      # прибавка к урону по боссам, %
 RECHECK_SEC = 2 * 60 * 60           # как часто перепроверять активных: раз в 2 часа
 LOOP_TICK_SEC = 10 * 60             # как часто цикл просыпается и ищет тех, чья очередь пришла
@@ -211,14 +219,14 @@ def bonus_html(user_id: int | None, with_image: bool = False, note: str = "") ->
     note_html = f"<p><b>{note}</b></p>" if note else ""
     return (
         f"{image}"
-        f"<p><b>{D.custom_emoji(D.DONATE_EMOJI)} БОНУС ЗА ОПИСАНИЕ</b></p>"
+        f"<p><b>{D.custom_emoji(BONUS_EMOJI)} БОНУС ЗА ОПИСАНИЕ</b></p>"
         f"<blockquote><i>Расскажи о боте в своём профиле и получи "
         f"<b>+{BONUS_PCT}% к урону</b> по всем боссам. Бесплатно и без ограничений по времени, "
         "пока юзернейм стоит в описании.</i></blockquote>"
         f"<p><b>{D.custom_emoji(D.INFO_EMOJI)} Как получить</b></p>"
-        "<p>1. Открой Telegram: Настройки, затем «Изменить профиль».<br>"
-        f"2. В поле «О себе» впиши <b>{uname}</b>.<br>"
-        "3. Вернись сюда и нажми «Проверить».</p>"
+        f"<p>{D.custom_emoji(NUM_EMOJI[0])} Открой Telegram: Настройки, затем «Изменить профиль».<br>"
+        f"{D.custom_emoji(NUM_EMOJI[1])} В поле «О себе» впиши <b>{uname}</b>.<br>"
+        f"{D.custom_emoji(NUM_EMOJI[2])} Вернись сюда и нажми «Проверить».</p>"
         f"{_status_block(user)}"
         f"{note_html}"
         "<p><i>Подсказка: юзернейм можно писать в любом месте описания и в любом регистре. "
@@ -229,7 +237,7 @@ def bonus_html(user_id: int | None, with_image: bool = False, note: str = "") ->
 def bonus_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="Проверить", callback_data="bonus:check",
-                              style=ButtonStyle.SUCCESS, icon_custom_emoji_id=D.DONATE_EMOJI[0])],
+                              style=ButtonStyle.SUCCESS, icon_custom_emoji_id=CHECK_EMOJI[0])],
         [InlineKeyboardButton(text="Назад", callback_data="menu:back",
                               style=ButtonStyle.PRIMARY, icon_custom_emoji_id=D.BACK_EMOJI_ID)],
     ])
