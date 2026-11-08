@@ -51,6 +51,7 @@ import settings
 import mine
 import quick_cmds
 import friends
+import gift              # передача ресурсов игроку: «дать @ник» (gift.py)
 import store as market   # раздел «Рынок» (store.py); имя store в main.py занято базой игроков
 from guard import Guard, OwnerTracker, load_owners, on_error, owners_saver, save_owners
 
@@ -750,6 +751,8 @@ def stock_html(user_id: int | None = None, with_image: bool = False) -> str:
         "</table>"
         f"<p><b>{custom_emoji(INFO_EMOJI)} Мясо и фрукты тратятся на прокачку "
         "и эволюцию питомца.</b></p>"
+        # как передавать ресурсы другу и какой у игрока лимит (gift.py)
+        f"{gift.stock_hint(user if user_id else None)}"
         # Синяя кнопка прямо в теле сообщения (Bot API 10.3)
         "<tg-button-row>"
         '<tg-button type="callback_data" data="stock:donate" '
@@ -1111,6 +1114,7 @@ IMG_TARGETS: dict[str, str] = {
     "lab": "Лаборатория",
     **donate.IMG_TARGETS,
     **market.IMG_TARGETS,
+    **gift.IMG_TARGETS,
     **mine.IMG_TARGETS,
     **boss.IMG_TARGETS,
     **cases.IMG_TARGETS,
@@ -1230,6 +1234,7 @@ dp.callback_query.outer_middleware(guard)
 dp.message.outer_middleware(achives.AchMiddleware())
 dp.callback_query.outer_middleware(achives.AchMiddleware())
 dp.errors.register(on_error)
+gift.install(dp)         # запоминает ники игроков для «дать @ник»
 quick_cmds.install(dp)   # быстрые команды: «шахта», «/босс», «арена» и т.д. (quick_cmds.py)
 
 dp.include_router(admin.router)
@@ -1444,6 +1449,17 @@ friends.setup(
     data_path=Path(__file__).with_name("friends.json"),
 )
 dp.include_router(friends.router)
+
+# Передача ресурсов другому игроку (gift.py): «дать» ответом на сообщение или «дать @ник».
+# Роутер стоит последним, чтобы ввод ника и другие состояния разделов обрабатывались раньше.
+gift.setup(
+    COIN_EMOJI=COIN_EMOJI,
+    MEAT_EMOJI=MEAT_EMOJI,
+    FRUIT_EMOJI=FRUIT_EMOJI,
+    GIFT_EMOJI=GIFT_EMOJI,
+    name_html=settings.name_html,
+)
+dp.include_router(gift.router)
 friends.install(dp)   # следит за ссылками, выбором питомца и 20 уровнем друга
 
 
