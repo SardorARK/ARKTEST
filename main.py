@@ -2223,6 +2223,7 @@ async def main():
     maintenance = asyncio.create_task(store.run_maintenance())   # пачечная запись, бэкапы, выгрузка из памяти
     notifier = asyncio.create_task(settings.notifier_loop(bot))  # «отряд вернулся из экспедиции»
     xrocket_task = asyncio.create_task(donate.xrocket_loop(bot))   # оплата xRocket Pay: проверка счетов
+    cryptobot_task = asyncio.create_task(donate.cryptobot_loop(bot))   # оплата CryptoBot: проверка счетов
     bonus_task = asyncio.create_task(bonus.recheck_loop(bot))   # раз в 2 часа проверяет только активные бонусы
     logging.info("Игроков в базе: %d", len(store))
     try:
@@ -2232,6 +2233,7 @@ async def main():
         notifier.cancel()
         bonus_task.cancel()
         xrocket_task.cancel()
+        cryptobot_task.cancel()
         owners_task.cancel()
         await save_owners(OWNERS_FILE)
         store.close()   # финальная запись всего, что не успело уйти на диск
