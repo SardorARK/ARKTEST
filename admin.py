@@ -501,6 +501,11 @@ def _read_db_rows(path) -> list[tuple[str, dict]]:
     return items
 
 
+def _shop_skins() -> dict[str, dict]:
+    """Донатные наборы скинов ника (те, у которых есть «shop»)."""
+    return {k: v for k, v in settings.SKINS.items() if v.get("shop")}
+
+
 def _scan(items) -> tuple[dict, list[dict]]:
     """Считает общие числа и лёгкие строки для списков. Только чтение."""
     now = time.time()
@@ -518,6 +523,7 @@ def _scan(items) -> tuple[dict, list[dict]]:
         # донат
         "crys": 0, "crys_holders": 0, "priv_vip": 0, "priv_premium": 0,
         "spent_cases": 0, "spent_boosts": 0, "refund": 0, "dups": 0,
+        "spent_skins": 0, "skin_players": 0, "skin_bought": Counter(), "skin_owned": Counter(),
         "case_open": Counter(), "boost_bought": Counter(), "boost_used": Counter(),
         "boost_active": Counter(), "inv_kind": Counter(), "inv_total": 0, "inv_players": 0, "inv_full": 0,
     }
@@ -560,11 +566,20 @@ def _scan(items) -> tuple[dict, list[dict]]:
                 S["inv_full"] += n_inv >= donate.INV_LIMIT
         S["inv_total"] += inv_all
         S["inv_players"] += inv_all > 0
+        own_skins = u.get(settings.SKINS_FIELD)
+        if isinstance(own_skins, list):
+            have = {k for k in own_skins if k in _shop_skins()}
+            S["skin_players"] += bool(have)
+            for skey in have:
+                S["skin_owned"][skey] += 1
         ds = donate.dstats(u)
         if ds:
             S["spent_cases"] += _int(ds.get("spent_cases"))
             S["spent_boosts"] += _int(ds.get("spent_boosts"))
             S["refund"] += _int(ds.get("refund"))
+            S["spent_skins"] += _int(ds.get("spent_skins"))
+            for skey in _shop_skins():
+                S["skin_bought"][skey] += _int(ds.get(f"skin_{skey}"))
             S["dups"] += _int(ds.get("dups"))
             for i in range(len(donate.DONATE_CASES)):
                 S["case_open"][i] += _int(ds.get(f"case{i + 1}"))
@@ -2622,6 +2637,8 @@ EVENT_TITLES = {
     "donate_boost_use": "Донат: эликсир применён", "donate_uncredited": "⚠ Платёж без начисления",
     "admin_donate_priv": "Привилегия выдана (админ)", "admin_donate_priv_take": "Привилегия снята (админ)",
     "admin_donate_reset": "Сброс эликсиров (админ)",
+    "donate_skin": "Донат: набор скинов ника",
+    "admin_donate_skin": "Набор скинов выдан (админ)", "admin_donate_skin_take": "Набор скинов снят (админ)",
     "admin_maintenance": "Тех. работы", "admin_backup": "Бэкап",
     "integrity_fix": "Исправление данных", "integrity_huge": "Огромное значение",
     "flush_error": "Ошибка записи", "backup_error": "Ошибка бэкапа",
@@ -2991,7 +3008,8 @@ def dstats_overview(S: dict, rows: list[dict], sm: dict) -> str:
         "", "<b>Кристаллы</b>",
         f"Куплено за всё время: <b>{fmt(sm['coins_bought'])}</b>",
         f"Сейчас на балансах: <b>{fmt(S['crys'])}</b> у {fmt(S['crys_holders'])} игроков",
-        f"Потрачено на кейсы: <b>{fmt(S['spent_cases'])}</b> · на эликсиры: <b>{fmt(S['spent_boosts'])}</b>",
+        f"Потрачено на кейсы: <b>{fmt(S['spent_cases'])}</b> · на эликсиры: <b>{fmt(S['spent_boosts'])}</b> · "
+        f"на скины: <b>{fmt(S['spent_skins'])}</b>",
         "<i>Траты считаются по профилям игроков с момента подключения учёта.</i>",
         "", "<b>Привилегии сейчас</b>",
         f"VIP: <b>{fmt(S['priv_vip'])}</b> · Premium: <b>{fmt(S['priv_premium'])}</b>",
@@ -3017,6 +3035,32 @@ def dstats_sales(S: dict, rows: list[dict], sm: dict) -> str:
     return "\n".join(lines)
 
 
+def _skin_stats_lines(S: dict) -> list[str]:
+    """Блок статистики скинов ника: продажи, владельцы, текущий набор в магазине."""
+    shop = _shop_skins()
+    lines = ["", "<b>Скины ника</b> (куплено · у игроков всего · цена · лимит)"]
+    for key, meta in shop.items():
+        sh = meta["shop"]
+        bought, owned = S["skin_bought"].get(key, 0), S["skin_owned"].get(key, 0)
+        gift = max(0, owned - bought)
+        lines.append(f"{escape(meta['name'])}: <b>{fmt(bought)}</b> · <b>{fmt(owned)}</b>"
+                     + (f" (выдано/сверх учёта {fmt(gift)})" if gift else "")
+                     + f" · {fmt(sh['price'])} · {fmt(sh['limit'])}")
+    lines += [f"Потрачено кристаллов на скины: <b>{fmt(S['spent_skins'])}</b>",
+              f"Игроков с донатными скинами: <b>{fmt(S['skin_players'])}</b>"]
+    try:
+        off = donate._SKIN_OFFER
+        key = off.get("set")
+        if key in shop:
+            limit = int(shop[key]["shop"]["limit"])
+            sold = int(off.get("sold", 0) or 0)
+            lines.append(f"В магазине сейчас: <b>{escape(shop[key]['name'])}</b> · продано "
+                         f"<b>{sold}/{limit}</b> · смена {when(off.get('ends'))}")
+    except Exception:
+        log.exception("не удалось прочитать текущий набор скинов")
+    return lines
+
+
 def dstats_usage(S: dict, rows: list[dict], sm: dict) -> str:
     lines = ["<b>Донат · Траты кристаллов</b>", "", "<b>Кейсы</b> (открыто)"]
     for i, c in enumerate(donate.DONATE_CASES):
@@ -3033,6 +3077,7 @@ def dstats_usage(S: dict, rows: list[dict], sm: dict) -> str:
               f"Игроков с эликсирами: <b>{fmt(S['inv_players'])}</b> · эликсиров всего: <b>{fmt(S['inv_total'])}</b>",
               f"Заполненных ячеек ({donate.INV_LIMIT}/{donate.INV_LIMIT}): <b>{fmt(S['inv_full'])}</b>",
               "<i>Ячейка = один вид эликсира у одного игрока.</i>"]
+    lines += _skin_stats_lines(S)
     return "\n".join(lines)
 
 
@@ -3246,6 +3291,16 @@ def _elixir_lines(user: dict) -> tuple[list[str], list[str]]:
     return active, stored
 
 
+def _user_skin_lines(user: dict) -> list[str]:
+    """Какие донатные наборы скинов есть у игрока и какой надет сейчас."""
+    cur = settings.skin_of(user)
+    out = []
+    for key, meta in _shop_skins().items():
+        if settings.owns_skin(user, key):
+            out.append(f"{escape(meta['name'])}" + (" · <b>надет</b>" if key == cur else ""))
+    return out or ["нет"]
+
+
 def dn_user_text(uid: str, user: dict) -> str:
     now = time.time()
     ds = donate.dstats(user)
@@ -3258,6 +3313,7 @@ def dn_user_text(uid: str, user: dict) -> str:
         f"<b>Донат игрока</b> {player_label(uid, user)}", "",
         f"{D.custom_emoji(donate.EM_CRYSTAL)} Кристаллы: <b>{fmt(donate.get_balance(user))}</b>",
         "", "<b>Привилегии</b>", *privs,
+        "", "<b>Скины ника</b>", *_user_skin_lines(user),
         "", "<b>Эликсиры действуют</b>", *(active or ["—"]),
         "", f"<b>Инвентарь</b> ({donate.inv_total(user)} шт., лимит {donate.INV_LIMIT} на вид)", *(stored or ["пусто"]),
     ]
@@ -3268,7 +3324,8 @@ def dn_user_text(uid: str, user: dict) -> str:
             f" · куплено кристаллов <b>{fmt(_int(ds.get('coins_bought')))}</b>",
             f"Потрачено: на кейсы <b>{fmt(_int(ds.get('spent_cases')))}</b> · "
             f"на эликсиры <b>{fmt(_int(ds.get('spent_boosts')))}</b>",
-            f"Кейсов открыто: <b>{sum(_int(ds.get(f'case{i + 1}')) for i in range(len(donate.DONATE_CASES)))}</b>",
+            f"Кейсов открыто: <b>{sum(_int(ds.get(f'case{i + 1}')) for i in range(len(donate.DONATE_CASES)))}</b>"
+            f" · на скины потрачено <b>{fmt(_int(ds.get('spent_skins')))}</b>",
             f"Первое событие: {when(ds.get('first'))} · последнее: {ago(ds.get('last'))}",
         ]
     else:
@@ -3289,6 +3346,7 @@ def dn_user_kb(uid: str, user: dict) -> InlineKeyboardMarkup:
          for tier, info in donate.PRIVILEGES.items()],
         *([take_row] if take_row else []),
         [_b("Платежи игрока", f"adm:dnp:0:{uid}", G), _b("Журнал игрока", f"adm:lg:0:{uid}", G)],
+        [_b("Скины ника", f"adm:dsk:{uid}", S)],
         [_b("Сбросить эликсиры", f"adm:dnx:{uid}", R)],
         [_b("Обновить", f"adm:dnu:{uid}", G)],
         _back(f"adm:u:{uid}"),
@@ -3342,6 +3400,86 @@ async def adm_donate_priv_take(cb: CallbackQuery):
     D.store.flush()
     await cb.answer(f"{donate.PRIVILEGES[tier]['name']} снята")
     await _show_dn_user(cb, uid, user)
+
+
+def dsk_text(uid: str, user: dict) -> str:
+    lines = [f"<b>Скины ника игрока</b> {player_label(uid, user)}", "",
+             "<i>Выдача и снятие не списывают кристаллы и не влияют на лимит продаж в магазине.</i>", ""]
+    cur = settings.skin_of(user)
+    for key, meta in _shop_skins().items():
+        owned = settings.owns_skin(user, key)
+        lines.append(f"{'✅' if owned else '▫️'} {escape(meta['name'])}"
+                     + (" · <b>надет</b>" if owned and key == cur else "")
+                     + f" · {fmt(meta['shop']['price'])} крист.")
+    return "\n".join(lines)
+
+
+def dsk_kb(uid: str, user: dict) -> InlineKeyboardMarkup:
+    S, R = ButtonStyle.SUCCESS, ButtonStyle.DANGER
+    btns = []
+    for key, meta in _shop_skins().items():
+        if settings.owns_skin(user, key):
+            btns.append(_b(f"Снять {meta['name']}", f"adm:dst:{key}:{uid}", R))
+        else:
+            btns.append(_b(f"Выдать {meta['name']}", f"adm:dsg:{key}:{uid}", S))
+    return _kb(*[btns[i:i + 2] for i in range(0, len(btns), 2)], _back(f"adm:dnu:{uid}"))
+
+
+async def _show_dsk(cb: CallbackQuery, uid: str, user: dict) -> None:
+    await _show(cb, dsk_text(uid, user), dsk_kb(uid, user))
+
+
+@router.callback_query(F.data.regexp(r"^adm:dsk:\d+$"))
+async def adm_skins_user(cb: CallbackQuery, state: FSMContext):
+    await state.clear()
+    uid = cb.data.split(":")[2]
+    user = await _need_user(cb, uid)
+    if user is None:
+        return
+    await _show_dsk(cb, uid, user)
+    await cb.answer()
+
+
+@router.callback_query(F.data.regexp(r"^adm:dsg:\w+:\d+$"))
+async def adm_skin_give(cb: CallbackQuery):
+    _, _, key, uid = cb.data.split(":")
+    user = await _need_user(cb, uid)
+    if user is None:
+        return
+    if key not in _shop_skins():
+        await cb.answer("Такого набора нет", show_alert=True)
+        return
+    if settings.owns_skin(user, key):
+        await cb.answer("Набор уже у игрока")
+        return
+    own = user.get(settings.SKINS_FIELD)
+    if not isinstance(own, list):
+        own = user[settings.SKINS_FIELD] = []
+    own.append(key)
+    ledger("admin_donate_skin", admin=cb.from_user.id, uid=uid, skin=key)
+    D.store.flush()
+    await cb.answer(f"Выдан: {settings.SKINS[key]['name']}")
+    await _show_dsk(cb, uid, user)
+
+
+@router.callback_query(F.data.regexp(r"^adm:dst:\w+:\d+$"))
+async def adm_skin_take(cb: CallbackQuery):
+    _, _, key, uid = cb.data.split(":")
+    user = await _need_user(cb, uid)
+    if user is None:
+        return
+    own = user.get(settings.SKINS_FIELD)
+    if key not in _shop_skins() or not isinstance(own, list) or key not in own:
+        await cb.answer("Набора у игрока нет", show_alert=True)
+        return
+    was_worn = settings.skin_of(user) == key
+    user[settings.SKINS_FIELD] = [k for k in own if k != key]
+    if was_worn:
+        user["nick_skin"] = settings.DEFAULT_SKIN
+    ledger("admin_donate_skin_take", admin=cb.from_user.id, uid=uid, skin=key, was_worn=was_worn)
+    D.store.flush()
+    await cb.answer(f"Снят: {settings.SKINS[key]['name']}")
+    await _show_dsk(cb, uid, user)
 
 
 @router.callback_query(F.data.regexp(r"^adm:dnx:\d+$"))
