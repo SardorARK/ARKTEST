@@ -1399,6 +1399,7 @@ settings.setup(
     ),
 )
 dp.include_router(settings.router)
+settings.migrate_legacy_nicks(users)   # старые ники с премиум-эмодзи сбрасываются, новая система скинов
 
 # Раздел «Арена»: бои питомцев, рейтинг, подбор соперников
 arena.setup(
