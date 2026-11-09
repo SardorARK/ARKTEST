@@ -695,7 +695,7 @@ def pack_kb(pack_id: str) -> InlineKeyboardMarkup:
         [_btn("Telegram Stars", f"donate:stars:{pack_id}", ButtonStyle.SUCCESS, EM_STAR[0])],
         [_btn("xRocket Pay", f"donate:rocket:{pack_id}", ButtonStyle.PRIMARY, EM_ROCKET[0])],
         [_btn("CryptoBot", f"donate:crypto:{pack_id}", ButtonStyle.PRIMARY, EM_CRYPTO[0])],
-        [InlineKeyboardButton(text="Карты / СБП", url=CARD_CONTACT, style=ButtonStyle.PRIMARY,
+        [InlineKeyboardButton(text="Карты / СБП", url=CARD_CONTACT, style=ButtonStyle.SUCCESS,
                               icon_custom_emoji_id=EM_CARD[0])],
         _back_btn("donate:shop"),
     ])
@@ -759,9 +759,9 @@ def shop_html(user_id: int, with_image: bool = False) -> str:
         + _rrows([
             _rbtn(f"{_ce(EM_STAR)} Telegram Stars", "donate:shop:stars", "success"),
             _rbtn(f"{_ce(EM_ROCKET)} xRocket Pay", "donate:shop:rocket", "primary"),
-            _rbtn(f"{_ce(EM_CRYPTO)} CryptoBot", "donate:shop:crypto", "primary"),
-            _ubtn(f"{_ce(EM_CARD)} Карты / СБП", CARD_CONTACT, "primary"),
         ], per_row=2)
+        + _rrows([_rbtn(f"{_ce(EM_CRYPTO)} CryptoBot", "donate:shop:crypto", "primary")])
+        + _rrows([_ubtn(f"{_ce(EM_CARD)} Карты / СБП", CARD_CONTACT, "success")])
     )
 
 
