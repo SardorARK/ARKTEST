@@ -236,17 +236,74 @@ for _i, _id in enumerate(_LETTER_IDS):
 for _i, _id in enumerate(_DIGIT_IDS):
     EMOJI_LETTERS[str(_i)] = (_id, _DIGIT_FALLBACK[_i])
 
+# Донатные наборы: A-Z, затем 0-9 (порядок как в наборе эмодзи)
+_SET1_IDS = [
+    "5442656319259587462", "5442941067001377271", "5445198733740384645", "5442721276344971174",
+    "5443069246005358218", "5444919251628500977", "5445342722518983442", "5445008848941262321",
+    "5442984093983745264", "5442956112271815287", "5442956382854755407", "5443110636605188325",
+    "5445340394646710021", "5442728418875584162", "5445232964629735264", "5442710757970065562",
+    "5443007346936688048", "5445313830273988012", "5443027902650164419", "5444900955067821500",
+    "5442879936731849745", "5445017670804087756", "5442727499752579967", "5445408976684492861",
+    "5445312747942223346", "5442724531930185855",                                   # A-Z
+    "5444879596195458584", "5442915971507466800", "5443124268831387407", "5445381299915240220",
+    "5443036063088026470", "5442839744427894778", "5444974545037470548", "5443034929216665764",
+    "5445214938651992882", "5445184130851579828",                                   # 0-9
+]
+_SET2_IDS = [
+    "5444855278090626891", "5445049006885479486", "5442892813043805793", "5445161320280271117",
+    "5445309397867734511", "5443144047155785124", "5443112096894071108", "5443097781768072422",
+    "5442778266266022259", "5445037268739860933", "5442606540588623052", "5442963843212946555",
+    "5442953866003921707", "5442837377900917600", "5445374213219199450", "5444998953336614272",
+    "5443059891566588262", "5442748081235867022", "5443126725552678443", "5442960806671068172",
+    "5444953808935363375", "5444929151528119060", "5445108616736579735", "5443122379045778120",
+    "5442892585410539351", "5442904027203416832",                                   # A-Z
+    "5442619163497507457", "5442834294114399292", "5443089793128903783", "5445010794561448165",
+    "5442601120339917111", "5443147642043413120", "5445103724768829237", "5442642549594438022",
+    "5443131119304227142", "5442601704455448469",                                   # 0-9
+]
+
+
+def _build_map(ids: list[str], letter_fb: str, special: dict[str, str], digit_fb: list[str]) -> dict:
+    """символ -> (id эмодзи, запасной символ) для A-Z и 0-9."""
+    table = {}
+    for i in range(26):
+        ch = chr(ord("A") + i)
+        table[ch] = (ids[i], special.get(ch, letter_fb))
+    for i in range(10):
+        table[str(i)] = (ids[26 + i], digit_fb[i])
+    return table
+
+
+SET1_LETTERS = _build_map(_SET1_IDS, "🔤", {"A": "🅰️"}, ["🔤"] * 10)
+SET2_LETTERS = _build_map(_SET2_IDS, "🔠", {"A": "🅰️", "B": "🅱️", "O": "⭕️"}, _DIGIT_FALLBACK)
+
 DEFAULT_SKIN = "plain"
-# Новые скины добавляются сюда: "map" это символ -> (id эмодзи, запасной символ)
+# Новые скины добавляются сюда: "map" это символ -> (id эмодзи, запасной символ).
+# Если есть "shop", скин продаётся в «Донат → Облики на имя»: price кристаллов, limit штук за одно
+# появление в магазине. Скины без "shop" доступны всем.
 SKINS: dict[str, dict] = {
     "plain": {"name": "Обычный", "map": None},
     "emoji": {"name": "Эмодзи-буквы", "map": EMOJI_LETTERS},
+    "set1": {"name": "Набор 1", "map": SET1_LETTERS, "shop": {"price": 29, "limit": 5}},
+    "set2": {"name": "Набор 2", "map": SET2_LETTERS, "shop": {"price": 39, "limit": 10}},
 }
+SKINS_FIELD = "nick_skins"       # в профиле: список купленных донатных скинов
+
+
+def owned_skins(user: dict | None) -> list[str]:
+    """Скины, которыми игрок может пользоваться: бесплатные и купленные."""
+    own = (user or {}).get(SKINS_FIELD)
+    own = own if isinstance(own, list) else []
+    return [k for k, v in SKINS.items() if not v.get("shop") or k in own]
+
+
+def owns_skin(user: dict | None, key: str) -> bool:
+    return key in owned_skins(user)
 
 
 def skin_of(user: dict | None) -> str:
     key = (user or {}).get("nick_skin", DEFAULT_SKIN)
-    return key if key in SKINS else DEFAULT_SKIN
+    return key if key in SKINS and owns_skin(user, key) else DEFAULT_SKIN
 
 
 def apply_skin(text: str, skin: str) -> str:
@@ -665,7 +722,8 @@ def nick_kb(user: dict) -> InlineKeyboardMarkup:
 def skin_html(user: dict, with_image: bool = False) -> str:
     cur = skin_of(user)
     sample = has_nick(user) and (user.get("nick_plain") or "") or "Kerry2026"
-    rows = [(SKINS[k]["name"], "выбран" if k == cur else "") for k in SKINS]
+    mine = owned_skins(user)
+    rows = [(SKINS[k]["name"], "выбран" if k == cur else "") for k in mine]
     return (
         f"{_image(with_image)}"
         f"<p><b>{_em(EM_NICK)} СКИН НИКНЕЙМА</b></p>"
@@ -674,18 +732,20 @@ def skin_html(user: dict, with_image: bool = False) -> str:
         + _tree([("Сейчас", name_html(user) if has_nick(user) else escape(default_name(user)))],
                 "Твоё имя")
         + _gap()
-        + _tree([(SKINS[k]["name"], apply_skin(sample[:NICK_MAX], k)) for k in SKINS],
+        + _tree([(SKINS[k]["name"], apply_skin(sample[:NICK_MAX], k)) for k in mine],
                 "Как выглядит")
         + _gap()
         + _tree(rows, "Скины")
-        + _p("<b>Выбери скин кнопкой ниже.</b>")
+        + _p("<b>Выбери скин кнопкой ниже.</b><br>"
+             "<i>Новые облики появляются в разделе «Донат → Облики на имя».</i>")
     )
 
 
 def skin_kb(user: dict) -> InlineKeyboardMarkup:
     cur = skin_of(user)
     rows = [[_btn(SKINS[k]["name"], f"set:skin:{k}",
-                  ButtonStyle.SUCCESS if k == cur else ButtonStyle.PRIMARY)] for k in SKINS]
+                  ButtonStyle.SUCCESS if k == cur else ButtonStyle.PRIMARY)]
+            for k in owned_skins(user)]
     rows.append([_back("set:nick")])
     return _kb(*rows)
 
@@ -798,6 +858,9 @@ async def on_skin_pick(callback: CallbackQuery):
     key = callback.data.split(":")[2]
     if key not in SKINS:
         await callback.answer("Такого скина нет", show_alert=True)
+        return
+    if not owns_skin(user, key):
+        await callback.answer("Этот облик не куплен: он продаётся в разделе «Донат».", show_alert=True)
         return
     if not has_nick(user):
         await callback.answer("Сначала задай никнейм: скин применяется к нему.", show_alert=True)
