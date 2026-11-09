@@ -1666,13 +1666,13 @@ async def on_menu_pet(callback: CallbackQuery):
         return
 
     await callback.answer()
-    # Из главного меню в раздел: всегда новое сообщение
+    # Фото меню и фото питомца разные: show_rich_card сам удалит старое и пришлёт новое.
+    # Если фото одно (или его нет нигде), сообщение обновится на месте.
     await show_rich_card(
         callback,
         user["pet"],
         lambda with_image: profile_html(callback.from_user.id, with_image),
         profile_kb(),
-        force_new=True,
     )
 
 
