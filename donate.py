@@ -2047,7 +2047,64 @@ _XR_BUSY: set[int] = set()       # игроки, у которых прямо с
 
 
 def _xr_key() -> str:
-    return _cfg.get("XROCKET_API_KEY") or XROCKET_API_KEY
+    """Токен без лишнего: пробелов, переносов, кавычек и приставки «Bearer » (часто попадают при копировании)."""
+    raw = str(_cfg.get("XROCKET_API_KEY") or XROCKET_API_KEY or "")
+    raw = raw.strip().strip("\"'").strip()
+    if raw.lower().startswith("bearer "):
+        raw = raw[7:]
+    return "".join(raw.split())
+
+
+def _xr_fingerprint() -> str:
+    k = _xr_key()
+    return f"длина {len(k)}, начало {k[:6]}…, конец …{k[-4:]}" if k else "токен не задан"
+
+
+async def xrocket_selftest() -> None:
+    """Проверка токена при запуске бота: пишет в консоль, какой API его принял, или что делать."""
+    global _xr_mode
+    if not _xr_key():
+        log.warning("xRocket: токен не задан (XROCKET_API_KEY), оплата xRocket отключена")
+        return
+    log.info("xRocket: проверяю токен (%s)", _xr_fingerprint())
+    problems = []
+    try:
+        info = await _xr_pay("GET", "/api/v1/app-info")
+        _xr_mode = "pay"
+        log.info("xRocket: токен принят новым Pay API (%s). Оплата xRocket готова.", XROCKET_PAY_URL)
+        log.debug("xRocket app-info: %s", str(info)[:300])
+        return
+    except XRocketAuthError as e:
+        problems.append(f"Pay API: {e}")
+    except Exception as e:
+        problems.append(f"Pay API недоступен: {e}")
+    try:
+        await _xr_legacy("GET", "/app/info")
+        _xr_mode = "legacy"
+        log.info("xRocket: токен принят старым Legacy API. Оплата xRocket готова.")
+        return
+    except XRocketAuthError as e:
+        problems.append(f"Legacy API: {e}")
+    except Exception as e:
+        problems.append(f"Legacy API недоступен: {e}")
+    testnet_hint = ""
+    try:
+        status, _ = await _xr_http("GET", "https://pay.api.testnet.xrocket.exchange/api/v1/app-info",
+                                   {"Authorization": f"Bearer {_xr_key()}"})
+        if status < 300:
+            testnet_hint = ("ТОКЕН ОТ ТЕСТОВОЙ СЕТИ (@xrocket_testnet_bot). Для него задай переменную "
+                            "XROCKET_PAY_URL=https://pay.api.testnet.xrocket.exchange или возьми токен в основном @xrocket.")
+    except Exception:
+        pass
+    log.error(
+        "xRocket: НИ ОДИН API НЕ ПРИНЯЛ ТОКЕН (%s).\n  %s\n  %s"
+        "Что проверить:\n"
+        "  1) @xrocket: Pay API → твоё приложение → Settings → API Version → выбери Current, "
+        "затем 🔑 API Token → выпусти токен заново (старый при этом перестаёт работать).\n"
+        "  2) Скопируй токен целиком (он длинный, начинается с eyJ…), без кавычек и пробелов.\n"
+        "  3) Токен не должен быть от другого приложения или от тестового бота.\n"
+        "  4) Бот читает токен при запуске: после смены переменной бота нужно перезапустить.",
+        _xr_fingerprint(), "\n  ".join(problems), (testnet_hint + "\n  ") if testnet_hint else "")
 
 
 def _xr_load() -> None:
@@ -2335,6 +2392,10 @@ def _xr_poll_interval(rec: dict) -> int:
 async def xrocket_loop(bot) -> None:
     """Фоновая задача: проверяет неоплаченные счета xRocket и начисляет оплаченные. Запускается из main.py."""
     due_at: dict[str, float] = {}
+    try:
+        await xrocket_selftest()
+    except Exception:
+        log.exception("xRocket: не удалось выполнить самопроверку токена")
     while True:
         try:
             now = time.time()
