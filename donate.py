@@ -33,8 +33,7 @@ take_mine_boost (подключение: см. комментарии у эти�
 счёт xRocket (POST /tg-invoices) и каждые XROCKET_POLL_SEC секунд спрашивает его статус (xrocket_loop,
 веб-сервер для вебхуков не нужен). Счёт хранится в xrocket_pending.json, поэтому после перезапуска бота
 оплата не теряется. Начисление идемпотентно: id счёта «xr:<id>» запоминается в PAID_FIELD.
-Ключ приложения: переменная окружения XROCKET_API_KEY. Подходит и токен нового Pay API (Bearer), и ключ старого
-Legacy API (Rocket-Pay-Key): бот сам определяет, какой API его принял (XROCKET_API_MODE=pay|legacy задаёт вручную).
+Ключ приложения: переменная окружения XROCKET_API_KEY (получить в @xrocket: Rocket Pay, Создать приложение).
 
 Подключение (см. инструкцию в конце ответа): donate.setup(...) и dp.include_router(donate.router).
 
@@ -120,9 +119,7 @@ PACKS: dict[str, tuple[int, int, str]] = {
 # ---------- Оплата через xRocket Pay ----------
 EM_ROCKET = ("5798534328698805312", "🚀")    # xRocket Pay
 XROCKET_API_KEY = os.getenv("XROCKET_API_KEY", "")
-XROCKET_API_URL = os.getenv("XROCKET_API_URL", "https://pay.xrocket.tg").rstrip("/")             # старый (Legacy) API
-XROCKET_PAY_URL = os.getenv("XROCKET_PAY_URL", "https://pay.api.xrocket.exchange").rstrip("/")   # новый Pay API
-XROCKET_API_MODE = os.getenv("XROCKET_API_MODE", "auto").lower()   # auto | pay | legacy
+XROCKET_API_URL = os.getenv("XROCKET_API_URL", "https://pay.xrocket.tg").rstrip("/")
 XROCKET_CURRENCY = "USDT"          # валюта счёта
 USD_CENTS_PER_100 = 130            # курс: 100 кристаллов = 1,30 $ (в центах)
 XROCKET_TTL = 30 * 60              # сколько секунд счёт можно оплатить
@@ -2047,64 +2044,7 @@ _XR_BUSY: set[int] = set()       # игроки, у которых прямо с
 
 
 def _xr_key() -> str:
-    """Токен без лишнего: пробелов, переносов, кавычек и приставки «Bearer » (часто попадают при копировании)."""
-    raw = str(_cfg.get("XROCKET_API_KEY") or XROCKET_API_KEY or "")
-    raw = raw.strip().strip("\"'").strip()
-    if raw.lower().startswith("bearer "):
-        raw = raw[7:]
-    return "".join(raw.split())
-
-
-def _xr_fingerprint() -> str:
-    k = _xr_key()
-    return f"длина {len(k)}, начало {k[:6]}…, конец …{k[-4:]}" if k else "токен не задан"
-
-
-async def xrocket_selftest() -> None:
-    """Проверка токена при запуске бота: пишет в консоль, какой API его принял, или что делать."""
-    global _xr_mode
-    if not _xr_key():
-        log.warning("xRocket: токен не задан (XROCKET_API_KEY), оплата xRocket отключена")
-        return
-    log.info("xRocket: проверяю токен (%s)", _xr_fingerprint())
-    problems = []
-    try:
-        info = await _xr_pay("GET", "/api/v1/app-info")
-        _xr_mode = "pay"
-        log.info("xRocket: токен принят новым Pay API (%s). Оплата xRocket готова.", XROCKET_PAY_URL)
-        log.debug("xRocket app-info: %s", str(info)[:300])
-        return
-    except XRocketAuthError as e:
-        problems.append(f"Pay API: {e}")
-    except Exception as e:
-        problems.append(f"Pay API недоступен: {e}")
-    try:
-        await _xr_legacy("GET", "/app/info")
-        _xr_mode = "legacy"
-        log.info("xRocket: токен принят старым Legacy API. Оплата xRocket готова.")
-        return
-    except XRocketAuthError as e:
-        problems.append(f"Legacy API: {e}")
-    except Exception as e:
-        problems.append(f"Legacy API недоступен: {e}")
-    testnet_hint = ""
-    try:
-        status, _ = await _xr_http("GET", "https://pay.api.testnet.xrocket.exchange/api/v1/app-info",
-                                   {"Authorization": f"Bearer {_xr_key()}"})
-        if status < 300:
-            testnet_hint = ("ТОКЕН ОТ ТЕСТОВОЙ СЕТИ (@xrocket_testnet_bot). Для него задай переменную "
-                            "XROCKET_PAY_URL=https://pay.api.testnet.xrocket.exchange или возьми токен в основном @xrocket.")
-    except Exception:
-        pass
-    log.error(
-        "xRocket: НИ ОДИН API НЕ ПРИНЯЛ ТОКЕН (%s).\n  %s\n  %s"
-        "Что проверить:\n"
-        "  1) @xrocket: Pay API → твоё приложение → Settings → API Version → выбери Current, "
-        "затем 🔑 API Token → выпусти токен заново (старый при этом перестаёт работать).\n"
-        "  2) Скопируй токен целиком (он длинный, начинается с eyJ…), без кавычек и пробелов.\n"
-        "  3) Токен не должен быть от другого приложения или от тестового бота.\n"
-        "  4) Бот читает токен при запуске: после смены переменной бота нужно перезапустить.",
-        _xr_fingerprint(), "\n  ".join(problems), (testnet_hint + "\n  ") if testnet_hint else "")
+    return _cfg.get("XROCKET_API_KEY") or XROCKET_API_KEY
 
 
 def _xr_load() -> None:
@@ -2130,164 +2070,54 @@ def _xr_save() -> None:
 _xr_load()
 
 
-class XRocketAuthError(RuntimeError):
-    """API не принял токен (401/403): скорее всего токен от другой версии API."""
-
-
-_xr_mode: str | None = None      # какой API принял токен: "pay" или "legacy" (определяется при первом счёте)
-
-
-async def _xr_http(method: str, url: str, headers: dict, body: dict | None = None,
-                   params: dict | None = None) -> tuple[int, object]:
+async def _xr_request(method: str, path: str, body: dict | None = None) -> dict:
+    key = _xr_key()
+    if not key:
+        raise RuntimeError("не задан XROCKET_API_KEY")
     timeout = aiohttp.ClientTimeout(total=15)
     async with aiohttp.ClientSession(timeout=timeout) as http:
-        async with http.request(method, url, json=body, params=params, headers=headers) as resp:
+        async with http.request(method, f"{XROCKET_API_URL}{path}", json=body,
+                                headers={"Rocket-Pay-Key": key}) as resp:
             try:
                 data = await resp.json(content_type=None)
             except Exception:
                 data = {}
-            return resp.status, data
-
-
-async def _xr_legacy(method: str, path: str, body: dict | None = None) -> dict:
-    """Старый API: https://pay.xrocket.tg, заголовок Rocket-Pay-Key, ответ {success, data}."""
-    status, data = await _xr_http(method, f"{XROCKET_API_URL}{path}", {"Rocket-Pay-Key": _xr_key()}, body)
-    if status in (401, 403):
-        raise XRocketAuthError(f"xRocket legacy {status}: {str(data)[:200]}")
-    if status >= 400 or not isinstance(data, dict) or not data.get("success", False):
-        raise RuntimeError(f"xRocket legacy {status}: {str(data)[:300]}")
-    return data.get("data") or {}
-
-
-async def _xr_pay(method: str, path: str, body: dict | None = None, params: dict | None = None) -> dict:
-    """Новый Pay API: https://pay.api.xrocket.exchange, заголовок Authorization: Bearer, ответ без обёртки."""
-    status, data = await _xr_http(method, f"{XROCKET_PAY_URL}{path}",
-                                  {"Authorization": f"Bearer {_xr_key()}"}, body, params)
-    if status in (401, 403):
-        raise XRocketAuthError(f"xRocket pay {status}: {str(data)[:200]}")
-    if status >= 400 or not isinstance(data, dict):
-        raise RuntimeError(f"xRocket pay {status}: {str(data)[:300]}")
-    return data.get("data") if isinstance(data.get("data"), dict) else data
-
-
-def _xr_pick_link(d: dict) -> str:
-    """Ссылка на оплату из ответа (имена полей у версий API разные). Предпочитаем ссылку t.me."""
-    found: list[str] = []
-    links = d.get("links")
-    if isinstance(links, dict):
-        found += [v for v in links.values() if isinstance(v, str) and v.startswith("http")]
-    for key in ("link", "url", "webLink", "tgLink", "paymentUrl"):
-        v = d.get(key)
-        if isinstance(v, str) and v.startswith("http"):
-            found.append(v)
-    found.sort(key=lambda u: 0 if "t.me/" in u else 1)
-    return found[0] if found else ""
-
-
-async def _xr_create_api(api: str, uid: int, pack_id: str, cents: int, coins: int, name: str) -> tuple[str, str]:
-    """Создаёт счёт через выбранный API. Возвращает (id счёта, ссылка на оплату)."""
-    if api == "pay":
-        d = await _xr_pay("POST", "/api/v1/invoices", {
-            "priceCurrency": XROCKET_CURRENCY,
-            "priceAmount": f"{cents // 100}.{cents % 100:02d}",
-            "clientInvoiceId": f"{uid}-{pack_id}-{int(time.time())}",
-        })
-    else:
-        d = await _xr_legacy("POST", "/tg-invoices", {
-            "amount": round(cents / 100, 2),
-            "currency": XROCKET_CURRENCY,
-            "numPayments": 1,
-            "description": f"{coins} кристаллов, пакет «{name}»",
-            "hiddenMessage": "Спасибо за поддержку! Кристаллы придут на баланс в игре.",
-            "payload": _payload(KIND_PACK, pack_id, uid),
-            "expiredIn": XROCKET_TTL,
-        })
-    inv = str(d.get("id") or d.get("invoiceId") or "")
-    link = _xr_pick_link(d)
-    if not inv or not link:
-        raise RuntimeError(f"xRocket {api}: в ответе нет id или ссылки: {str(d)[:300]}")
-    return inv, link
+            if resp.status >= 400 or not isinstance(data, dict) or not data.get("success", False):
+                raise RuntimeError(f"xRocket {resp.status}: {str(data)[:300]}")
+            return data
 
 
 async def _xr_create(uid: int, pack_id: str) -> tuple[str, dict]:
-    """Счёт на пакет. Если у игрока уже есть живой счёт на этот пакет, отдаёт его, а не создаёт новый.
-    API определяется автоматически: токен пробуется на новом Pay API, затем на старом."""
-    global _xr_mode
+    """Счёт на пакет. Если у игрока уже есть живой счёт на этот пакет, отдаёт его, а не создаёт новый."""
     now = time.time()
     for inv, rec in _XR.items():
         if rec.get("uid") == uid and rec.get("pack") == pack_id and rec.get("expires", 0) > now + 120:
             return inv, rec
     _stars, coins, name = PACKS[pack_id]
     cents = _cents(coins)
-    if XROCKET_API_MODE in ("pay", "legacy"):
-        order = [XROCKET_API_MODE]
-    else:
-        order = [_xr_mode] if _xr_mode else ["pay", "legacy"]
-    last_auth: Exception | None = None
-    for api in order:
-        try:
-            inv, link = await _xr_create_api(api, uid, pack_id, cents, coins, name)
-        except XRocketAuthError as e:
-            last_auth = e
-            log.warning("xRocket: API %s не принял токен (%s)", api, e)
-            continue
-        _xr_mode = api
-        rec = {"uid": uid, "pack": pack_id, "cents": cents, "link": link, "api": api,
-               "created": int(now), "expires": int(now) + XROCKET_TTL,
-               # Pay API не знает нашего срока: опрашиваем счёт сутки, чтобы поздняя оплата не потерялась
-               "keep_until": int(now) + (86400 if api == "pay" else XROCKET_TTL + 300)}
-        _XR[inv] = rec
-        _xr_save()
-        return inv, rec
-    _xr_mode = None
-    raise last_auth or RuntimeError("xRocket: нет подходящего API")
+    data = await _xr_request("POST", "/tg-invoices", {
+        "amount": round(cents / 100, 2),
+        "currency": XROCKET_CURRENCY,
+        "numPayments": 1,
+        "description": f"{coins} кристаллов, пакет «{name}»",
+        "hiddenMessage": "Спасибо за поддержку! Кристаллы придут на баланс в игре.",
+        "payload": _payload(KIND_PACK, pack_id, uid),
+        "expiredIn": XROCKET_TTL,
+    })
+    d = data.get("data") or {}
+    inv, link = str(d.get("id", "")), d.get("link")
+    if not inv or not link:
+        raise RuntimeError(f"xRocket: в ответе нет id или ссылки: {str(data)[:300]}")
+    rec = {"uid": uid, "pack": pack_id, "cents": cents, "link": link,
+           "created": int(now), "expires": int(now) + XROCKET_TTL}
+    _XR[inv] = rec
+    _xr_save()
+    return inv, rec
 
 
-_xr_warned: dict[str, float] = {}     # когда в последний раз писали в лог про отказ по счёту (чтобы не засорять консоль)
-
-
-def _xr_warn_once(key: str, text: str, every: int = 600) -> None:
-    now = time.time()
-    if now - _xr_warned.get(key, 0) >= every:
-        _xr_warned[key] = now
-        log.warning(text)
-
-
-_PAID_STATUSES = {"paid", "finished", "completed", "success", "succeeded"}
-_DEAD_STATUSES = {"expired", "deleted", "cancelled", "canceled"}
-
-
-async def _xr_status_any(invoice_id: str, rec: dict) -> str:
-    """Статус счёта. Если API, в котором счёт создан, отказал по токену (например, сменили ключ),
-    пробуем второй API и запоминаем, какой ответил."""
-    first = rec.get("api", "legacy")
-    order = [first]
-    if XROCKET_API_MODE == "auto":
-        order += [a for a in ("pay", "legacy") if a != first]
-    last: Exception | None = None
-    for api in order:
-        try:
-            status = await _xr_status(invoice_id, api)
-        except XRocketAuthError as e:
-            last = e
-            continue
-        except RuntimeError as e:
-            if api != first:        # у чужого API такого счёта нет (404), это не ошибка
-                continue
-            raise
-        if api != first:
-            rec["api"] = api
-            _xr_save()
-        return status
-    raise last or RuntimeError("xRocket: нет подходящего API")
-
-
-async def _xr_status(invoice_id: str, api: str = "legacy") -> str:
-    if api == "pay":
-        d = await _xr_pay("GET", "/api/v1/invoice", params={"invoiceId": invoice_id})
-    else:
-        d = await _xr_legacy("GET", f"/tg-invoices/{invoice_id}")
-    return str(d.get("status", "")).lower()
+async def _xr_status(invoice_id: str) -> str:
+    data = await _xr_request("GET", f"/tg-invoices/{invoice_id}")
+    return str((data.get("data") or {}).get("status", "")).lower()
 
 
 async def _xr_credit(bot, invoice_id: str, rec: dict) -> None:
@@ -2356,58 +2186,35 @@ async def _xr_report_uncredited(bot, record: dict, reason: str) -> None:
 
 async def _xr_settle(bot, invoice_id: str) -> str:
     """Спрашивает статус счёта и при оплате начисляет. Возвращает: paid, active, expired, gone, error."""
-    rec = _XR.get(invoice_id)
-    if rec is None:
+    if invoice_id not in _XR:
         return "gone"
     try:
-        status = await _xr_status_any(invoice_id, rec)
-    except XRocketAuthError as e:
-        _xr_warn_once(invoice_id, f"xRocket: токен не подходит для проверки счёта {invoice_id} ({e}). "
-                                  "Счёт создан другим ключом, он истечёт сам.")
-        status = ""
-    except Exception as e:
-        _xr_warn_once(f"err{invoice_id}", f"xRocket: не удалось получить статус счёта {invoice_id}: {e}", every=120)
+        status = await _xr_status(invoice_id)
+    except Exception:
+        log.exception("xRocket: не удалось получить статус счёта %s", invoice_id)
         return "error"
     rec = _XR.get(invoice_id)
     if rec is None:          # пока ждали ответ, счёт уже обработал другой вызов
         return "gone"
-    if status in _PAID_STATUSES:
+    if status == "paid":
         _XR.pop(invoice_id, None)
         _xr_save()
         await _xr_credit(bot, invoice_id, rec)
         return "paid"
-    if status in _DEAD_STATUSES or time.time() > rec.get("keep_until", rec.get("expires", 0) + 300):
+    if status in ("expired", "deleted", "cancelled") or time.time() > rec.get("expires", 0) + 300:
         _XR.pop(invoice_id, None)
         _xr_save()
         return "expired"
     return "active"
 
 
-def _xr_poll_interval(rec: dict) -> int:
-    """Чем старше счёт, тем реже опрос (у Pay API лимит 120 запросов в минуту на метод)."""
-    age = time.time() - rec.get("created", 0)
-    return XROCKET_POLL_SEC if age < 600 else 60 if age < 3600 else 300
-
-
 async def xrocket_loop(bot) -> None:
     """Фоновая задача: проверяет неоплаченные счета xRocket и начисляет оплаченные. Запускается из main.py."""
-    due_at: dict[str, float] = {}
-    try:
-        await xrocket_selftest()
-    except Exception:
-        log.exception("xRocket: не удалось выполнить самопроверку токена")
     while True:
         try:
-            now = time.time()
             for inv in list(_XR):
-                if due_at.get(inv, 0) > now:
-                    continue
                 await _xr_settle(bot, inv)
-                rec = _XR.get(inv)
-                due_at[inv] = time.time() + (_xr_poll_interval(rec) if rec else 0)
-                await asyncio.sleep(0.5)
-            for inv in [k for k in due_at if k not in _XR]:
-                due_at.pop(inv, None)
+                await asyncio.sleep(0.3)
         except asyncio.CancelledError:
             raise
         except Exception:
