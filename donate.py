@@ -2186,8 +2186,43 @@ async def _xr_create(uid: int, pack_id: str) -> tuple[str, dict]:
     raise last_auth or RuntimeError("xRocket: нет подходящего API")
 
 
+_xr_warned: dict[str, float] = {}     # когда в последний раз писали в лог про отказ по счёту (чтобы не засорять консоль)
+
+
+def _xr_warn_once(key: str, text: str, every: int = 600) -> None:
+    now = time.time()
+    if now - _xr_warned.get(key, 0) >= every:
+        _xr_warned[key] = now
+        log.warning(text)
+
+
 _PAID_STATUSES = {"paid", "finished", "completed", "success", "succeeded"}
 _DEAD_STATUSES = {"expired", "deleted", "cancelled", "canceled"}
+
+
+async def _xr_status_any(invoice_id: str, rec: dict) -> str:
+    """Статус счёта. Если API, в котором счёт создан, отказал по токену (например, сменили ключ),
+    пробуем второй API и запоминаем, какой ответил."""
+    first = rec.get("api", "legacy")
+    order = [first]
+    if XROCKET_API_MODE == "auto":
+        order += [a for a in ("pay", "legacy") if a != first]
+    last: Exception | None = None
+    for api in order:
+        try:
+            status = await _xr_status(invoice_id, api)
+        except XRocketAuthError as e:
+            last = e
+            continue
+        except RuntimeError as e:
+            if api != first:        # у чужого API такого счёта нет (404), это не ошибка
+                continue
+            raise
+        if api != first:
+            rec["api"] = api
+            _xr_save()
+        return status
+    raise last or RuntimeError("xRocket: нет подходящего API")
 
 
 async def _xr_status(invoice_id: str, api: str = "legacy") -> str:
@@ -2268,9 +2303,13 @@ async def _xr_settle(bot, invoice_id: str) -> str:
     if rec is None:
         return "gone"
     try:
-        status = await _xr_status(invoice_id, rec.get("api", "legacy"))
-    except Exception:
-        log.exception("xRocket: не удалось получить статус счёта %s", invoice_id)
+        status = await _xr_status_any(invoice_id, rec)
+    except XRocketAuthError as e:
+        _xr_warn_once(invoice_id, f"xRocket: токен не подходит для проверки счёта {invoice_id} ({e}). "
+                                  "Счёт создан другим ключом, он истечёт сам.")
+        status = ""
+    except Exception as e:
+        _xr_warn_once(f"err{invoice_id}", f"xRocket: не удалось получить статус счёта {invoice_id}: {e}", every=120)
         return "error"
     rec = _XR.get(invoice_id)
     if rec is None:          # пока ждали ответ, счёт уже обработал другой вызов
