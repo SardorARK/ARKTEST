@@ -1310,6 +1310,7 @@ equipment.setup(
     get_user=get_user,
     save_users=save_users,
     send_rich_card=send_rich_card,
+    show_rich_card=show_rich_card,             # то же фото: правим сообщение, другое фото: новое
     custom_emoji=custom_emoji,
     INFO_EMOJI=INFO_EMOJI,
     BACK_EMOJI_ID=BACK_EMOJI_ID,
