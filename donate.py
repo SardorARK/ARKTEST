@@ -102,7 +102,7 @@ EM_SAVED = ("5244837092042750681", "📈")     # накоплено
 EM_STATUS = ("5422439311196834318", "💡")    # статус / результат
 EM_OPENED = ("5203996991054432397", "🎁")    # заголовок «кейс открыт»
 
-EM_SKIN = ("5442656319259587462", "🅰️")      # кнопка и текст «Облики на имя»
+EM_SKIN = ("5445224310270633584", "🔤")      # кнопка и текст «Скины ника»
 IMG_KEY = "donate"           # ключ картинки раздела (если добавишь в IMG_TARGETS)
 CASES_KEY = IMG_KEY          # одно общее фото на весь раздел: все экраны используют IMG_KEY
 CASE_RESULT_KEY = IMG_KEY
@@ -677,7 +677,7 @@ def home_kb() -> InlineKeyboardMarkup:
         [_btn("Привилегии", "donate:priv", ButtonStyle.PRIMARY, EM_PRIV[0]), _btn("Кейсы", "donate:cases", ButtonStyle.PRIMARY, "5285009510300150278")],
         [_btn("Временные бусты", "donate:boosts", ButtonStyle.SUCCESS, "5438571934210082705")],
         [_btn("🎒 Инвентарь", "donate:inv", ButtonStyle.PRIMARY)],
-        [_btn("Облики на имя", "donate:skins", ButtonStyle.SUCCESS, EM_SKIN[0])],
+        [_btn("Скины ника", "donate:skins", ButtonStyle.SUCCESS, EM_SKIN[0])],
         _back_btn("menu:back"),
     ])
 
@@ -735,7 +735,7 @@ def home_html(user_id: int, with_image: bool = False) -> str:
              f"{_ce(EM_PRIV)} <b>Привилегии</b>: {_tier_ce('vip')} VIP и {_tier_ce('premium')} Premium",
              "<b>Кейсы</b>: артефакты Эпик, Миф и Лега за кристаллы",
              "<b>Временные бусты</b>: эликсиры на несколько часов за кристаллы",
-             f"{_ce(EM_SKIN)} <b>Облики на имя</b>: наборы эмодзи для никнейма, набор меняется раз в 24 часа",
+             f"{_ce(EM_SKIN)} <b>Скины ника</b>: эмодзи вместо букв в имени",
              f"🎒 <b>Инвентарь</b>: купленные эликсиры (до {INV_LIMIT} каждого вида), сейчас: "
              f"<b>{inv_total(user)}</b>"],
         )
@@ -1086,10 +1086,10 @@ async def on_soon(callback: CallbackQuery):
     await callback.answer(f"{name}: скоро появится.", show_alert=True)
 
 
-# ---------- Облики на имя ----------
+# ---------- Скины ника ----------
 # Донатные скины никнейма лежат в settings.SKINS (поле "shop": price и limit). В продаже всегда один
 # набор, он выбирается случайно и меняется каждые SKIN_ROTATION_SEC секунд. Лимит (limit) общий:
-# столько штук можно купить у всех игроков за одно появление набора. Купленный облик остаётся
+# столько штук можно купить у всех игроков за одно появление набора. Купленный скин остаётся
 # у игрока навсегда (settings.SKINS_FIELD), один и тот же набор второй раз купить нельзя.
 
 SKIN_ROTATION_SEC = 24 * 3600
@@ -1141,7 +1141,7 @@ def skin_offer() -> dict | None:
         st.update({"set": random.choice(list(catalog)), "started": int(now),
                    "ends": int(now) + SKIN_ROTATION_SEC, "sold": 0})
         _skin_save()
-        log.info("в продаже набор обликов %s", st["set"])
+        log.info("в продаже набор скинов %s", st["set"])
     return st
 
 
@@ -1160,42 +1160,34 @@ def skins_html(user_id: int, with_image: bool = False) -> str:
     st = _skins_mod()
     crystal = _ce(EM_CRYSTAL)
     head = (f"{_image(with_image)}"
-            f"<p><b>{_ce(EM_SKIN)} ОБЛИКИ НА ИМЯ</b></p>"
-            "<blockquote><i>Облик показывает буквы и цифры твоего никнейма эмодзи. "
-            "В продаже один набор, он меняется случайно раз в 24 часа. Купленный облик остаётся "
-            "у тебя навсегда, выбрать его можно в Настройки → Никнейм → Скин.</i></blockquote>"
+            f"<p><b>{_ce(EM_SKIN)} СКИНЫ НИКА</b></p>"
+            "<blockquote><i>Эмодзи вместо букв в твоём нике. Скин остаётся навсегда. "
+            "Набор в продаже меняется раз в 24 часа.</i></blockquote>"
             f"{_balance_line(user)}")
     offer = skin_offer()
     if offer is None:
-        return head + _tree("Сейчас в продаже", ["Пока ничего нет"])
+        return head + _tree("В продаже", ["Пока ничего нет"])
     key = offer["set"]
     meta = st.SKINS[key]
     price = int(meta["shop"]["price"])
     limit = int(meta["shop"]["limit"])
     left = _skin_left(offer)
-    owned = st.owns_skin(user, key)
-    sample = (user or {}).get("nick_plain") if st.has_nick(user or {}) else None
-    sample = (sample or "Kerry2026")[:st.NICK_MAX]
+    sample = ((user or {}).get("nick_plain") if st.has_nick(user or {}) else None) or "Kerry2026"
     rows = [f"Набор: <b>{escape(meta['name'])}</b>",
             f"Цена: {crystal} <b>{_fmt(price)}</b>",
-            f"В наличии: <b>{left} из {limit}</b>",
-            f"Набор сменится через: <b>{_left(int(offer['ends']))}</b>"]
-    mine = [escape(st.SKINS[k]["name"]) for k in st.owned_skins(user) if st.SKINS[k].get("shop")]
-    out = (head + _tree("Сейчас в продаже", rows)
-           + _GAP + f"<p><b>Как выглядят буквы</b><br>{_skin_alphabet(key)}</p>"
-           + _GAP + f"<p><b>Твоё имя в этом облике</b><br>{st.apply_skin(sample, key)}</p>")
-    if mine:
-        out += _GAP + _tree("Твои облики", mine)
-    if owned:
-        return out + _GAP + _tree("Статус", ["Этот облик у тебя уже есть"])
+            f"Осталось: <b>{left} из {limit}</b>",
+            f"Смена через: <b>{_left(int(offer['ends']))}</b>"]
+    out = (head + _tree("В продаже", rows)
+           + _GAP + f"<p><b>Твой ник:</b> {st.apply_skin(sample[:st.NICK_MAX], key)}</p>")
+    if st.owns_skin(user, key):
+        return out + "<p><b>Этот скин уже у тебя.</b></p>"
     if left <= 0:
-        return out + _GAP + _tree("Статус", ["Набор раскупили. Следующий появится после смены"])
+        return out + "<p><b>Набор раскупили. Жди смены.</b></p>"
     have = get_balance(user)
-    tail = ""
+    lack = ""
     if have < price:
-        tail = _GAP + _tree("Кристаллы", [f"{crystal} У тебя: <b>{_fmt(have)}</b>",
-                                          f"{_ce(EM_STATUS)} Не хватает: <b>{_fmt(price - have)} {_plural(price - have)}</b>"])
-    return (out + tail + _GAP
+        lack = f"<p>{_ce(EM_STATUS)} Не хватает: <b>{_fmt(price - have)} {_plural(price - have)}</b></p>"
+    return (out + lack + _GAP
             + _rrows([_rbtn(f"{_ce(EM_BUY)} Купить за {crystal} {_fmt(price)}",
                             f"donate:skbuy:{key}", "success" if have >= price else "danger")]))
 
@@ -1204,7 +1196,7 @@ def skins_kb(user_id: int) -> InlineKeyboardMarkup:
     rows = []
     user = _cfg["get_user"](user_id)
     if any(_skins_mod().SKINS[k].get("shop") for k in _skins_mod().owned_skins(user)):
-        rows.append([_btn("Выбрать облик", "set:skin", ButtonStyle.SUCCESS, EM_SKIN[0])])
+        rows.append([_btn("Выбрать скин", "set:skin", ButtonStyle.SUCCESS, EM_SKIN[0])])
     rows.append(_back_btn("donate:home"))
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -1212,14 +1204,11 @@ def skins_kb(user_id: int) -> InlineKeyboardMarkup:
 def skin_done_html(user_id: int, key: str) -> str:
     user = _cfg["get_user"](user_id)
     st = _skins_mod()
-    crystal = _ce(EM_CRYSTAL)
-    rows = [f"Набор: <b>{escape(st.SKINS[key]['name'])}</b>",
-            f"{crystal} Осталось кристаллов: <b>{_fmt(get_balance(user))}</b>"]
     return (
-        f"<p><b>{_ce(EM_SKIN)} ОБЛИК ТВОЙ</b></p>"
-        "<blockquote><i>Спасибо за поддержку игры! Облик теперь всегда с тобой: "
-        "включи его в Настройки → Никнейм → Скин.</i></blockquote>"
-        + _tree("Итог", rows)
+        f"<p><b>{_ce(EM_SKIN)} СКИН КУПЛЕН</b></p>"
+        f"<blockquote><i>«{escape(st.SKINS[key]['name'])}» теперь твой. "
+        "Включи его кнопкой ниже.</i></blockquote>"
+        f"<p>{_ce(EM_CRYSTAL)} Осталось: <b>{_fmt(get_balance(user))}</b></p>"
     )
 
 
@@ -1234,7 +1223,7 @@ async def on_skins(callback: CallbackQuery):
 
 @router.callback_query(F.data.regexp(r"^donate:skbuy:\w+$"))
 async def on_skin_buy(callback: CallbackQuery):
-    """Покупка облика. Проверка, списание и выдача идут без await между ними."""
+    """Покупка скина. Проверка, списание и выдача идут без await между ними."""
     user = await _require_user(callback)
     if user is None:
         return
@@ -1243,14 +1232,14 @@ async def on_skin_buy(callback: CallbackQuery):
     st = _skins_mod()
     offer = skin_offer()
     if offer is None or key not in _skin_catalog():
-        await callback.answer("Такого облика нет.", show_alert=True)
+        await callback.answer("Такого скина нет.", show_alert=True)
         return
     if offer["set"] != key:
         await callback.answer("Этот набор уже убрали из продажи.", show_alert=True)
         await _cfg["show_rich_card"](callback, IMG_KEY, lambda wi: skins_html(uid, wi), skins_kb(uid))
         return
     if st.owns_skin(user, key):
-        await callback.answer("Этот облик у тебя уже есть.", show_alert=True)
+        await callback.answer("Этот скин у тебя уже есть.", show_alert=True)
         return
     if _skin_left(offer) <= 0:
         await callback.answer("Набор раскупили. Следующий появится после смены.", show_alert=True)
@@ -1277,8 +1266,8 @@ async def on_skin_buy(callback: CallbackQuery):
         user.clear()
         user.update(snapshot)
         offer["sold"] = sold_before
-        log.exception("покупка облика %s у игрока %s не удалась, состояние восстановлено", key, uid)
-        await callback.answer("Не удалось купить облик. Кристаллы не потрачены.", show_alert=True)
+        log.exception("покупка скина %s у игрока %s не удалась, состояние восстановлено", key, uid)
+        await callback.answer("Не удалось купить скин. Кристаллы не потрачены.", show_alert=True)
         return
     _skin_save()
     _cfg["save_users"]()
@@ -1289,7 +1278,7 @@ async def on_skin_buy(callback: CallbackQuery):
     await _cfg["show_rich_card"](
         callback, IMG_KEY, lambda wi: skin_done_html(uid, key),
         InlineKeyboardMarkup(inline_keyboard=[
-            [_btn("Выбрать облик", "set:skin", ButtonStyle.SUCCESS, EM_SKIN[0])],
+            [_btn("Выбрать скин", "set:skin", ButtonStyle.SUCCESS, EM_SKIN[0])],
             _back_btn("donate:skins"),
         ]),
     )
