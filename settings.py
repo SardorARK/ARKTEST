@@ -82,6 +82,7 @@ IMG_TARGETS: dict[str, str] = {
 NICK_MIN = 2                     # минимум видимых символов
 NICK_MAX = 24                    # максимум видимых символов
 NICK_COOLDOWN = 300              # пауза между сменами никнейма, секунд
+NICK_PATTERN = re.compile(r"[A-Za-z0-9]+")   # в никнейме только английские буквы и цифры
 BANNED_PARTS: tuple[str, ...] = ()   # запрещённые слова (в нижнем регистре), например ("admin",)
 RESERVED_BUTTONS = ("Меню", "Арена", "Рынок", "Настройки")   # кнопки нижней клавиатуры
 
@@ -342,6 +343,9 @@ def _check_text(message: Message) -> tuple[str | None, str | None, str | None]:
         return None, None, "Имя должно быть в одну строку."
     if text.startswith("/"):
         return None, None, "Имя не может начинаться с «/»."
+    if not NICK_PATTERN.fullmatch(text):
+        return None, None, ("В имени можно использовать только английские буквы и цифры, "
+                            "без русских букв, пробелов, эмодзи и символов.")
     if any(e.type in FORBIDDEN_ENTITIES for e in entities):
         return None, None, "В имени нельзя использовать ссылки, упоминания и хэштеги."
     if re.search(r"(https?://|t\.me/|www\.|@\w)", text, re.I):
@@ -571,16 +575,14 @@ def nick_html_screen(user: dict, with_image: bool = False, note: str = "") -> st
     left = max(0, int(user.get("nick_at", 0) + NICK_COOLDOWN - time.time()))
     rules = [
         ("Длина", f"от {NICK_MIN} до {NICK_MAX} символов"),
-        ("Форматирование", "жирный, курсив, подчёркнутый, зачёркнутый, моноширинный"),
-        ("Эмодзи", "обычные и кастомные"),
-        ("Нельзя", "ссылки, упоминания, переносы строк"),
+        ("Можно", "только английские буквы (A-Z, a-z) и цифры (0-9)"),
+        ("Нельзя", "русские буквы, пробелы, эмодзи, символы, ссылки, упоминания"),
     ]
     return (
         f"{_image(with_image)}"
         f"<p><b>{_em(EM_NICK)} НИКНЕЙМ</b></p>"
         "<blockquote><i>Это имя будет показано везде в боте: в меню, профиле и разделах. "
-        "Выдели часть текста и сделай её жирной или вставь кастомный эмодзи, "
-        "и всё сохранится как есть.</i></blockquote>"
+        "Используй только английские буквы и цифры.</i></blockquote>"
         + _tree([("Сейчас", name_html(user))], "Твоё имя")
         + _gap()
         + _tree(rules, "Правила")
