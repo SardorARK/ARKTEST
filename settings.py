@@ -287,6 +287,7 @@ SKINS: dict[str, dict] = {
     "set1": {"name": "Набор 1", "map": SET1_LETTERS, "shop": {"price": 29, "limit": 5}},
     "set2": {"name": "Набор 2", "map": SET2_LETTERS, "shop": {"price": 39, "limit": 10}},
 }
+EM_SKINS_BTN = "5445224310270633584"   # значок кнопки «Скины» в разделе «Никнейм»
 SKINS_FIELD = "nick_skins"       # в профиле: список купленных донатных скинов
 
 
@@ -690,7 +691,7 @@ def nick_html_screen(user: dict, with_image: bool = False, note: str = "") -> st
         ("Длина", f"от {NICK_MIN} до {NICK_MAX} символов"),
         ("Можно", "только английские буквы (A-Z, a-z) и цифры (0-9)"),
         ("Нельзя", "русские буквы, пробелы, эмодзи, символы, ссылки, упоминания"),
-        ("Скин", "кнопка «Скин»: имя из эмодзи-букв"),
+        ("Скины", "кнопка «Скины»: имя из эмодзи-букв"),
     ]
     return (
         f"{_image(with_image)}"
@@ -712,42 +713,52 @@ def _p(text: str) -> str:
 
 
 def nick_kb(user: dict) -> InlineKeyboardMarkup:
-    rows = [[_ibtn("Скин", "set:skin", EMOJI_LETTERS["A"])]]
+    rows = [[InlineKeyboardButton(text="Скины", callback_data="set:skin", style=ButtonStyle.SUCCESS,
+                                  icon_custom_emoji_id=EM_SKINS_BTN)]]
     if has_nick(user):
         rows.append([_btn("Сбросить к имени Telegram", "set:nick_reset", ButtonStyle.DANGER)])
     rows.append([_back("set:main")])
     return _kb(*rows)
 
 
+def _rbtn(label_html: str, data: str, style: str) -> str:
+    """Кнопка прямо в теле сообщения (callback)."""
+    return (f'<tg-button type="callback_data" data="{escape(data, quote=True)}" style="{style}">'
+            f"{label_html}</tg-button>")
+
+
 def skin_html(user: dict, with_image: bool = False) -> str:
     cur = skin_of(user)
-    sample = has_nick(user) and (user.get("nick_plain") or "") or "Kerry2026"
+    sample = (has_nick(user) and (user.get("nick_plain") or "")) or "Kerry2026"
+    sample = sample[:NICK_MAX]
     mine = owned_skins(user)
-    rows = [(SKINS[k]["name"], "выбран" if k == cur else "") for k in mine]
+    names = [(SKINS[k]["name"], "выбран" if k == cur else "") for k in mine]
+    buttons = "".join(
+        "<tg-button-row>"
+        + _rbtn(apply_skin(sample, k), f"set:skin:{k}", "success" if k == cur else "primary")
+        + "</tg-button-row>"
+        for k in mine
+    )
     return (
         f"{_image(with_image)}"
-        f"<p><b>{_em(EM_NICK)} СКИН НИКНЕЙМА</b></p>"
+        f"<p><b>{_em(EM_NICK)} СКИНЫ НИКНЕЙМА</b></p>"
         "<blockquote><i>Скин меняет вид имени: буквы и цифры никнейма "
         "показываются эмодзи. Работает на английских буквах и цифрах.</i></blockquote>"
         + _tree([("Сейчас", name_html(user) if has_nick(user) else escape(default_name(user)))],
                 "Твоё имя")
         + _gap()
-        + _tree([(SKINS[k]["name"], apply_skin(sample[:NICK_MAX], k)) for k in mine],
-                "Как выглядит")
+        + _tree(names, "Скины (сверху вниз, как кнопки)")
+        + _p("<b>Нажми на кнопку с нужным видом имени.</b><br>"
+             "<i>Выбранный скин горит зелёным. Новые облики появляются в разделе "
+             "«Донат → Облики на имя».</i>")
         + _gap()
-        + _tree(rows, "Скины")
-        + _p("<b>Выбери скин кнопкой ниже.</b><br>"
-             "<i>Новые облики появляются в разделе «Донат → Облики на имя».</i>")
+        + buttons
     )
 
 
 def skin_kb(user: dict) -> InlineKeyboardMarkup:
-    cur = skin_of(user)
-    rows = [[_btn(SKINS[k]["name"], f"set:skin:{k}",
-                  ButtonStyle.SUCCESS if k == cur else ButtonStyle.PRIMARY)]
-            for k in owned_skins(user)]
-    rows.append([_back("set:nick")])
-    return _kb(*rows)
+    """Скины лежат кнопками в самом сообщении, внизу только «Назад»."""
+    return _kb([_back("set:nick")])
 
 
 def notif_html(user: dict, with_image: bool = False) -> str:
