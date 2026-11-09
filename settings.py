@@ -516,7 +516,7 @@ def name_html(user: dict | None) -> str:
     if not user:
         return "Игрок"
     nick = user.get("nick")
-    if nick and _valid_html(nick):
+    if nick and not _is_legacy_nick(user) and _valid_html(nick):
         skin = skin_of(user)
         plain = user.get("nick_plain")
         if skin != DEFAULT_SKIN and isinstance(plain, str) and plain:
@@ -530,13 +530,13 @@ def name_plain(user: dict | None) -> str:
     if not user:
         return "Игрок"
     plain = user.get("nick_plain")
-    if plain and isinstance(plain, str) and user.get("nick"):
+    if plain and isinstance(plain, str) and user.get("nick") and not _is_legacy_nick(user):
         return plain[:60]
     return default_name(user)
 
 
 def has_nick(user: dict) -> bool:
-    return bool(user.get("nick")) and _valid_html(user.get("nick"))
+    return bool(user.get("nick")) and not _is_legacy_nick(user) and _valid_html(user.get("nick"))
 
 
 def is_hidden(user: dict | None) -> bool:
@@ -616,6 +616,38 @@ def reset_nick(user: dict) -> str | None:
     for key in ("nick", "nick_plain", "nick_at"):
         user.pop(key, None)
     return old
+
+
+def _is_legacy_nick(user: dict | None) -> bool:
+    """Старый ник с премиум (кастомными) эмодзи: в новой системе ники только обычным текстом."""
+    nick = (user or {}).get("nick")
+    return isinstance(nick, str) and "<tg-emoji" in nick
+
+
+def migrate_legacy_nicks(users) -> int:
+    """Сбрасывает ники с премиум-эмодзи (новая система скинов). Возвращает, сколько сброшено.
+    Вызывается из main.py после setup(). Безопасна при повторном запуске."""
+    count = 0
+    try:
+        items = list(users.items())
+    except Exception:                      # хранилище без items(): идём по ключам
+        try:
+            items = [(k, users.get(k)) for k in list(users.keys())]
+        except Exception:
+            log.exception("migrate_legacy_nicks: не удалось перебрать игроков")
+            return 0
+    for uid, user in items:
+        if isinstance(user, dict) and _is_legacy_nick(user):
+            reset_nick(user)
+            count += 1
+    if count:
+        try:
+            if _save_users:
+                _save_users()
+        except Exception:
+            log.exception("migrate_legacy_nicks: не удалось сохранить")
+        log.info("migrate_legacy_nicks: сброшено ников с премиум-эмодзи: %d", count)
+    return count
 
 
 def _nest_entities(entities: list) -> list:
