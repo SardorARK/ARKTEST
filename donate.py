@@ -35,6 +35,12 @@ take_mine_boost (подключение: см. комментарии у эти�
 оплата не теряется. Начисление идемпотентно: id счёта «xr:<id>» запоминается в PAID_FIELD.
 Ключ приложения: переменная окружения XROCKET_API_KEY (получить в @xrocket: Rocket Pay, Создать приложение).
 
+Оплата через CryptoBot (@send / @CryptoBot): третий способ, устроен так же, как xRocket. Счёт создаётся через
+Crypto Pay API (createInvoice), статус проверяется раз в CRYPTOBOT_POLL_SEC секунд (cryptobot_loop), счета лежат
+в cryptobot_pending.json. Начисление идемпотентно: id «cb:<id>» запоминается в PAID_FIELD. Курс тот же, что у xRocket.
+Токен приложения: переменная окружения CRYPTOBOT_API_KEY (@CryptoBot: Crypto Pay, Create App, API Token).
+Для тестовой сети: CRYPTOBOT_API_URL=https://testnet-pay.crypt.bot/api
+
 Подключение (см. инструкцию в конце ответа): donate.setup(...) и dp.include_router(donate.router).
 
 Для будущих разделов (кейсы, бусты, привилегии) есть готовые функции работы с балансом:
@@ -125,6 +131,15 @@ USD_CENTS_PER_100 = 130            # курс: 100 кристаллов = 1,30 $
 XROCKET_TTL = 30 * 60              # сколько секунд счёт можно оплатить
 XROCKET_POLL_SEC = 8               # как часто бот спрашивает статус неоплаченных счетов
 XROCKET_FILE = Path(__file__).with_name("xrocket_pending.json")
+
+# ---------- Оплата через CryptoBot (@send / @CryptoBot, Crypto Pay API) ----------
+EM_CRYPTO = ("5798650400189980129", "💵")    # CryptoBot
+CRYPTOBOT_API_KEY = os.getenv("CRYPTOBOT_API_KEY", "")
+CRYPTOBOT_API_URL = os.getenv("CRYPTOBOT_API_URL", "https://pay.crypt.bot/api").rstrip("/")
+CRYPTOBOT_ASSET = "USDT"           # валюта счёта
+CRYPTOBOT_TTL = 30 * 60            # сколько секунд счёт можно оплатить
+CRYPTOBOT_POLL_SEC = 8             # как часто бот спрашивает статус неоплаченных счетов
+CRYPTOBOT_FILE = Path(__file__).with_name("cryptobot_pending.json")
 
 # Привилегии. Действуют PRIVILEGE_DAYS дней с момента оплаты; повторная покупка продлевает срок.
 # Бонусы разных привилегий не складываются: действует сильнейшая из активных (Premium выше VIP).
@@ -675,6 +690,7 @@ def pack_kb(pack_id: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [_btn("Telegram Stars", f"donate:stars:{pack_id}", ButtonStyle.SUCCESS, EM_STAR[0])],
         [_btn("xRocket Pay", f"donate:rocket:{pack_id}", ButtonStyle.PRIMARY, EM_ROCKET[0])],
+        [_btn("CryptoBot", f"donate:crypto:{pack_id}", ButtonStyle.PRIMARY, EM_CRYPTO[0])],
         _back_btn("donate:shop"),
     ])
 
@@ -707,7 +723,7 @@ def home_html(user_id: int, with_image: bool = False) -> str:
         f"{_balance_line(user)}"
         + _tree(
             f"{_ce(EM_STAR)} Разделы",
-            ["<b>Магазин кристаллов</b>: пополнение за Telegram Stars или xRocket Pay",
+            ["<b>Магазин кристаллов</b>: пополнение за Telegram Stars, xRocket Pay или CryptoBot",
              f"{_ce(EM_PRIV)} <b>Привилегии</b>: {_tier_ce('vip')} VIP и {_tier_ce('premium')} Premium",
              "<b>Кейсы</b>: артефакты Эпик, Миф и Лега за кристаллы",
              "<b>Временные бусты</b>: эликсиры на несколько часов за кристаллы",
@@ -722,7 +738,7 @@ def shop_html(user_id: int, with_image: bool = False) -> str:
     image = '<img src="tg://photo?id=pet"/>' if with_image else ""
     packs = _tree(
         f"{_ce(EM_STAR)} Пакеты (1 {_ce(EM_STAR)} = 1 {_ce(EM_CRYSTAL)}, 100 {_ce(EM_CRYSTAL)} = {_usd(USD_CENTS_PER_100)})",
-        [f"{_ce(EM_STAR)} <b>{_fmt(stars)}</b> / {_ce(EM_ROCKET)} <b>{_usd(_cents(coins))}</b> → {_ce(EM_CRYSTAL)} {_fmt(coins)} {_plural(coins)}"
+        [f"{_ce(EM_STAR)} <b>{_fmt(stars)}</b> / {_ce(EM_ROCKET)}{_ce(EM_CRYPTO)} <b>{_usd(_cents(coins))}</b> → {_ce(EM_CRYSTAL)} {_fmt(coins)} {_plural(coins)}"
          for stars, coins, _name in PACKS.values()],
     )
     return (
@@ -737,6 +753,7 @@ def shop_html(user_id: int, with_image: bool = False) -> str:
         + _rrows([
             _rbtn(f"{_ce(EM_STAR)} Telegram Stars", "donate:shop:stars", "success"),
             _rbtn(f"{_ce(EM_ROCKET)} xRocket Pay", "donate:shop:rocket", "primary"),
+            _rbtn(f"{_ce(EM_CRYPTO)} CryptoBot", "donate:shop:crypto", "primary"),
         ], per_row=2)
     )
 
@@ -752,12 +769,19 @@ def method_html(user_id: int, method: str, links: dict[str, str] | None = None,
         if method == "stars":
             label = f"{_ce(EM_CRYSTAL)} {_fmt(coins)} · {_ce(EM_STAR)} {_fmt(stars)}"
             buttons.append(_ubtn(label, (links or {})[pack_id], "success"))
+        elif method == "crypto":
+            label = f"{_ce(EM_CRYSTAL)} {_fmt(coins)} · {_ce(EM_CRYPTO)} {_usd(_cents(coins))}"
+            buttons.append(_rbtn(label, f"donate:crypto:{pack_id}", "primary"))
         else:
             label = f"{_ce(EM_CRYSTAL)} {_fmt(coins)} · {_ce(EM_ROCKET)} {_usd(_cents(coins))}"
             buttons.append(_rbtn(label, f"donate:rocket:{pack_id}", "primary"))
     if method == "stars":
         title = f"{_ce(EM_STAR)} ОПЛАТА TELEGRAM STARS"
         hint = "Нажми на пакет, подтверди оплату в окне Telegram, и кристаллы сразу придут на баланс."
+    elif method == "crypto":
+        title = f"{_ce(EM_CRYPTO)} ОПЛАТА CRYPTOBOT"
+        hint = (f"Нажми на пакет, и появится счёт в {CRYPTOBOT_ASSET}. Оплати его в @send (@CryptoBot), "
+                f"кристаллы придут сами. Курс: 100 {_ce(EM_CRYSTAL)} = {_usd(USD_CENTS_PER_100)}.")
     else:
         title = f"{_ce(EM_ROCKET)} ОПЛАТА XROCKET PAY"
         hint = (f"Нажми на пакет, и появится счёт в {XROCKET_CURRENCY}. Оплати его в @xrocket, "
@@ -794,13 +818,14 @@ def pack_html(user_id: int, pack_id: str, with_image: bool = False) -> str:
         + _tree(
             f"{_ce(EM_PACK)} Состав пакета",
             [f"Кристаллы: {_ce(EM_CRYSTAL)} <b>{_fmt(coins)}</b>",
-             f"Цена: {_ce(EM_STAR)} <b>{_fmt(stars)}</b> или {_ce(EM_ROCKET)} <b>{_usd(_cents(coins))}</b>",
+             f"Цена: {_ce(EM_STAR)} <b>{_fmt(stars)}</b> или {_ce(EM_ROCKET)}{_ce(EM_CRYPTO)} <b>{_usd(_cents(coins))}</b>",
              f"Баланс после покупки: {_ce(EM_CRYSTAL)} <b>{_fmt(get_balance(user) + coins)}</b>"],
         )
         + _GAP
         + "<p><b>Выбери способ оплаты</b></p>"
         f"<p>{_ce(EM_STAR)} <b>Telegram Stars</b>: оплата звёздами прямо в Telegram<br>"
-        f"{_ce(EM_ROCKET)} <b>xRocket Pay</b>: оплата криптовалютой ({XROCKET_CURRENCY})</p>"
+        f"{_ce(EM_ROCKET)} <b>xRocket Pay</b>: оплата криптовалютой ({XROCKET_CURRENCY})<br>"
+        f"{_ce(EM_CRYPTO)} <b>CryptoBot</b>: оплата криптовалютой ({CRYPTOBOT_ASSET}) в @send</p>"
     )
 
 
@@ -855,6 +880,35 @@ def rocket_html(user_id: int, pack_id: str, invoice_id: str, rec: dict, with_ima
         f"{_ce(EM_ROCKET)} Оплатить {_usd(rec['cents'])}</tg-button>"
         "</tg-button-row>"
         + _rrows([_rbtn("Проверить оплату", f"donate:rchk:{invoice_id}", "primary")])
+    )
+
+
+def crypto_html(user_id: int, pack_id: str, invoice_id: str, rec: dict, with_image: bool = False) -> str:
+    """Оплата CryptoBot: сумма, срок счёта, кнопки «Оплатить» и «Проверить оплату» в теле сообщения."""
+    user = _cfg["get_user"](user_id)
+    _stars, coins, name = PACKS[pack_id]
+    image = '<img src="tg://photo?id=pet"/>' if with_image else ""
+    mins = max(1, int((rec["expires"] - time.time()) // 60))
+    return (
+        f"{image}"
+        f"<p><b>{_ce(EM_CRYPTO)} ОПЛАТА CRYPTOBOT</b></p>"
+        f"<blockquote><i>Пакет «{escape(name)}»: {_fmt(coins)} {_plural(coins)}. "
+        "Нажми «Оплатить», заплати в @send (@CryptoBot), а затем вернись сюда. "
+        "Кристаллы придут сами, кнопка проверки нужна, если хочешь не ждать.</i></blockquote>"
+        + _GAP
+        + _tree(
+            f"{_ce(EM_PACK)} Счёт",
+            [f"К оплате: {_ce(EM_CRYPTO)} <b>{_usd(rec['cents'])}</b> ({CRYPTOBOT_ASSET})",
+             f"Кристаллы: {_ce(EM_CRYSTAL)} <b>{_fmt(coins)}</b>",
+             f"Баланс после покупки: {_ce(EM_CRYSTAL)} <b>{_fmt(get_balance(user) + coins)}</b>",
+             f"Счёт действует ещё: <b>{mins} мин.</b>"],
+        )
+        + _GAP
+        + "<tg-button-row>"
+        f'<tg-button type="url" url="{escape(rec["link"], quote=True)}" style="success">'
+        f"{_ce(EM_CRYPTO)} Оплатить {_usd(rec['cents'])}</tg-button>"
+        "</tg-button-row>"
+        + _rrows([_rbtn("Проверить оплату", f"donate:cchk:{invoice_id}", "primary")])
     )
 
 
@@ -1991,7 +2045,7 @@ async def on_pack(callback: CallbackQuery):
     )
 
 
-@router.callback_query(F.data.in_({"donate:shop:stars", "donate:shop:rocket"}))
+@router.callback_query(F.data.in_({"donate:shop:stars", "donate:shop:rocket", "donate:shop:crypto"}))
 async def on_shop_method(callback: CallbackQuery):
     """Выбран способ оплаты: показываем пакеты кнопками в сообщении (у Stars это сразу счета)."""
     uid = callback.from_user.id
@@ -2010,6 +2064,11 @@ async def on_shop_method(callback: CallbackQuery):
             await callback.answer("Не удалось создать счета. Попробуй чуть позже.", show_alert=True)
             return
         links = dict(zip(PACKS, urls))
+    elif method == "crypto":
+        if not _cb_key():
+            await callback.answer("Оплата через CryptoBot пока не подключена. Выбери Telegram Stars.",
+                                  show_alert=True)
+            return
     elif not _xr_key():
         await callback.answer("Оплата через xRocket Pay пока не подключена. Выбери Telegram Stars.",
                               show_alert=True)
@@ -2273,6 +2332,258 @@ async def on_rocket_check(callback: CallbackQuery):
         await callback.answer("Оплата получена, кристаллы начислены!", show_alert=True)
     elif res == "active":
         await callback.answer("Оплата ещё не поступила. Оплати счёт в @xrocket и нажми снова.", show_alert=True)
+    elif res == "expired":
+        await callback.answer("Счёт истёк. Создай новый в магазине.", show_alert=True)
+    elif res == "gone":
+        await callback.answer("Этот счёт уже обработан. Загляни в баланс.", show_alert=True)
+    else:
+        await callback.answer("Не удалось проверить оплату. Попробуй чуть позже.", show_alert=True)
+
+
+# ---------- Оплата CryptoBot (@send / @CryptoBot, Crypto Pay API) ----------
+
+_CB: dict[str, dict] = {}        # неоплаченные счета: id счёта -> {uid, pack, cents, link, created, expires}
+_CB_BUSY: set[int] = set()       # игроки, у которых прямо сейчас создаётся счёт (защита от двойного клика)
+
+
+def _cb_key() -> str:
+    return _cfg.get("CRYPTOBOT_API_KEY") or CRYPTOBOT_API_KEY
+
+
+def _cb_load() -> None:
+    try:
+        data = json.loads(CRYPTOBOT_FILE.read_text(encoding="utf-8"))
+        if isinstance(data, dict):
+            _CB.update({str(k): v for k, v in data.items() if isinstance(v, dict)})
+    except FileNotFoundError:
+        pass
+    except (OSError, ValueError):
+        log.exception("не удалось прочитать %s", CRYPTOBOT_FILE)
+
+
+def _cb_save() -> None:
+    try:
+        tmp = CRYPTOBOT_FILE.with_suffix(".tmp")
+        tmp.write_text(json.dumps(_CB, ensure_ascii=False), encoding="utf-8")
+        os.replace(tmp, CRYPTOBOT_FILE)
+    except OSError:
+        log.exception("не удалось записать %s", CRYPTOBOT_FILE)
+
+
+_cb_load()
+
+
+async def _cb_request(method: str, path: str, body: dict | None = None, params: dict | None = None) -> dict:
+    key = _cb_key()
+    if not key:
+        raise RuntimeError("не задан CRYPTOBOT_API_KEY")
+    timeout = aiohttp.ClientTimeout(total=15)
+    async with aiohttp.ClientSession(timeout=timeout) as http:
+        async with http.request(method, f"{CRYPTOBOT_API_URL}{path}", json=body, params=params,
+                                headers={"Crypto-Pay-API-Token": key}) as resp:
+            try:
+                data = await resp.json(content_type=None)
+            except Exception:
+                data = {}
+            if resp.status >= 400 or not isinstance(data, dict) or not data.get("ok", False):
+                raise RuntimeError(f"CryptoBot {resp.status}: {str(data)[:300]}")
+            return data
+
+
+async def _cb_create(uid: int, pack_id: str) -> tuple[str, dict]:
+    """Счёт на пакет. Если у игрока уже есть живой счёт на этот пакет, отдаёт его, а не создаёт новый."""
+    now = time.time()
+    for inv, rec in _CB.items():
+        if rec.get("uid") == uid and rec.get("pack") == pack_id and rec.get("expires", 0) > now + 120:
+            return inv, rec
+    _stars, coins, name = PACKS[pack_id]
+    cents = _cents(coins)
+    data = await _cb_request("POST", "/createInvoice", {
+        "currency_type": "crypto",
+        "asset": CRYPTOBOT_ASSET,
+        "amount": f"{cents // 100}.{cents % 100:02d}",
+        "description": f"{coins} кристаллов, пакет «{name}»",
+        "hidden_message": "Спасибо за поддержку! Кристаллы придут на баланс в игре.",
+        "payload": _payload(KIND_PACK, pack_id, uid),
+        "allow_comments": False,
+        "allow_anonymous": False,
+        "expires_in": CRYPTOBOT_TTL,
+    })
+    d = data.get("result") or {}
+    inv = str(d.get("invoice_id", ""))
+    link = d.get("bot_invoice_url") or d.get("pay_url")
+    if not inv or not link:
+        raise RuntimeError(f"CryptoBot: в ответе нет id или ссылки: {str(data)[:300]}")
+    rec = {"uid": uid, "pack": pack_id, "cents": cents, "link": link,
+           "created": int(now), "expires": int(now) + CRYPTOBOT_TTL}
+    _CB[inv] = rec
+    _cb_save()
+    return inv, rec
+
+
+async def _cb_status(invoice_id: str) -> str:
+    data = await _cb_request("GET", "/getInvoices", params={"invoice_ids": invoice_id})
+    res = data.get("result")
+    items = res.get("items") if isinstance(res, dict) else res
+    for item in items or []:
+        if isinstance(item, dict) and str(item.get("invoice_id")) == str(invoice_id):
+            return str(item.get("status", "")).lower()
+    return "missing"
+
+
+async def _cb_credit(bot, invoice_id: str, rec: dict) -> None:
+    """Начисляет кристаллы за оплаченный счёт CryptoBot. Повторно один и тот же счёт не начисляется."""
+    uid, pack_id = rec["uid"], rec["pack"]
+    charge_id = f"cb:{invoice_id}"
+    record = {"ts": int(time.time()), "user": uid, "charge_id": charge_id,
+              "payload": _payload(KIND_PACK, pack_id, uid), "usd_cents": rec["cents"],
+              "currency": CRYPTOBOT_ASSET, "method": "cryptobot"}
+    user = _cfg["get_user"](uid)
+    if user is None or pack_id not in PACKS:
+        await _cb_report_uncredited(bot, record, "нет игрока или неизвестный пакет")
+        return
+    paid: list = user.setdefault(PAID_FIELD, [])
+    if charge_id in paid:
+        log.warning("повторная доставка платежа %s, пропускаю", charge_id)
+        return
+    coins = PACKS[pack_id][1]
+    # Начисление без await: либо выдано всё и платёж отмечен, либо состояние игрока откатывается
+    snapshot = copy.deepcopy(user)
+    try:
+        paid.append(charge_id)
+        del paid[:-PAID_KEEP]
+        user[BALANCE_FIELD] = get_balance(user) + coins
+        _bump(user, pays=1, coins_bought=coins, usd_cents=rec["cents"])
+    except Exception:
+        user.clear()
+        user.update(snapshot)
+        log.exception("не удалось начислить платёж %s", charge_id)
+        await _cb_report_uncredited(bot, record, "ошибка при начислении")
+        return
+    _cfg["save_users"]()
+    if not commit_now(uid):
+        log.critical("платёж %s начислен в памяти, но запись в базу не удалась (повторится автоматически)", charge_id)
+    balance = user[BALANCE_FIELD]
+    record.update(status="OK", kind="crystals", pack=pack_id, coins=coins, balance=balance)
+    await _write_donation_log(record)
+    ledger("donate", **{k: v for k, v in record.items() if k != "ts"})
+    await _notify_admins(
+        bot,
+        f"<b>💰 Новый донат (CryptoBot)</b>\nИгрок: <code>{uid}</code>\n"
+        f"Сумма: <b>{_usd(rec['cents'])}</b> ({CRYPTOBOT_ASSET})\nПокупка: <b>{_fmt(coins)}</b> {_plural(coins)} "
+        f"(пакет «{escape(PACKS[pack_id][2])}»)\nБаланс игрока: {_fmt(balance)}",
+    )
+    try:
+        await _cfg["send_rich_card"](
+            bot, uid, IMG_KEY, lambda wi: success_html(coins, balance), success_kb(),
+        )
+    except TelegramAPIError:
+        log.warning("не удалось отправить игроку %s сообщение об успешной оплате", uid)
+
+
+async def _cb_report_uncredited(bot, record: dict, reason: str) -> None:
+    record["status"] = "UNCREDITED"
+    record["reason"] = reason
+    await _write_donation_log(record)
+    ledger("donate_uncredited", **{k: v for k, v in record.items() if k != "ts"})
+    log.critical("платёж без начисления: %s", record)
+    await _notify_admins(
+        bot,
+        f"<b>⚠ Платёж CryptoBot без начисления</b>\nИгрок: <code>{record['user']}</code>\n"
+        f"Сумма: <b>{_usd(record['usd_cents'])}</b>\nПричина: {escape(reason)}\n"
+        f"Платёж: <code>{escape(record['charge_id'])}</code>\n<i>Нужен ручной разбор или возврат.</i>",
+    )
+
+
+async def _cb_settle(bot, invoice_id: str) -> str:
+    """Спрашивает статус счёта и при оплате начисляет. Возвращает: paid, active, expired, gone, error."""
+    if invoice_id not in _CB:
+        return "gone"
+    try:
+        status = await _cb_status(invoice_id)
+    except Exception:
+        log.exception("CryptoBot: не удалось получить статус счёта %s", invoice_id)
+        return "error"
+    rec = _CB.get(invoice_id)
+    if rec is None:          # пока ждали ответ, счёт уже обработал другой вызов
+        return "gone"
+    if status == "paid":
+        _CB.pop(invoice_id, None)
+        _cb_save()
+        await _cb_credit(bot, invoice_id, rec)
+        return "paid"
+    if status in ("expired", "missing") or time.time() > rec.get("expires", 0) + 300:
+        _CB.pop(invoice_id, None)
+        _cb_save()
+        return "expired"
+    return "active"
+
+
+async def cryptobot_loop(bot) -> None:
+    """Фоновая задача: проверяет неоплаченные счета CryptoBot и начисляет оплаченные. Запускается из main.py."""
+    while True:
+        try:
+            for inv in list(_CB):
+                await _cb_settle(bot, inv)
+                await asyncio.sleep(0.3)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            log.exception("ошибка в цикле проверки счетов CryptoBot")
+        await asyncio.sleep(CRYPTOBOT_POLL_SEC)
+
+
+@router.callback_query(F.data.startswith("donate:crypto:"))
+async def on_pay_crypto(callback: CallbackQuery):
+    """Оплата CryptoBot: создаёт счёт и показывает его в том же сообщении."""
+    uid = callback.from_user.id
+    pack_id = callback.data.rsplit(":", 1)[-1]
+    if pack_id not in PACKS:
+        await callback.answer("Такого пакета нет.", show_alert=True)
+        return
+    if _cfg["get_user"](uid) is None:
+        await callback.answer("Сначала выбери питомца: /start", show_alert=True)
+        return
+    if not _cb_key():
+        await callback.answer("Оплата через CryptoBot пока не подключена. Выбери Telegram Stars.",
+                              show_alert=True)
+        return
+    if uid in _CB_BUSY:
+        await callback.answer("Счёт уже создаётся, секунду…")
+        return
+    _CB_BUSY.add(uid)
+    try:
+        inv, rec = await _cb_create(uid, pack_id)
+    except Exception:
+        log.exception("CryptoBot: не удалось создать счёт для игрока %s", uid)
+        await callback.answer("Не удалось создать счёт CryptoBot. Попробуй чуть позже или выбери Stars.",
+                              show_alert=True)
+        return
+    finally:
+        _CB_BUSY.discard(uid)
+    await callback.answer()
+    await _cfg["show_rich_card"](
+        callback, _img("donate_shop"), lambda wi: crypto_html(uid, pack_id, inv, rec, wi), pay_kb(pack_id, "crypto")
+    )
+
+
+@router.callback_query(F.data.startswith("donate:cchk:"))
+async def on_crypto_check(callback: CallbackQuery):
+    """Кнопка «Проверить оплату»: не ждём очередного круга фоновой проверки."""
+    inv = callback.data.rsplit(":", 1)[-1]
+    rec = _CB.get(inv)
+    if rec is None:
+        await callback.answer("Этот счёт уже обработан или истёк. Если ты оплатил, кристаллы уже на балансе.",
+                              show_alert=True)
+        return
+    if rec.get("uid") != callback.from_user.id:
+        await callback.answer("Этот счёт выставлен другому игроку.", show_alert=True)
+        return
+    res = await _cb_settle(callback.bot, inv)
+    if res == "paid":
+        await callback.answer("Оплата получена, кристаллы начислены!", show_alert=True)
+    elif res == "active":
+        await callback.answer("Оплата ещё не поступила. Оплати счёт в @send и нажми снова.", show_alert=True)
     elif res == "expired":
         await callback.answer("Счёт истёк. Создай новый в магазине.", show_alert=True)
     elif res == "gone":
