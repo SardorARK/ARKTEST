@@ -1078,12 +1078,22 @@ async def _require_user(callback: CallbackQuery) -> dict | None:
 
 
 async def _show(callback: CallbackQuery, key: str) -> None:
-    """Старое сообщение удаляем, присылаем новое."""
+    """Если у нового экрана то же фото, что у текущего (или фото нет и там и там), сообщение
+    обновляется на месте. Если фото другое, старое сообщение удаляется и приходит новое.
+    Это делает D.show_rich_card из main.py (сравнивает фото экранов по img_key)."""
+    uid = callback.from_user.id
+    show = getattr(D, "show_rich_card", None)
+    if show is not None:
+        html, kb = SCREENS[key]
+        await show(
+            callback, img_key(key), lambda with_image: html(uid, with_image), kb(uid)
+        )
+        return
     try:
         await callback.message.delete()
     except Exception as e:  # сообщение могло уже пропасть
         logging.warning("Не удалось удалить сообщение: %s", e)
-    await send_screen(callback.bot, callback.message.chat.id, callback.from_user.id, key)
+    await send_screen(callback.bot, callback.message.chat.id, uid, key)
 
 
 def _ints(callback: CallbackQuery) -> list[int] | None:
