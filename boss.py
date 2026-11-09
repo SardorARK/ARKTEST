@@ -182,7 +182,7 @@ BOSS_TYPES: dict[str, dict] = {
         "names": ["Каргорот, Гнев Мира", "Вулдрах, Кровавый Шторм"],
     },
     "impossible": {
-        "title": "Невозможные", "one": "Невозможный", "icon": "💀", "emoji": ("", "💀"),
+        "title": "Невозможные", "one": "Невозможный", "icon": "💀", "emoji": ("5458834365846920477", "💀"),
         "hp": 250_000_000, "slots": 1, "def": 70, "respawn_min": 360,
         "reward": {"coins": 100_000_000, "meat": 400_000, "fruit": 400_000},
         "last": {"coins": 10_000_000, "meat": 40_000, "fruit": 40_000},
@@ -1292,7 +1292,21 @@ def _watch(user_id: int, chat_id: int, message_id: int, bid: str) -> None:
 
 
 async def _edit_battle(bot, user_id: int, v: dict) -> bool:
-    """Обновляет окно боя игрока на месте. False, если окно больше не обновить."""
+    """Обновляет окно боя игрока. В личке правит на месте, в группах присылает новое сообщение
+    (при правке Telegram заменяет кастомные эмодзи обычными). False, если окно больше не обновить."""
+    if RESEND_IN_GROUPS and v["chat"] < 0:
+        try:
+            msg = await send_screen(bot, v["chat"], user_id, "boss_skills", v["bid"])
+            try:
+                await bot.delete_message(v["chat"], v["msg"])
+            except Exception as e:
+                logging.info("Старое окно боя %s не удалить: %s", user_id, e)
+            v["msg"] = msg.message_id
+            v["sig"] = _kb_sig(skills_kb(user_id, v["bid"]))
+            return True
+        except Exception as e:
+            logging.warning("Не удалось переслать окно боя %s: %s", user_id, e)
+            return False
     file_id = D.pet_images.get("boss_skills")
     kwargs = {"html": skills_html(user_id, bool(file_id), v["bid"])}
     if file_id:
@@ -1460,12 +1474,25 @@ def _mark_dirty(bot, *bids: str) -> None:
         _task = asyncio.create_task(_live_loop(bot))
 
 
+# Кастомные эмодзи в группах: при правке сообщения Telegram может заменять их обычными.
+# Поэтому в группах и супергруппах вместо правки на месте старое сообщение удаляется,
+# а экран отправляется заново (как в main.py: RESEND_IN_GROUPS). В личке правим на месте.
+# Живое окно боя (_edit_battle) обновляется часто, его слать заново нельзя (лимиты Telegram).
+RESEND_IN_GROUPS = True
+
+
+def _can_edit_in_place(msg: Message) -> bool:
+    if not RESEND_IN_GROUPS:
+        return True
+    return getattr(msg.chat, "type", "private") == "private"
+
+
 async def _edit_screen(callback: CallbackQuery, key: str, ref: str = "") -> Message | None:
     """Переход внутри раздела: правим то же сообщение (фото и подпись), новое не создаём.
     None, если поправить нельзя (например, сообщение слишком старое или другого вида)."""
     msg = callback.message
-    if not isinstance(msg, Message):
-        return None
+    if not isinstance(msg, Message) or not _can_edit_in_place(msg):
+        return None   # в группе: _show удалит сообщение и пришлёт новое, эмодзи не пропадут
     uid = callback.from_user.id
     html, kb = SCREENS[key]
     file_id = D.pet_images.get(key)
@@ -1564,6 +1591,8 @@ async def on_skills(callback: CallbackQuery):
 
 async def _edit_top(callback: CallbackQuery, ref: str) -> bool:
     """Переключение периода или показателя: правим окно топа на месте."""
+    if not _can_edit_in_place(callback.message):
+        return False
     uid = callback.from_user.id
     file_id = D.pet_images.get("boss_top")
     kwargs = {"html": top_html(uid, bool(file_id), ref)}
