@@ -141,6 +141,10 @@ CRYPTOBOT_TTL = 30 * 60            # сколько секунд счёт мож
 CRYPTOBOT_POLL_SEC = 8             # как часто бот спрашивает статус неоплаченных счетов
 CRYPTOBOT_FILE = Path(__file__).with_name("cryptobot_pending.json")
 
+# ---------- Оплата картой / СБП (вручную через менеджера) ----------
+EM_CARD = ("5217961106554769883", "🔸")      # кнопка «Карты / СБП»
+CARD_CONTACT = "https://t.me/IIARKII"        # куда пишет игрок для оплаты картой или по СБП
+
 # Привилегии. Действуют PRIVILEGE_DAYS дней с момента оплаты; повторная покупка продлевает срок.
 # Бонусы разных привилегий не складываются: действует сильнейшая из активных (Premium выше VIP).
 # Значения бонусов в процентах. Ключи перков:
@@ -669,9 +673,9 @@ def _back_btn(data: str) -> list[InlineKeyboardButton]:
 def home_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [_btn("Магазин кристаллов", "donate:shop", ButtonStyle.SUCCESS, EM_CRYSTAL[0])],
-        [_btn("Привилегии", "donate:priv", ButtonStyle.SUCCESS, EM_PRIV[0]), _btn("Кейсы", "donate:cases", ButtonStyle.SUCCESS, "5285009510300150278")],
+        [_btn("Привилегии", "donate:priv", ButtonStyle.PRIMARY, EM_PRIV[0]), _btn("Кейсы", "donate:cases", ButtonStyle.PRIMARY, "5285009510300150278")],
         [_btn("Временные бусты", "donate:boosts", ButtonStyle.SUCCESS, "5438571934210082705")],
-        [_btn("🎒 Инвентарь", "donate:inv", ButtonStyle.SUCCESS)],
+        [_btn("🎒 Инвентарь", "donate:inv", ButtonStyle.PRIMARY)],
         _back_btn("menu:back"),
     ])
 
@@ -691,6 +695,8 @@ def pack_kb(pack_id: str) -> InlineKeyboardMarkup:
         [_btn("Telegram Stars", f"donate:stars:{pack_id}", ButtonStyle.SUCCESS, EM_STAR[0])],
         [_btn("xRocket Pay", f"donate:rocket:{pack_id}", ButtonStyle.PRIMARY, EM_ROCKET[0])],
         [_btn("CryptoBot", f"donate:crypto:{pack_id}", ButtonStyle.PRIMARY, EM_CRYPTO[0])],
+        [InlineKeyboardButton(text="Карты / СБП", url=CARD_CONTACT, style=ButtonStyle.PRIMARY,
+                              icon_custom_emoji_id=EM_CARD[0])],
         _back_btn("donate:shop"),
     ])
 
@@ -723,7 +729,7 @@ def home_html(user_id: int, with_image: bool = False) -> str:
         f"{_balance_line(user)}"
         + _tree(
             f"{_ce(EM_STAR)} Разделы",
-            ["<b>Магазин кристаллов</b>: пополнение за Telegram Stars, xRocket Pay или CryptoBot",
+            ["<b>Магазин кристаллов</b>: пополнение за Telegram Stars, xRocket Pay, CryptoBot или картой / СБП",
              f"{_ce(EM_PRIV)} <b>Привилегии</b>: {_tier_ce('vip')} VIP и {_tier_ce('premium')} Premium",
              "<b>Кейсы</b>: артефакты Эпик, Миф и Лега за кристаллы",
              "<b>Временные бусты</b>: эликсиры на несколько часов за кристаллы",
@@ -754,6 +760,7 @@ def shop_html(user_id: int, with_image: bool = False) -> str:
             _rbtn(f"{_ce(EM_STAR)} Telegram Stars", "donate:shop:stars", "success"),
             _rbtn(f"{_ce(EM_ROCKET)} xRocket Pay", "donate:shop:rocket", "primary"),
             _rbtn(f"{_ce(EM_CRYPTO)} CryptoBot", "donate:shop:crypto", "primary"),
+            _ubtn(f"{_ce(EM_CARD)} Карты / СБП", CARD_CONTACT, "primary"),
         ], per_row=2)
     )
 
@@ -825,7 +832,8 @@ def pack_html(user_id: int, pack_id: str, with_image: bool = False) -> str:
         + "<p><b>Выбери способ оплаты</b></p>"
         f"<p>{_ce(EM_STAR)} <b>Telegram Stars</b>: оплата звёздами прямо в Telegram<br>"
         f"{_ce(EM_ROCKET)} <b>xRocket Pay</b>: оплата криптовалютой ({XROCKET_CURRENCY})<br>"
-        f"{_ce(EM_CRYPTO)} <b>CryptoBot</b>: оплата криптовалютой ({CRYPTOBOT_ASSET}) в @send</p>"
+        f"{_ce(EM_CRYPTO)} <b>CryptoBot</b>: оплата криптовалютой ({CRYPTOBOT_ASSET}) в @send<br>"
+        f"{_ce(EM_CARD)} <b>Карты / СБП</b>: напиши @IIARKII, оплата вручную</p>"
     )
 
 
