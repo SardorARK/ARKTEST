@@ -505,6 +505,17 @@ async def _delete(callback: CallbackQuery) -> None:
         logging.warning("Не удалось удалить сообщение: %s", e)
 
 
+async def _show(callback: CallbackQuery, key: str, html, kb) -> None:
+    """Фото то же (или его нет): сообщение правится на месте. Фото другое: старое удаляется,
+    приходит новое. Это делает D.show_rich_card из main.py."""
+    show = getattr(D, "show_rich_card", None)
+    if show is not None:
+        await show(callback, key, html, kb)
+        return
+    await _delete(callback)   # show_rich_card не передан: как раньше, удалить и прислать новое
+    await D.send_rich_card(callback.bot, callback.message.chat.id, key, html, kb)
+
+
 # ---------- Хендлеры ----------
 
 @router.callback_query(F.data == "menu:equip")
@@ -512,8 +523,8 @@ async def on_equip(callback: CallbackQuery):
     if await _require_user(callback) is None:
         return
     await callback.answer()
-    await _delete(callback)
-    await send_equip(callback.bot, callback.message.chat.id, callback.from_user.id)
+    uid = callback.from_user.id
+    await _show(callback, "equip", lambda with_image: equip_html(uid, with_image), equip_kb(uid))
 
 
 @router.callback_query(F.data == "equip:list")
@@ -521,8 +532,8 @@ async def on_list(callback: CallbackQuery):
     if await _require_user(callback) is None:
         return
     await callback.answer()
-    await _delete(callback)
-    await send_list(callback.bot, callback.message.chat.id, callback.from_user.id)
+    uid = callback.from_user.id
+    await _show(callback, "equip_list", lambda with_image: list_html(uid, with_image), list_kb(uid))
 
 
 @router.callback_query(F.data.regexp(r"^equip:item:\w+$"))
@@ -538,8 +549,9 @@ async def on_item(callback: CallbackQuery):
         await callback.answer("Этого артефакта у тебя нет. Он выпадает из сундуков.", show_alert=True)
         return
     await callback.answer()
-    await _delete(callback)
-    await send_item(callback.bot, callback.message.chat.id, callback.from_user.id, key)
+    uid = callback.from_user.id
+    await _show(callback, "equip_item", lambda with_image: item_html(uid, key, with_image),
+                item_kb(uid, key))
 
 
 @router.callback_query(F.data.regexp(r"^equip:wear:\w+$"))
@@ -568,8 +580,8 @@ async def on_wear(callback: CallbackQuery):
     worn.append(key)
     D.save_users()
     await callback.answer(f"Надето: {BY_KEY[key]['name']}")
-    await _delete(callback)
-    await send_equip(callback.bot, callback.message.chat.id, callback.from_user.id)
+    uid = callback.from_user.id
+    await _show(callback, "equip", lambda with_image: equip_html(uid, with_image), equip_kb(uid))
 
 
 @router.callback_query(F.data.regexp(r"^equip:take:\w+$"))
@@ -586,5 +598,5 @@ async def on_take(callback: CallbackQuery):
     worn.remove(key)
     D.save_users()
     await callback.answer(f"Снято: {BY_KEY[key]['name']}")
-    await _delete(callback)
-    await send_equip(callback.bot, callback.message.chat.id, callback.from_user.id)
+    uid = callback.from_user.id
+    await _show(callback, "equip", lambda with_image: equip_html(uid, with_image), equip_kb(uid))
