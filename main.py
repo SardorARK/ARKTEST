@@ -1263,6 +1263,7 @@ mine.setup(
     get_user=get_user,
     save_users=save_users,
     send_rich_card=send_rich_card,
+    show_rich_card=show_rich_card,             # то же фото: правим сообщение, другое фото: новое
     custom_emoji=custom_emoji,
     COIN_EMOJI=COIN_EMOJI,
     INFO_EMOJI=INFO_EMOJI,
