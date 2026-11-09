@@ -69,6 +69,7 @@ router = Router()
 IMG_TARGETS: dict[str, str] = {
     "settings": "Настройки",
     "settings_nick": "Настройки: никнейм",
+    "settings_skin": "Настройки: скин никнейма",
     "settings_notify": "Настройки: уведомления",
     "settings_privacy": "Настройки: приватность",
     "settings_help": "Настройки: помощь (темы)",
@@ -209,6 +210,57 @@ def _valid_html(value) -> bool:
     return not stack and "<" not in tail and ">" not in tail
 
 
+# ---------------------------------------------------------------------------
+# Скины никнейма: имя показывается кастомными эмодзи-буквами
+# ---------------------------------------------------------------------------
+
+_LETTER_IDS = [
+    "5442666386662926782", "5442789489015567725", "5442888268968407239", "5443067296090205241",
+    "5442930565806339502", "5445045210134392285", "5442904770232759662", "5444888546907312649",
+    "5442948978331134970", "5443056721880718834", "5442889935415718340", "5443093181858100144",
+    "5442964612012092458", "5443144742940485489", "5445160306667986067", "5444872745722616155",
+    "5444912749048016606", "5443041805459303246", "5443129860878806759", "5443023517488557215",
+    "5442904907671714022", "5442786624272378035", "5442817560921810165", "5445399433267162730",
+    "5443021812386537711", "5442665196956985605",
+]   # A-Z по алфавиту
+_DIGIT_IDS = [
+    "5445292643200313328", "5445356758472109209", "5445093764739674361", "5445133531841865213",
+    "5445156909348857969", "5445069798822159353", "5442808331037096630", "5445321239092568970",
+    "5442792065995942039", "5444961204869044774",
+]   # 0-9
+_DIGIT_FALLBACK = ["0️⃣", "1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣"]
+
+EMOJI_LETTERS: dict[str, tuple[str, str]] = {}
+for _i, _id in enumerate(_LETTER_IDS):
+    EMOJI_LETTERS[chr(ord("A") + _i)] = (_id, "🔤")
+for _i, _id in enumerate(_DIGIT_IDS):
+    EMOJI_LETTERS[str(_i)] = (_id, _DIGIT_FALLBACK[_i])
+
+DEFAULT_SKIN = "plain"
+# Новые скины добавляются сюда: "map" это символ -> (id эмодзи, запасной символ)
+SKINS: dict[str, dict] = {
+    "plain": {"name": "Обычный", "map": None},
+    "emoji": {"name": "Эмодзи-буквы", "map": EMOJI_LETTERS},
+}
+
+
+def skin_of(user: dict | None) -> str:
+    key = (user or {}).get("nick_skin", DEFAULT_SKIN)
+    return key if key in SKINS else DEFAULT_SKIN
+
+
+def apply_skin(text: str, skin: str) -> str:
+    """Имя обычным текстом -> HTML в выбранном скине. Символы без эмодзи остаются как есть."""
+    table = (SKINS.get(skin) or {}).get("map")
+    if not table:
+        return escape(text)
+    out = []
+    for ch in text:
+        pair = table.get(ch.upper())
+        out.append(_custom_emoji(pair) if pair else escape(ch))
+    return "".join(out)
+
+
 def default_name(user: dict) -> str:
     """Имя без никнейма: имя из Telegram (юзернейм не показываем), иначе «Игрок»."""
     return (user.get("tg_name") or "Игрок")[:40]
@@ -220,6 +272,10 @@ def name_html(user: dict | None) -> str:
         return "Игрок"
     nick = user.get("nick")
     if nick and _valid_html(nick):
+        skin = skin_of(user)
+        plain = user.get("nick_plain")
+        if skin != DEFAULT_SKIN and isinstance(plain, str) and plain:
+            return apply_skin(plain[:NICK_MAX], skin)
         return nick
     return escape(default_name(user))
 
@@ -577,6 +633,7 @@ def nick_html_screen(user: dict, with_image: bool = False, note: str = "") -> st
         ("Длина", f"от {NICK_MIN} до {NICK_MAX} символов"),
         ("Можно", "только английские буквы (A-Z, a-z) и цифры (0-9)"),
         ("Нельзя", "русские буквы, пробелы, эмодзи, символы, ссылки, упоминания"),
+        ("Скин", "кнопка «Скин»: имя из эмодзи-букв"),
     ]
     return (
         f"{_image(with_image)}"
@@ -598,10 +655,38 @@ def _p(text: str) -> str:
 
 
 def nick_kb(user: dict) -> InlineKeyboardMarkup:
-    rows = []
+    rows = [[_ibtn("Скин", "set:skin", EMOJI_LETTERS["A"])]]
     if has_nick(user):
         rows.append([_btn("Сбросить к имени Telegram", "set:nick_reset", ButtonStyle.DANGER)])
     rows.append([_back("set:main")])
+    return _kb(*rows)
+
+
+def skin_html(user: dict, with_image: bool = False) -> str:
+    cur = skin_of(user)
+    sample = has_nick(user) and (user.get("nick_plain") or "") or "Kerry2026"
+    rows = [(SKINS[k]["name"], "выбран" if k == cur else "") for k in SKINS]
+    return (
+        f"{_image(with_image)}"
+        f"<p><b>{_em(EM_NICK)} СКИН НИКНЕЙМА</b></p>"
+        "<blockquote><i>Скин меняет вид имени: буквы и цифры никнейма "
+        "показываются эмодзи. Работает на английских буквах и цифрах.</i></blockquote>"
+        + _tree([("Сейчас", name_html(user) if has_nick(user) else escape(default_name(user)))],
+                "Твоё имя")
+        + _gap()
+        + _tree([(SKINS[k]["name"], apply_skin(sample[:NICK_MAX], k)) for k in SKINS],
+                "Как выглядит")
+        + _gap()
+        + _tree(rows, "Скины")
+        + _p("<b>Выбери скин кнопкой ниже.</b>")
+    )
+
+
+def skin_kb(user: dict) -> InlineKeyboardMarkup:
+    cur = skin_of(user)
+    rows = [[_btn(SKINS[k]["name"], f"set:skin:{k}",
+                  ButtonStyle.SUCCESS if k == cur else ButtonStyle.PRIMARY)] for k in SKINS]
+    rows.append([_back("set:nick")])
     return _kb(*rows)
 
 
@@ -695,6 +780,39 @@ async def on_nick(callback: CallbackQuery, state: FSMContext):
     await _show(callback, "settings_nick", lambda wi: nick_html_screen(user, wi), nick_kb(user))
 
 
+@router.callback_query(F.data == "set:skin")
+async def on_skin(callback: CallbackQuery, state: FSMContext):
+    await state.clear()
+    user = await _need_user(callback)
+    if user is None:
+        return
+    await callback.answer()
+    await _show(callback, "settings_skin", lambda wi: skin_html(user, wi), skin_kb(user))
+
+
+@router.callback_query(F.data.regexp(r"^set:skin:\w+$"))
+async def on_skin_pick(callback: CallbackQuery):
+    user = await _need_user(callback)
+    if user is None:
+        return
+    key = callback.data.split(":")[2]
+    if key not in SKINS:
+        await callback.answer("Такого скина нет", show_alert=True)
+        return
+    if not has_nick(user):
+        await callback.answer("Сначала задай никнейм: скин применяется к нему.", show_alert=True)
+        return
+    if skin_of(user) == key:
+        await callback.answer("Этот скин уже выбран")
+        return
+    old = skin_of(user)
+    user["nick_skin"] = key
+    _save_users()
+    _led("nick_skin", uid=str(callback.from_user.id), old=old, new=key)
+    await callback.answer(f"Скин: {SKINS[key]['name']}")
+    await _show(callback, "settings_skin", lambda wi: skin_html(user, wi), skin_kb(user))
+
+
 @router.callback_query(F.data == "set:nick_reset")
 async def on_nick_reset(callback: CallbackQuery, state: FSMContext):
     user = await _need_user(callback)
@@ -707,6 +825,10 @@ async def on_nick_reset(callback: CallbackQuery, state: FSMContext):
     await state.set_state(NickStates.waiting)
     await callback.answer("Никнейм сброшен: теперь показывается имя из Telegram")
     await _show(callback, "settings_nick", lambda wi: nick_html_screen(user, wi), nick_kb(user))
+
+
+def _retry_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[[_btn("Ввести имя заново", "set:nick")]])
 
 
 @router.message(NickStates.waiting, F.text)
@@ -723,12 +845,15 @@ async def nick_receive(message: Message, state: FSMContext):
 
     left = int(user.get("nick_at", 0) + NICK_COOLDOWN - time.time())
     if left > 0:
+        await state.clear()          # ввод имени ждём только один раз
         await message.answer(f"<i>Имя можно менять раз в {NICK_COOLDOWN // 60} мин. "
                              f"Подожди ещё {left} с.</i>")
         return
     html, plain, error = _check_text(message)
     if error:
-        await message.answer(f"<i>{escape(error)} Отправь другое имя.</i>")
+        await state.clear()          # имя не подошло: ввод закончен, начинаем заново кнопкой
+        await message.answer(f"<i>{escape(error)} Нажми кнопку и введи имя заново.</i>",
+                             reply_markup=_retry_kb())
         return
 
     old = name_plain(user) if has_nick(user) else None
@@ -747,8 +872,10 @@ async def nick_receive(message: Message, state: FSMContext):
 
 
 @router.message(NickStates.waiting, ~F.text)
-async def nick_not_text(message: Message):
-    await message.answer("<i>Пришли имя текстом.</i>")
+async def nick_not_text(message: Message, state: FSMContext):
+    await state.clear()              # ввод имени ждём только один раз
+    await message.answer("<i>Имя нужно прислать текстом. Нажми кнопку и введи имя заново.</i>",
+                         reply_markup=_retry_kb())
 
 
 @router.callback_query(F.data == "set:notif")
