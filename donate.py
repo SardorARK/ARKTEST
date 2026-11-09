@@ -675,9 +675,9 @@ def home_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [_btn("Магазин кристаллов", "donate:shop", ButtonStyle.SUCCESS, EM_CRYSTAL[0])],
         [_btn("Привилегии", "donate:priv", ButtonStyle.PRIMARY, EM_PRIV[0]), _btn("Кейсы", "donate:cases", ButtonStyle.PRIMARY, "5285009510300150278")],
-        [_btn("Временные бусты", "donate:boosts", ButtonStyle.SUCCESS, "5438571934210082705")],
-        [_btn("🎒 Инвентарь", "donate:inv", ButtonStyle.PRIMARY)],
-        [_btn("Скины ника", "donate:skins", ButtonStyle.SUCCESS, EM_SKIN[0])],
+        [_btn("Временные бусты", "donate:boosts", ButtonStyle.SUCCESS, "5438571934210082705"),
+         _btn("🎒 Инвентарь", "donate:inv", ButtonStyle.SUCCESS)],
+        [_btn("Скины ника", "donate:skins", ButtonStyle.PRIMARY, EM_SKIN[0])],
         _back_btn("menu:back"),
     ])
 
@@ -726,18 +726,17 @@ def home_html(user_id: int, with_image: bool = False) -> str:
     return (
         f"{image}"
         f"<p><b>{_ce(_cfg['DONATE_EMOJI'])} ДОНАТ</b></p>"
-        "<blockquote><i>Поддержи развитие игры и получи дополнительные возможности. "
-        "Все покупки добровольны и никогда не обязательны для прохождения.</i></blockquote>"
+        "<blockquote><i>Поддержи игру и получи бонусы. "
+        "Покупки добровольны и не нужны для прохождения.</i></blockquote>"
         f"{_balance_line(user)}"
         + _tree(
             f"{_ce(EM_STAR)} Разделы",
-            ["<b>Магазин кристаллов</b>: пополнение за Telegram Stars, xRocket Pay, CryptoBot или картой / СБП",
-             f"{_ce(EM_PRIV)} <b>Привилегии</b>: {_tier_ce('vip')} VIP и {_tier_ce('premium')} Premium",
-             "<b>Кейсы</b>: артефакты Эпик, Миф и Лега за кристаллы",
-             "<b>Временные бусты</b>: эликсиры на несколько часов за кристаллы",
-             f"{_ce(EM_SKIN)} <b>Скины ника</b>: эмодзи вместо букв в имени",
-             f"🎒 <b>Инвентарь</b>: купленные эликсиры (до {INV_LIMIT} каждого вида), сейчас: "
-             f"<b>{inv_total(user)}</b>"],
+            ["<b>Магазин кристаллов</b>: <i>Stars, xRocket, CryptoBot, карта / СБП</i>",
+             f"{_ce(EM_PRIV)} <b>Привилегии</b>: {_tier_ce('vip')} <i>VIP и</i> {_tier_ce('premium')} <i>Premium</i>",
+             "<b>Кейсы</b>: <i>артефакты Эпик, Миф и Лега</i>",
+             "<b>Временные бусты</b>: <i>эликсиры на несколько часов</i>",
+             f"🎒 <b>Инвентарь</b>: <i>твои эликсиры, сейчас</i> <b>{inv_total(user)}</b>",
+             f"{_ce(EM_SKIN)} <b>Скины ника</b>: <i>эмодзи вместо букв в имени</i>"],
         )
     )
 
@@ -1585,9 +1584,9 @@ def _boost_status(user: dict | None, key: str) -> str:
     b = BOOSTS[key]
     if b.get("charge"):
         have = int((user or {}).get(MINE_FIELD, 0) or 0)
-        return f"ждёт запуска автодобычи, до <b>{have} ч</b>" if have > 0 else "не применён"
+        return f"<i>ждёт запуска автодобычи, до</i> <b>{have} ч</b>" if have > 0 else "<i>не применён</i>"
     cur = boost_active(user, key)
-    return f"{_effect(b, cur[0])}, ещё <b>{_left(cur[1])}</b>" if cur else "не активен"
+    return f"<b>{_effect(b, cur[0])}</b> <i>· ещё {_left(cur[1])}</i>" if cur else "<i>не активен</i>"
 
 
 def _active_lines(user: dict | None) -> list[str]:
@@ -1596,11 +1595,11 @@ def _active_lines(user: dict | None) -> list[str]:
         if b.get("charge"):
             h = int((user or {}).get(MINE_FIELD, 0) or 0)
             if h > 0:
-                active.append(f"{_bicon(b)}{b['name']}: <b>до {h} ч</b>, ждёт запуска автодобычи")
+                active.append(f"{_bicon(b)}<b>{b['name']}</b>: <b>до {h} ч</b> <i>· ждёт запуска автодобычи</i>")
         else:
             cur = boost_active(user, key)
             if cur:
-                active.append(f"{_bicon(b)}{b['name']}: <b>{_effect(b, cur[0])}</b>, ещё {_left(cur[1])}")
+                active.append(f"{_bicon(b)}<b>{b['name']}</b>: <b>{_effect(b, cur[0])}</b> <i>· ещё {_left(cur[1])}</i>")
     return active
 
 
@@ -1626,23 +1625,21 @@ def boosts_html(user_id: int, page: int = 0, with_image: bool = False) -> str:
     return (
         f"{_image(with_image)}"
         f"<p><b>{_ce(_cfg['DONATE_EMOJI'])} ВРЕМЕННЫЕ БУСТЫ · {page + 1}/{_boost_pages()}</b></p>"
-        "<blockquote><i>Эликсиры усиливают питомца на несколько часов. Купленный эликсир ложится "
-        "в инвентарь, а включаешь ты его сам, когда нужно. Время идёт и тогда, когда тебя нет в игре.</i></blockquote>"
+        "<blockquote><i>Эликсиры усиливают питомца на время. "
+        "Купленный лежит в инвентаре, включаешь его сам.</i></blockquote>"
         f"{_balance_line(user)}"
-        + _tree("Активные эликсиры", _active_lines(user) or ["Пока нет активных"])
+        + _tree("Активные", _active_lines(user) or ["<i>Пока нет</i>"])
         + _GAP
         + _tree("Эликсиры", [
-            f"{_bicon(b)}<b>{b['name']}</b>: "
-            + b["short"].format(lo=b["levels"][0], hi=b["levels"][-1])
+            f"{_bicon(b)}<b>{b['name']}</b>: <i>"
+            + b["short"].format(lo=b["levels"][0], hi=b["levels"][-1]) + "</i>"
             for _key, b in _page_items(page)
         ])
         + _GAP
-        + _tree("Как это работает", [
-            f"Цены от <b>{min(prices)}</b> до <b>{max(prices)}</b> {crystal}",
-            f"Покупка кладёт эликсир в 🎒 инвентарь: до <b>{INV_LIMIT}</b> штук каждого вида "
-            f"(сейчас там <b>{inv_total(user)}</b>)",
-            "Одновременно действует один уровень каждого вида; тот же уровень можно применить ещё раз, срок продлится",
-            "Бонусы эликсиров складываются с привилегиями",
+        + _tree("Коротко", [
+            f"<i>Цены:</i> <b>{min(prices)}</b>–<b>{max(prices)}</b> {crystal}",
+            f"<i>В инвентаре: до</i> <b>{INV_LIMIT}</b> <i>каждого вида, сейчас</i> <b>{inv_total(user)}</b>",
+            "<i>Повторное применение продлевает срок</i>",
         ])
     )
 
@@ -1653,21 +1650,19 @@ def boost_html(user_id: int, key: str, with_image: bool = False) -> str:
     b = BOOSTS[key]
     crystal = _ce(EM_CRYSTAL)
     if b.get("charge"):
-        levels = [f"{_effect(b, i)}: <b>{_boost_price(b, i)}</b> {crystal}" for i in range(len(b["levels"]))]
-        terms = ["Одноразовый: расходуется при запуске автодобычи",
-                 "Куплённый эликсир лежит в инвентаре, применяешь его кнопкой",
-                 "Применить можно, когда нет другого неиспользованного"]
+        levels = [f"<i>{_effect(b, i)}:</i> <b>{_boost_price(b, i)}</b> {crystal}"
+                  for i in range(len(b["levels"]))]
+        terms = ["<i>Одноразовый: тратится при запуске автодобычи</i>",
+                 "<i>Применяется кнопкой из инвентаря</i>"]
     else:
         levels = []
         for i in range(len(b["levels"])):
             lo, hi = _boost_price_range(b, i)
-            levels.append(f"{_effect(b, i)}: от <b>{lo}</b> до <b>{hi}</b> {crystal}")
-        terms = [f"Срок на выбор: <b>{', '.join(str(h) for h in BOOST_HOURS[:-1])} или {BOOST_HOURS[-1]} "
+            levels.append(f"<i>{_effect(b, i)}:</i> <b>{lo}</b>–<b>{hi}</b> {crystal}")
+        terms = [f"<i>Срок на выбор:</i> <b>{', '.join(str(h) for h in BOOST_HOURS[:-1])} или {BOOST_HOURS[-1]} "
                  f"{_hours_word(BOOST_HOURS[-1])}</b>",
-                 "Куплённый эликсир лежит в инвентаре, срок идёт с момента применения",
-                 "Тот же уровень можно применить ещё раз: срок продлится",
-                 "Другой уровень доступен, когда закончится текущий"]
-    terms.append(f"В инвентаре до <b>{INV_LIMIT}</b> эликсиров этого вида")
+                 "<i>Срок идёт с момента применения</i>",
+                 "<i>Тот же уровень продлевает срок</i>"]
     buy_buttons = []
     for i in range(len(b["levels"])):
         if b.get("charge"):
@@ -1686,8 +1681,8 @@ def boost_html(user_id: int, key: str, with_image: bool = False) -> str:
         + _GAP
         + _tree("Условия", terms)
         + _GAP
-        + _tree("Статус", [f"{_ce(EM_STATUS)} Сейчас: {_boost_status(user, key)}",
-                           f"🎒 В инвентаре: <b>{inv_count(user, key)}/{INV_LIMIT}</b>"])
+        + _tree("Сейчас", [f"{_ce(EM_STATUS)} {_boost_status(user, key)}",
+                           f"🎒 <i>В инвентаре:</i> <b>{inv_count(user, key)}/{INV_LIMIT}</b>"])
         + _GAP
         + _rrows(buy_buttons, 2)
     )
@@ -1707,10 +1702,10 @@ def boost_level_html(user_id: int, key: str, lvl: int, with_image: bool = False)
     return (
         f"{_image(with_image)}"
         f"<p><b>{_bicon(b)}{b['name'].upper()}</b></p>"
-        f"<blockquote><i>{_effect(b, lvl)}. Выбери, на сколько часов.</i></blockquote>"
+        f"<blockquote><i>{_effect(b, lvl)}. Выбери срок.</i></blockquote>"
         f"{_balance_line(user)}"
         + _tree("Цены по сроку", [
-            f"<b>{_hours(h)}</b>: {crystal} <b>{_boost_price(b, lvl, d)}</b>"
+            f"<i>{_hours(h)}:</i> {crystal} <b>{_boost_price(b, lvl, d)}</b>"
             for d, h in enumerate(BOOST_HOURS)
         ])
         + _GAP
@@ -1724,30 +1719,27 @@ def boost_confirm_html(user_id: int, key: str, lvl: int, dur: int, with_image: b
     crystal = _ce(EM_CRYSTAL)
     price = _boost_price(b, lvl, dur)
     have = get_balance(user)
-    term = ("до ближайшего запуска автодобычи (одноразовый)" if b.get("charge")
-            else _hours(BOOST_HOURS[dur]))
-    rows = [f"Эликсир: <b>{_bicon(b)}{b['name']}</b>",
-            f"Эффект: <b>{_effect(b, lvl)}</b>",
-            f"Срок: <b>{term}</b>",
-            f"Цена: {crystal} <b>{_fmt(price)}</b>"]
-    after = [f"{crystal} У тебя: <b>{_fmt(have)}</b>",
-             f"{crystal} После покупки: <b>{_fmt(max(0, have - price))}</b>"]
+    term = ("до запуска автодобычи (одноразовый)" if b.get("charge") else _hours(BOOST_HOURS[dur]))
+    rows = [f"<i>Эликсир:</i> <b>{_bicon(b)}{b['name']}</b>",
+            f"<i>Эффект:</i> <b>{_effect(b, lvl)}</b>",
+            f"<i>Срок:</i> <b>{term}</b>",
+            f"<i>Цена:</i> {crystal} <b>{_fmt(price)}</b>"]
+    after = [f"<i>У тебя:</i> {crystal} <b>{_fmt(have)}</b>",
+             f"<i>После покупки:</i> {crystal} <b>{_fmt(max(0, have - price))}</b>"]
     if have < price:
-        after.append(f"{_ce(EM_STATUS)} Не хватает: <b>{_fmt(price - have)} {_plural(price - have)}</b>")
+        after.append(f"{_ce(EM_STATUS)} <i>Не хватает:</i> <b>{_fmt(price - have)} {_plural(price - have)}</b>")
     n = inv_count(user, key)
-    inv = [f"🎒 Сейчас в инвентаре: <b>{n}/{INV_LIMIT}</b>",
-           f"🎒 После покупки: <b>{min(INV_LIMIT, n + 1)}/{INV_LIMIT}</b>"]
     err = _buy_error(user, key) if user else None
     tail = _GAP + _tree("Нельзя купить сейчас", [escape(err)]) if err else ""
     return (
         f"{_image(with_image)}"
         f"<p><b>{_ce(_cfg['DONATE_EMOJI'])} ПОДТВЕРЖДЕНИЕ ПОКУПКИ</b></p>"
-        f"<blockquote><i>{b['desc']} Эликсир попадёт в инвентарь, включишь его сам.</i></blockquote>"
+        "<blockquote><i>Эликсир попадёт в инвентарь, включишь его сам.</i></blockquote>"
         + _tree("Покупка", rows)
         + _GAP
         + _tree("Кристаллы", after)
         + _GAP
-        + _tree("Инвентарь", inv)
+        + f"<p>🎒 <i>В инвентаре:</i> <b>{n}</b> → <b>{min(INV_LIMIT, n + 1)}</b> <i>из</i> <b>{INV_LIMIT}</b></p>"
         + tail
         + _GAP
         + _rrows([_rbtn(f"{_ce(EM_BUY)} Купить за {crystal} {_fmt(price)}",
@@ -1759,15 +1751,14 @@ def boost_done_html(user_id: int, key: str, lvl: int, dur: int) -> str:
     user = _cfg["get_user"](user_id)
     b = BOOSTS[key]
     crystal = _ce(EM_CRYSTAL)
-    term = "до ближайшего запуска автодобычи" if b.get("charge") else _hours(BOOST_HOURS[dur])
-    rows = [f"Эликсир: <b>{_bicon(b)}{b['name']}</b>", f"Эффект: <b>{_effect(b, lvl)}</b>",
-            f"Срок после применения: <b>{term}</b>",
-            f"🎒 В инвентаре: <b>{inv_count(user, key)}/{INV_LIMIT}</b>",
-            f"{crystal} Осталось кристаллов: <b>{_fmt(get_balance(user))}</b>"]
+    term = "до запуска автодобычи" if b.get("charge") else _hours(BOOST_HOURS[dur])
+    rows = [f"<i>Эликсир:</i> <b>{_bicon(b)}{b['name']}</b>", f"<i>Эффект:</i> <b>{_effect(b, lvl)}</b>",
+            f"<i>Срок после применения:</i> <b>{term}</b>",
+            f"🎒 <i>В инвентаре:</i> <b>{inv_count(user, key)}/{INV_LIMIT}</b>",
+            f"{crystal} <i>Осталось:</i> <b>{_fmt(get_balance(user))}</b>"]
     return (
         f"<p><b>{_ce(_cfg['DONATE_EMOJI'])} ЭЛИКСИР В ИНВЕНТАРЕ</b></p>"
-        "<blockquote><i>Спасибо за поддержку игры! Эликсир ждёт в инвентаре: "
-        "примени его, когда он понадобится.</i></blockquote>"
+        "<blockquote><i>Спасибо за поддержку! Примени его, когда понадобится.</i></blockquote>"
         + _tree("Итог", rows)
     )
 
