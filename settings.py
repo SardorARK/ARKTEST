@@ -279,7 +279,7 @@ SET2_LETTERS = _build_map(_SET2_IDS, "🔠", {"A": "🅰️", "B": "🅱️", "O
 
 DEFAULT_SKIN = "plain"
 # Новые скины добавляются сюда: "map" это символ -> (id эмодзи, запасной символ).
-# Если есть "shop", скин продаётся в «Донат → Облики на имя»: price кристаллов, limit штук за одно
+# Если есть "shop", скин продаётся в «Донат → Скины ника»: price кристаллов, limit штук за одно
 # появление в магазине. Скины без "shop" доступны всем.
 SKINS: dict[str, dict] = {
     "plain": {"name": "Обычный", "map": None},
@@ -729,30 +729,21 @@ def _rbtn(label_html: str, data: str, style: str) -> str:
 
 def skin_html(user: dict, with_image: bool = False) -> str:
     cur = skin_of(user)
-    sample = (has_nick(user) and (user.get("nick_plain") or "")) or "Kerry2026"
-    sample = sample[:NICK_MAX]
+    sample = ((has_nick(user) and (user.get("nick_plain") or "")) or "Kerry2026")[:NICK_MAX]
     mine = owned_skins(user)
-    names = [(SKINS[k]["name"], "выбран" if k == cur else "") for k in mine]
-    buttons = "".join(
-        "<tg-button-row>"
-        + _rbtn(apply_skin(sample, k), f"set:skin:{k}", "success" if k == cur else "primary")
-        + "</tg-button-row>"
-        for k in mine
-    )
+    btns = [_rbtn(apply_skin(sample, k), f"set:skin:{k}", "success" if k == cur else "primary")
+            for k in mine]
+    rows = "".join("<tg-button-row>" + "".join(btns[i:i + 2]) + "</tg-button-row>"
+                   for i in range(0, len(btns), 2))
     return (
         f"{_image(with_image)}"
-        f"<p><b>{_em(EM_NICK)} СКИНЫ НИКНЕЙМА</b></p>"
-        "<blockquote><i>Скин меняет вид имени: буквы и цифры никнейма "
-        "показываются эмодзи. Работает на английских буквах и цифрах.</i></blockquote>"
+        f"<p><b>{_em(EM_NICK)} СКИНЫ НИКА</b></p>"
+        "<blockquote><i>Выбери, как выглядит твой ник. "
+        "Новые скины: Донат → Скины ника.</i></blockquote>"
         + _tree([("Сейчас", name_html(user) if has_nick(user) else escape(default_name(user)))],
-                "Твоё имя")
+                "Твой ник")
         + _gap()
-        + _tree(names, "Скины (сверху вниз, как кнопки)")
-        + _p("<b>Нажми на кнопку с нужным видом имени.</b><br>"
-             "<i>Выбранный скин горит зелёным. Новые облики появляются в разделе "
-             "«Донат → Облики на имя».</i>")
-        + _gap()
-        + buttons
+        + rows
     )
 
 
@@ -871,7 +862,7 @@ async def on_skin_pick(callback: CallbackQuery):
         await callback.answer("Такого скина нет", show_alert=True)
         return
     if not owns_skin(user, key):
-        await callback.answer("Этот облик не куплен: он продаётся в разделе «Донат».", show_alert=True)
+        await callback.answer("Этот скин не куплен: он продаётся в разделе «Донат».", show_alert=True)
         return
     if not has_nick(user):
         await callback.answer("Сначала задай никнейм: скин применяется к нему.", show_alert=True)
