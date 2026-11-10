@@ -820,9 +820,8 @@ def player_html(user_id: int, with_image: bool = False) -> str:
 
     head = (
         f"{image}"
-        f"<p><b>{custom_emoji(settings.EM_USER)} {settings.name_html(user)}</b></p>"
-        f"<p><b>{custom_emoji(LEVEL_EMOJI)} Уровень игрока: {level}/{PLAYER_MAX_LEVEL}</b>"
-        "</p>"
+        f"<p><b>{custom_emoji(settings.EM_USER)} {settings.name_html(user)} "
+        f"{level}/{PLAYER_MAX_LEVEL}</b></p>"
     )
 
     if level >= PLAYER_MAX_LEVEL:
@@ -857,7 +856,7 @@ def player_html(user_id: int, with_image: bool = False) -> str:
         f"<p>{status}</p>"
         "<tg-button-row>"
         '<tg-button type="callback_data" data="plv:do" '
-        f'style="success">{custom_emoji(UPGRADE_EMOJI)} Повысить уровень</tg-button>'
+        f'style="success">{custom_emoji(UPGRADE_EMOJI)} Повысить</tg-button>'
         "</tg-button-row>"
     )
 
