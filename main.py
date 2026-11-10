@@ -1016,7 +1016,7 @@ def player_stats_html(user_id: int, with_image: bool = False) -> str:
                           ("За месяц", "month"), ("За всё время", "all")):
         values = player_earned(user, period)
         line = "  ·  ".join(f"{icon} {_fmt(v)}" for icon, v in zip(icons, values))
-        blocks.append(f"<b>{title}</b><br>{line}")
+        blocks.append(f"<i>{title}</i><br>{line}")
 
     return (
         f"{image}"
