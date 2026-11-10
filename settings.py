@@ -936,20 +936,47 @@ def _rbtn(label_html: str, data: str, style: str) -> str:
             f"{label_html}</tg-button>")
 
 
-def skin_html(user: dict, with_image: bool = False) -> str:
-    """Все скины сразу. Надет: зелёный, куплен: синий, не куплен: красный (нажатие открывает покупку)."""
+SKIN_PAGE_SIZE = 7   # на странице: ник без эмодзи отдельным рядом, 3 ряда по 2 скина и один скин в конце
+
+
+def skin_pages() -> list[list[str]]:
+    """Страницы скинов. На каждой первым идёт обычный ник, дальше по SKIN_PAGE_SIZE скинов."""
+    rest = [k for k in SKINS if k != DEFAULT_SKIN]
+    return [rest[i:i + SKIN_PAGE_SIZE] for i in range(0, len(rest), SKIN_PAGE_SIZE)] or [[]]
+
+
+def skin_page_of(key: str) -> int:
+    """Номер страницы (с 1), на которой лежит скин."""
+    for n, page in enumerate(skin_pages(), 1):
+        if key in page:
+            return n
+    return 1
+
+
+def _skin_page_no(page: int) -> int:
+    return max(1, min(int(page), len(skin_pages())))
+
+
+def skin_html(user: dict, with_image: bool = False, page: int = 1) -> str:
+    """Скины по страницам. Надет: зелёный, куплен: синий, не куплен: красный (нажатие открывает покупку)."""
     cur = skin_of(user)
     sample = ((has_nick(user) and (user.get("nick_plain") or "")) or "Zoro")[:NICK_MAX]
-    btns = []
-    for k in SKINS:
+    page = _skin_page_no(page)
+
+    def one(k: str) -> str:
         if k == cur:
-            btns.append(_rbtn(apply_skin(sample, k), f"set:skin:{k}", "success"))
-        elif owns_skin(user, k):
-            btns.append(_rbtn(apply_skin(sample, k), f"set:skin:{k}", "primary"))
-        else:
-            btns.append(_rbtn(apply_skin(sample, k), f"donate:skin:{k}", "danger"))
-    rows = "".join("<tg-button-row>" + "".join(btns[i:i + 2]) + "</tg-button-row>"
-                   for i in range(0, len(btns), 2))
+            return _rbtn(apply_skin(sample, k), f"set:skin:{k}", "success")
+        if owns_skin(user, k):
+            return _rbtn(apply_skin(sample, k), f"set:skin:{k}", "primary")
+        return _rbtn(apply_skin(sample, k), f"donate:skin:{k}", "danger")
+
+    keys = skin_pages()[page - 1]
+    pairs, last = (keys[:-1], keys[-1]) if len(keys) % 2 else (keys, None)
+    rows = "<tg-button-row>" + one(DEFAULT_SKIN) + "</tg-button-row>"
+    rows += "".join("<tg-button-row>" + "".join(one(k) for k in pairs[i:i + 2]) + "</tg-button-row>"
+                    for i in range(0, len(pairs), 2))
+    if last:
+        rows += "<tg-button-row>" + one(last) + "</tg-button-row>"
     return (
         f"{_image(with_image)}"
         f"<p><b>{_em(EM_NICK)} СКИНЫ НИКА</b></p>"
@@ -963,9 +990,13 @@ def skin_html(user: dict, with_image: bool = False) -> str:
     )
 
 
-def skin_kb(user: dict) -> InlineKeyboardMarkup:
-    """Скины лежат кнопками в самом сообщении, внизу только «Назад»."""
-    return _kb([_back("menu:player")])
+def skin_kb(user: dict, page: int = 1) -> InlineKeyboardMarkup:
+    """Скины лежат кнопками в самом сообщении, внизу переключатель страниц и «Назад»."""
+    page = _skin_page_no(page)
+    total = len(skin_pages())
+    nav = [_btn(f"Страница {n}", f"set:skinp:{n}", ButtonStyle.SUCCESS if n == page else ButtonStyle.PRIMARY)
+           for n in range(1, total + 1)] if total > 1 else []
+    return _kb(nav, [_back("menu:player")])
 
 
 def notif_html(user: dict, with_image: bool = False) -> str:
@@ -1065,7 +1096,17 @@ async def on_skin(callback: CallbackQuery, state: FSMContext):
     if user is None:
         return
     await callback.answer()
-    await _show(callback, "settings_skin", lambda wi: skin_html(user, wi), skin_kb(user))
+    await _show(callback, "settings_skin", lambda wi: skin_html(user, wi, 1), skin_kb(user, 1))
+
+
+@router.callback_query(F.data.regexp(r"^set:skinp:\d+$"))
+async def on_skin_page(callback: CallbackQuery):
+    user = await _need_user(callback)
+    if user is None:
+        return
+    page = _skin_page_no(int(callback.data.split(":")[2]))
+    await callback.answer()
+    await _show(callback, "settings_skin", lambda wi: skin_html(user, wi, page), skin_kb(user, page))
 
 
 @router.callback_query(F.data.regexp(r"^set:skin:\w+$"))
@@ -1091,7 +1132,8 @@ async def on_skin_pick(callback: CallbackQuery):
     _save_users()
     _led("nick_skin", uid=str(callback.from_user.id), old=old, new=key)
     await callback.answer(f"Скин: {SKINS[key]['name']}")
-    await _show(callback, "settings_skin", lambda wi: skin_html(user, wi), skin_kb(user))
+    page = skin_page_of(key)
+    await _show(callback, "settings_skin", lambda wi: skin_html(user, wi, page), skin_kb(user, page))
 
 
 @router.callback_query(F.data == "set:nick_reset")
