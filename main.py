@@ -13,6 +13,7 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ButtonStyle, ParseMode
 from aiogram.exceptions import TelegramAPIError, TelegramBadRequest
 from aiogram.filters import CommandStart
+from aiogram.fsm.context import FSMContext
 from aiogram.types import (
     CallbackQuery,
     InlineKeyboardButton,
@@ -467,7 +468,7 @@ if not getattr(settings, "_level_prefix_patched", False):
 
     _orig_name_html = settings.name_html
     _orig_public_name_html_by_id = settings.public_name_html_by_id
-    _TOP_FUNC = _re.compile(r"(^|_)top(_|$)|топ|leader|rating", _re.I)
+    _TOP_FUNC = _re.compile(r"(^|_)top(_|$)|топ|leader|rating|skin", _re.I)
 
     def _called_from_top() -> bool:
         """Ник просят для топа (в стеке вызовов есть функция top/leaderboard/rating): без уровня."""
@@ -983,7 +984,7 @@ def privilege_active(user: dict) -> bool:
         return False
 
 
-def player_profile_html(user_id: int, with_image: bool = False) -> str:
+def player_profile_html(user_id: int, with_image: bool = False, note: str = "") -> str:
     """Rich-карточка «Профиль»: ник, монеты, минералы, привилегия."""
     user = get_user(user_id)
     image = '<img src="tg://photo?id=pet"/>' if with_image else ""
@@ -1002,6 +1003,7 @@ def player_profile_html(user_id: int, with_image: bool = False) -> str:
         f"<b>{MINERAL_EMOJI} Минералы:</b> {_fmt(player_minerals(user))}<br>"
         f"<b>{custom_emoji(PRIVILEGE_EMOJI)} Привилегия:</b> {privilege}</p>"
         f"{GAP}"
+        + (f"<p>{note}</p>" if note else "")
     )
 
 
@@ -1707,6 +1709,7 @@ settings.setup(
     custom_emoji=custom_emoji,
     INFO_EMOJI=INFO_EMOJI,
     BACK_EMOJI_ID=BACK_EMOJI_ID,
+    open_profile=lambda *a, **k: open_player_profile(*a, **k),                       # после смены ника показываем «Профиль»
     alerts_path=Path(__file__).with_name("alerts.json"),   # ожидающие уведомления о возвращении отрядов
     admin_ids=ADMIN_IDS,                                    # кому приходят обращения в поддержку
     emoji=dict(                                             # кастомные эмодзи других разделов
@@ -2036,6 +2039,20 @@ def player_profile_kb() -> InlineKeyboardMarkup:
                     icon_custom_emoji_id=STAT_BTN_EMOJI[0],
                 ),
             ],
+            [
+                InlineKeyboardButton(
+                    text="Изменить ник",
+                    callback_data="set:nick",
+                    style=ButtonStyle.PRIMARY,
+                    icon_custom_emoji_id=settings.EM_NICK[0],
+                ),
+                InlineKeyboardButton(
+                    text="Скины",
+                    callback_data="set:skin",
+                    style=ButtonStyle.SUCCESS,
+                    icon_custom_emoji_id=settings.EM_SKINS_BTN,
+                ),
+            ],
             [InlineKeyboardButton(
                 text="Назад",
                 callback_data="menu:back",
@@ -2060,8 +2077,18 @@ def player_back_kb() -> InlineKeyboardMarkup:
     )
 
 
+async def open_player_profile(bot, chat_id: int, user_id: int, note: str = "") -> None:
+    """Новое сообщение «Профиль» (после смены ника)."""
+    await send_rich_card(
+        bot, chat_id, "player",
+        lambda with_image: player_profile_html(user_id, with_image, note),
+        player_profile_kb(),
+    )
+
+
 @dp.callback_query(F.data == "menu:player")
-async def on_menu_player(callback: CallbackQuery):
+async def on_menu_player(callback: CallbackQuery, state: FSMContext):
+    await state.clear()
     if get_user(callback.from_user.id) is None:
         await callback.answer("Сначала выбери питомца: /start", show_alert=True)
         return
