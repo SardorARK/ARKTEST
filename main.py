@@ -303,6 +303,7 @@ def upgrade_lack(user: dict) -> list[str]:
 PLAYER_MAX_LEVEL = 500
 MINERALS_FIELD = "minerals"          # поле игрока с минералами (то же, что использует mine.py)
 MINERAL_EMOJI = "🏜"
+GAP = "<p>\u2800</p>"   # пустая строка между блоками (braille-пробел: Telegram его не срезает)
 PRIVILEGE_EMOJI = ("5418299289141004396", "❤️")   # привилегия
 PLAYER_UP_EMOJI = ("5408869739982246969", "⭐")   # кнопка «Повысить»
 LACK_EMOJI = ("5328093774650293878", "🌟")   # ресурса не хватает
@@ -865,7 +866,7 @@ def privilege_active(user: dict) -> bool:
         return False
 
 
-def profile_html(user_id: int, with_image: bool = False) -> str:
+def player_profile_html(user_id: int, with_image: bool = False) -> str:
     """Rich-карточка «Профиль»: ник, монеты, минералы, привилегия."""
     user = get_user(user_id)
     image = '<img src="tg://photo?id=pet"/>' if with_image else ""
@@ -879,9 +880,11 @@ def profile_html(user_id: int, with_image: bool = False) -> str:
         f"<p><b>{settings.name_html(user)}</b></p>"
         "<blockquote><i>Твои запасы и статус в одном месте. "
         "Прокачивай уровень, чтобы стать сильнее.</i></blockquote>"
-        f"<p><br>&nbsp;<br><b>{custom_emoji(COIN_EMOJI)} Монеты:</b> {_fmt(user['coins'])}<br>"
+        f"{GAP}"
+        f"<p><b>{custom_emoji(COIN_EMOJI)} Монеты:</b> {_fmt(user['coins'])}<br>"
         f"<b>{MINERAL_EMOJI} Минералы:</b> {_fmt(player_minerals(user))}<br>"
-        f"<b>{custom_emoji(PRIVILEGE_EMOJI)} Привилегия:</b> {privilege}<br>&nbsp;<br></p>"
+        f"<b>{custom_emoji(PRIVILEGE_EMOJI)} Привилегия:</b> {privilege}</p>"
+        f"{GAP}"
     )
 
 
@@ -893,7 +896,8 @@ def player_level_html(user_id: int, with_image: bool = False) -> str:
 
     head = (
         f"{image}"
-        f"<p><b>{settings.name_html(user)}</b><br>&nbsp;<br></p>"
+        f"<p><b>{settings.name_html(user)}</b></p>"
+        f"{GAP}"
     )
 
     if level >= PLAYER_MAX_LEVEL:
@@ -925,7 +929,8 @@ def player_level_html(user_id: int, with_image: bool = False) -> str:
         + "<blockquote><i>Качай уровень игрока: собирай минералы в шахтах, "
         "копи монеты и поднимайся к 500-му уровню.</i></blockquote>"
         f"<p>{rows}</p>"
-        f"<p>{status}<br>&nbsp;<br></p>"
+        f"<p>{status}</p>"
+        f"{GAP}"
         "<tg-button-row>"
         '<tg-button type="callback_data" data="plv:do" '
         f'style="success">{custom_emoji(PLAYER_UP_EMOJI)} Повысить</tg-button>'
@@ -1871,7 +1876,7 @@ async def on_menu_stock(callback: CallbackQuery):
     )
 
 
-def profile_kb() -> InlineKeyboardMarkup:
+def player_profile_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(
@@ -1913,8 +1918,8 @@ async def on_menu_player(callback: CallbackQuery):
     await show_rich_card(
         callback,
         "player",
-        lambda with_image: profile_html(callback.from_user.id, with_image),
-        profile_kb(),
+        lambda with_image: player_profile_html(callback.from_user.id, with_image),
+        player_profile_kb(),
         force_new=True,
     )
 
