@@ -134,6 +134,7 @@ _ALERTS: dict[str, float] = {}   # uid -> когда закончилась (и�
 
 
 _ADMIN_IDS: set[int] = set()
+_OPEN_PROFILE = None
 _GAME: dict = {}                 # числа игры для раздела «Помощь» (уровни, цены, шансы)
 
 
@@ -154,11 +155,12 @@ def _ic(key: str) -> str:
 
 def setup(*, get_user, save_users, show_rich_card, send_rich_card, custom_emoji,
           BACK_EMOJI_ID, INFO_EMOJI=None, alerts_path=None, admin_ids=(), game=None,
-          emoji=None, **_ignored) -> None:
+          emoji=None, open_profile=None, **_ignored) -> None:
     """game: числа игры для текстов помощи: MAX_LEVEL, EVO_EVERY, EVO_COST_MULT, STAT_GROWTH,
     EVO_GROWTH, upgrade_cost(level), SLOTS, DUPLICATE_COINS, FRAG_DAMAGE_STEP, FRAG_CHANCE."""
     global _get_user, _save_users, _show_rich_card, _send_rich_card, _custom_emoji
-    global _BACK_ID, _INFO, _ALERTS_FILE, _ADMIN_IDS, _GAME
+    global _BACK_ID, _INFO, _ALERTS_FILE, _ADMIN_IDS, _GAME, _OPEN_PROFILE
+    _OPEN_PROFILE = open_profile          # async (bot, chat_id, user_id, note): показать «Профиль»
     _EMOJI.update(emoji or {})
     _ADMIN_IDS = set(admin_ids)
     _GAME = dict(game or {})
@@ -884,7 +886,7 @@ def settings_html(user: dict, uid: int, with_image: bool = False, note: str = ""
     return (
         f"{_image(with_image)}"
         f"<p><b>{_em(SETTINGS_EMOJI)} НАСТРОЙКИ</b></p>"
-        "<blockquote><i>Здесь ты можешь придумать себе имя, настроить уведомления "
+        "<blockquote><i>Здесь ты можешь настроить уведомления "
         "и посмотреть данные своего профиля.</i></blockquote>"
         + _tree(profile, "Профиль")
         + _gap()
@@ -895,33 +897,22 @@ def settings_html(user: dict, uid: int, with_image: bool = False, note: str = ""
 
 def settings_kb() -> InlineKeyboardMarkup:
     return _kb(
-        [_ibtn("Никнейм", "set:nick", EM_NICK, ButtonStyle.PRIMARY),
-         _ibtn("Уведомления", "set:notif", EM_NOTIF, ButtonStyle.PRIMARY)],
-        [_ibtn("Приватность", "set:priv", EM_PRIV, ButtonStyle.PRIMARY),
-         _ibtn("Помощь", "set:help", EM_HELP, ButtonStyle.PRIMARY)],
-        [_ibtn("Поддержка", "set:sup", EM_SUPPORT, ButtonStyle.SUCCESS)],
+        [_ibtn("Уведомления", "set:notif", EM_NOTIF, ButtonStyle.PRIMARY),
+         _ibtn("Приватность", "set:priv", EM_PRIV, ButtonStyle.PRIMARY)],
+        [_ibtn("Помощь", "set:help", EM_HELP, ButtonStyle.PRIMARY),
+         _ibtn("Поддержка", "set:sup", EM_SUPPORT, ButtonStyle.SUCCESS)],
         [_btn("Закрыть", "set:close", ButtonStyle.DANGER)],
     )
 
 
 def nick_html_screen(user: dict, with_image: bool = False, note: str = "") -> str:
     left = max(0, int(user.get("nick_at", 0) + NICK_COOLDOWN - time.time()))
-    rules = [
-        ("Длина", f"от {NICK_MIN} до {NICK_MAX} символов"),
-        ("Можно", "только английские буквы (A-Z, a-z) и цифры (0-9)"),
-        ("Нельзя", "русские буквы, пробелы, эмодзи, символы, ссылки, упоминания"),
-        ("Скины", "кнопка «Скины»: имя из эмодзи-букв"),
-    ]
     return (
         f"{_image(with_image)}"
-        f"<p><b>{_em(EM_NICK)} НИКНЕЙМ</b></p>"
-        "<blockquote><i>Это имя будет показано везде в боте: в меню, профиле и разделах. "
-        "Используй только английские буквы и цифры.</i></blockquote>"
-        + _tree([("Сейчас", name_html(user))], "Твоё имя")
-        + _gap()
-        + _tree(rules, "Правила")
-        + _p("<b>Отправь новое имя одним сообщением.</b>"
-             + (f"<br><i>Менять имя можно раз в {NICK_COOLDOWN // 60} мин, подожди ещё {left} с.</i>"
+        f"<p><b>{_em(EM_NICK)} ИЗМЕНИТЬ НИК</b></p>"
+        "<blockquote><i>Отправь мне новый ник одним сообщением.</i></blockquote>"
+        + _p(f"Английские буквы и цифры, от {NICK_MIN} до {NICK_MAX} символов."
+             + (f"<br><i>Менять ник можно раз в {NICK_COOLDOWN // 60} мин, подожди ещё {left} с.</i>"
                 if left else ""))
         + (f"<p>{note}</p>" if note else "")
     )
@@ -932,11 +923,10 @@ def _p(text: str) -> str:
 
 
 def nick_kb(user: dict) -> InlineKeyboardMarkup:
-    rows = [[InlineKeyboardButton(text="Скины", callback_data="set:skin", style=ButtonStyle.SUCCESS,
-                                  icon_custom_emoji_id=EM_SKINS_BTN)]]
+    rows = []
     if has_nick(user):
         rows.append([_btn("Сбросить к имени Telegram", "set:nick_reset", ButtonStyle.DANGER)])
-    rows.append([_back("set:main")])
+    rows.append([_back("menu:player")])
     return _kb(*rows)
 
 
@@ -968,7 +958,7 @@ def skin_html(user: dict, with_image: bool = False) -> str:
 
 def skin_kb(user: dict) -> InlineKeyboardMarkup:
     """Скины лежат кнопками в самом сообщении, внизу только «Назад»."""
-    return _kb([_back("set:nick")])
+    return _kb([_back("menu:player")])
 
 
 def notif_html(user: dict, with_image: bool = False) -> str:
@@ -1150,9 +1140,13 @@ async def nick_receive(message: Message, state: FSMContext):
     except TelegramAPIError:
         pass
     uid = message.from_user.id
+    note = f"<b>{_ic('ok')} Ник изменён!</b>"
+    if _OPEN_PROFILE is not None:
+        await _OPEN_PROFILE(message.bot, message.chat.id, uid, note)
+        return
     await _send_rich_card(
         message.bot, message.chat.id, "settings",
-        lambda wi: settings_html(user, uid, wi, f"<b>{_ic('ok')} Никнейм изменён!</b>"), settings_kb())
+        lambda wi: settings_html(user, uid, wi, note), settings_kb())
 
 
 @router.message(NickStates.waiting, ~F.text)
