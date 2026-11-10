@@ -2043,7 +2043,7 @@ def player_profile_kb() -> InlineKeyboardMarkup:
                 InlineKeyboardButton(
                     text="Изменить ник",
                     callback_data="set:nick",
-                    style=ButtonStyle.PRIMARY,
+                    style=ButtonStyle.SUCCESS,
                     icon_custom_emoji_id=settings.EM_NICK[0],
                 ),
                 InlineKeyboardButton(
