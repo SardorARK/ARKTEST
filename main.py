@@ -165,7 +165,7 @@ def pet_change_price(user: dict) -> int:
     return PET_CHANGE_PRICES[min(n, len(PET_CHANGE_PRICES) - 1)]
 
 
-COIN_EMOJI = ("5449418135381759397", "🪙")  # валюта бота: монеты
+COIN_EMOJI = ("5433631991675244306", "🤑")  # валюта бота: монеты
 MEAT_EMOJI = "🥩"
 INFO_EMOJI = ("5334544901428229844", "ℹ️")
 FRUIT_EMOJI = "🥭"
@@ -294,6 +294,48 @@ def upgrade_lack(user: dict) -> list[str]:
         lack.append(f"фруктов: {need_fruit - user['fruit']}")
     need_coins = evo_coin_cost(level)
     if need_coins and user["coins"] < need_coins:
+        lack.append(f"монет: {_fmt(need_coins - user['coins'])}")
+    return lack
+
+
+# ---------- Уровень игрока (раздел «Профиль») ----------
+# Отдельно от уровня питомца: растёт за минералы и монеты, максимум PLAYER_MAX_LEVEL.
+PLAYER_MAX_LEVEL = 500
+MINERALS_FIELD = "minerals"          # поле игрока с минералами (то же, что использует mine.py)
+MINERAL_EMOJI = "🏜"
+PLAYER_L1_MINERALS = 25              # цена перехода 1 -> 2: 25 минералов и 35 монет
+PLAYER_L1_COINS = 35
+
+
+def player_level(user: dict) -> int:
+    try:
+        return max(1, min(int(user.get("plevel", 1)), PLAYER_MAX_LEVEL))
+    except (TypeError, ValueError):
+        return 1
+
+
+def player_minerals(user: dict) -> int:
+    try:
+        return max(0, int(user.get(MINERALS_FIELD, 0)))
+    except (TypeError, ValueError):
+        return 0
+
+
+def player_upgrade_cost(level: int) -> tuple[int, int]:
+    """Сколько (минералов, монет) нужно, чтобы поднять уровень игрока с level на level + 1.
+    1 -> 2 это ровно 25 и 35, дальше цена плавно растёт (к 499 -> 500 около 110 тыс. и 390 тыс.)."""
+    level = max(1, level)
+    return (round(PLAYER_L1_MINERALS * level ** 1.35),
+            round(PLAYER_L1_COINS * level ** 1.5))
+
+
+def player_lack(user: dict) -> list[str]:
+    level = player_level(user)
+    need_min, need_coins = player_upgrade_cost(level)
+    lack = []
+    if player_minerals(user) < need_min:
+        lack.append(f"минералов: {_fmt(need_min - player_minerals(user))}")
+    if user["coins"] < need_coins:
         lack.append(f"монет: {_fmt(need_coins - user['coins'])}")
     return lack
 
@@ -762,6 +804,71 @@ def stock_html(user_id: int | None = None, with_image: bool = False) -> str:
     )
 
 
+def _level_bar(level: int, size: int = 10) -> str:
+    filled = round(level / PLAYER_MAX_LEVEL * size)
+    if level > 1:
+        filled = max(1, filled)
+    return "▰" * filled + "▱" * (size - filled)
+
+
+def player_html(user_id: int, with_image: bool = False) -> str:
+    """Rich-карточка «Профиль»: уровень игрока и что нужно для следующего."""
+    user = get_user(user_id)
+    level = player_level(user)
+    image = '<img src="tg://photo?id=pet"/>' if with_image else ""
+
+    head = (
+        f"{image}"
+        f"<p><b>{custom_emoji(settings.EM_USER)} ПРОФИЛЬ</b><br>&nbsp;<br>"
+        f"<b>{settings.name_html(user)}</b></p>"
+        f"<p><b>{custom_emoji(LEVEL_EMOJI)} Уровень игрока: {level}/{PLAYER_MAX_LEVEL}</b>"
+        f"<br><b>{_level_bar(level)}</b></p>"
+    )
+
+    if level >= PLAYER_MAX_LEVEL:
+        return (
+            head
+            + "<blockquote><i>Ты достиг вершины: максимальный уровень игрока. "
+            "Дальше прокачивать некуда, ты легенда!</i></blockquote>"
+        )
+
+    need_min, need_coins = player_upgrade_cost(level)
+    needs = (
+        (f"{MINERAL_EMOJI} Минералы", player_minerals(user), need_min),
+        (f"{custom_emoji(COIN_EMOJI)} Монеты", user["coins"], need_coins),
+    )
+    rows = "".join(
+        "<tr>"
+        f"<td><b>{label}</b></td>"
+        f'<td align="center"><b>{_fmt(have)}/{_fmt(need)}'
+        f'{" " + custom_emoji(CHECK_EMOJI) if have >= need else ""}</b></td>'
+        "</tr>"
+        for label, have, need in needs
+    )
+    lack = player_lack(user)
+    status = (
+        "<i>Всё готово, можно повышать уровень!</i>"
+        if not lack
+        else f"<i>Не хватает {escape(', '.join(lack))}.</i>"
+    )
+
+    return (
+        head
+        + "<blockquote><i>Качай уровень игрока: собирай минералы в шахтах, "
+        "копи монеты и поднимайся к 500-му уровню.</i></blockquote>"
+        f"<p><b>{custom_emoji(INFO_EMOJI)} Для уровня {level + 1} нужно</b></p>"
+        "<table bordered striped>"
+        "<tr><th><b>Ресурс</b></th><th><b>Есть/нужно</b></th></tr>"
+        f"{rows}"
+        "</table>"
+        f"<p>{status}</p>"
+        "<tg-button-row>"
+        '<tg-button type="callback_data" data="plv:do" '
+        f'style="success">{custom_emoji(UPGRADE_EMOJI)} Повысить уровень</tg-button>'
+        "</tg-button-row>"
+    )
+
+
 TREASURY_EMOJI = ("6192975148681793540", "💰")  # кнопка «Сокровищница»
 STOCK_BTN_EMOJI = ("5854908544712707500", "📦")  # кнопка «Запасы»
 
@@ -776,6 +883,7 @@ def menu_kb() -> InlineKeyboardMarkup:
         inline_keyboard=[
             # Главная кнопка на всю ширину, зелёная
             [btn("Мой питомец", "menu:pet", ButtonStyle.SUCCESS, PET_BTN_EMOJI[0])],
+            [btn("Профиль", "menu:player", ButtonStyle.PRIMARY, settings.EM_USER[0])],
             [
                 btn("Запасы", "menu:stock", ButtonStyle.PRIMARY, STOCK_BTN_EMOJI[0]),
                 btn("Шахты", "menu:mine", ButtonStyle.PRIMARY, mine.MINE_EMOJI[0]),
@@ -1115,6 +1223,7 @@ IMG_TARGETS: dict[str, str] = {
     "pets_list": "Выбор питомцев",
     "menu": "Меню",
     "stock": "Запасы",
+    "player": "Профиль игрока",
     "lab": "Лаборатория",
     **donate.IMG_TARGETS,
     **market.IMG_TARGETS,
@@ -1692,6 +1801,64 @@ async def on_menu_stock(callback: CallbackQuery):
         lambda with_image: stock_html(callback.from_user.id, with_image),
         profile_back_kb(),
         force_new=True,
+    )
+
+
+def player_back_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[[
+            InlineKeyboardButton(
+                text="Назад",
+                callback_data="menu:back",
+                style=ButtonStyle.PRIMARY,
+                icon_custom_emoji_id=BACK_EMOJI_ID,
+            )
+        ]]
+    )
+
+
+@dp.callback_query(F.data == "menu:player")
+async def on_menu_player(callback: CallbackQuery):
+    if get_user(callback.from_user.id) is None:
+        await callback.answer("Сначала выбери питомца: /start", show_alert=True)
+        return
+    await callback.answer()
+    await show_rich_card(
+        callback,
+        "player",
+        lambda with_image: player_html(callback.from_user.id, with_image),
+        player_back_kb(),
+        force_new=True,
+    )
+
+
+@dp.callback_query(F.data == "plv:do")
+async def on_player_upgrade(callback: CallbackQuery):
+    user = get_user(callback.from_user.id)
+    if user is None:
+        await callback.answer("Сначала выбери питомца: /start", show_alert=True)
+        return
+    level = player_level(user)
+    if level >= PLAYER_MAX_LEVEL:
+        await callback.answer("Достигнут максимальный уровень", show_alert=True)
+        return
+    lack = player_lack(user)
+    if lack:
+        await callback.answer("Не хватает " + ", ".join(lack), show_alert=True)
+        return
+
+    # проверка и списание идут без await между ними
+    need_min, need_coins = player_upgrade_cost(level)
+    user[MINERALS_FIELD] = player_minerals(user) - need_min
+    user["coins"] -= need_coins
+    user["plevel"] = level + 1
+    save_users()
+    await callback.answer(f"Уровень игрока повышен до {level + 1}!", show_alert=True)
+    await show_rich_card(
+        callback,
+        "player",
+        lambda with_image: player_html(callback.from_user.id, with_image),
+        player_back_kb(),
     )
 
 
