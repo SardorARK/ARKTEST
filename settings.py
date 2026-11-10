@@ -81,7 +81,7 @@ IMG_TARGETS: dict[str, str] = {
 # ---------------------------------------------------------------------------
 
 NICK_MIN = 2                     # минимум видимых символов
-NICK_MAX = 24                    # максимум видимых символов
+NICK_MAX = 12                    # максимум видимых символов
 NICK_COOLDOWN = 300              # пауза между сменами никнейма, секунд
 NICK_PATTERN = re.compile(r"[A-Za-z0-9]+")   # в никнейме только английские буквы и цифры
 BANNED_PARTS: tuple[str, ...] = ()   # запрещённые слова (в нижнем регистре), например ("admin",)
@@ -911,10 +911,9 @@ def nick_html_screen(user: dict, with_image: bool = False, note: str = "") -> st
     return (
         f"{_image(with_image)}"
         f"<p><b>{_em(EM_NICK)} ИЗМЕНИТЬ НИК</b></p>"
-        "<blockquote><i>Отправь мне новый ник одним сообщением.</i></blockquote>"
-        + _p(f"Английские буквы и цифры, от {NICK_MIN} до {NICK_MAX} символов."
-             + (f"<br><i>Менять ник можно раз в {NICK_COOLDOWN // 60} мин, подожди ещё {left} с.</i>"
-                if left else ""))
+        f"<blockquote><i>Отправь мне новый ник одним сообщением, до {NICK_MAX} символов максимум.</i></blockquote>"
+        + (_p(f"<i>Менять ник можно раз в {NICK_COOLDOWN // 60} мин, подожди ещё {left} с.</i>")
+           if left else "")
         + (f"<p>{note}</p>" if note else "")
     )
 
