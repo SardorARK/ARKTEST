@@ -879,9 +879,9 @@ def profile_html(user_id: int, with_image: bool = False) -> str:
         f"<p><b>{settings.name_html(user)}</b></p>"
         "<blockquote><i>Твои запасы и статус в одном месте. "
         "Прокачивай уровень, чтобы стать сильнее.</i></blockquote>"
-        f"<p><b>{custom_emoji(COIN_EMOJI)} Монеты:</b> {_fmt(user['coins'])}<br>"
+        f"<p><br>&nbsp;<br><b>{custom_emoji(COIN_EMOJI)} Монеты:</b> {_fmt(user['coins'])}<br>"
         f"<b>{MINERAL_EMOJI} Минералы:</b> {_fmt(player_minerals(user))}<br>"
-        f"<b>{custom_emoji(PRIVILEGE_EMOJI)} Привилегия:</b> {privilege}</p>"
+        f"<b>{custom_emoji(PRIVILEGE_EMOJI)} Привилегия:</b> {privilege}<br>&nbsp;<br></p>"
     )
 
 
