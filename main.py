@@ -896,8 +896,7 @@ def player_level_html(user_id: int, with_image: bool = False) -> str:
 
     head = (
         f"{image}"
-        f"<p><b>{settings.name_html(user)}</b></p>"
-        f"{GAP}"
+        f"<p><b>{settings.name_html(user)}</b><br>&nbsp;<br></p>"
     )
 
     if level >= PLAYER_MAX_LEVEL:
@@ -929,8 +928,7 @@ def player_level_html(user_id: int, with_image: bool = False) -> str:
         + "<blockquote><i>Качай уровень игрока: собирай минералы в шахтах, "
         "копи монеты и поднимайся к 500-му уровню.</i></blockquote>"
         f"<p>{rows}</p>"
-        f"<p>{status}</p>"
-        f"{GAP}"
+        f"<p>{status}<br>&nbsp;<br></p>"
         "<tg-button-row>"
         '<tg-button type="callback_data" data="plv:do" '
         f'style="success">{custom_emoji(PLAYER_UP_EMOJI)} Повысить</tg-button>'
