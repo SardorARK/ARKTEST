@@ -980,7 +980,7 @@ def skin_html(user: dict, with_image: bool = False, page: int = 1) -> str:
         rows += "<tg-button-row>" + one(last) + "</tg-button-row>"
     return (
         f"{_image(with_image)}"
-        f"<p><b>{_em(EM_NICK)} СКИНЫ НИКА</b></p>"
+        f"<p><b>{_em((EM_SKINS_BTN, '🔤'))} СКИНЫ НИКА</b></p>"
         "<blockquote><i>Нажми на скин, чтобы надеть его. "
         "Зелёные доступны тебе, галочка стоит на надетом, красные не куплены: "
         "нажми на красный, чтобы увидеть цену и купить.</i></blockquote>"
