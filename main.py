@@ -303,6 +303,7 @@ def upgrade_lack(user: dict) -> list[str]:
 PLAYER_MAX_LEVEL = 500
 MINERALS_FIELD = "minerals"          # поле игрока с минералами (то же, что использует mine.py)
 MINERAL_EMOJI = "🏜"
+PRIVILEGE_EMOJI = ("5418299289141004396", "❤️")   # привилегия
 PLAYER_UP_EMOJI = ("5408869739982246969", "⭐")   # кнопка «Повысить»
 LACK_EMOJI = ("5328093774650293878", "🌟")   # ресурса не хватает
 PLAYER_L1_MINERALS = 25              # цена перехода 1 -> 2: 25 минералов и 35 монет
@@ -875,14 +876,12 @@ def profile_html(user_id: int, with_image: bool = False) -> str:
 
     return (
         f"{image}"
-        f"<p><b>{settings.name_html(user)}</b>"
-        "<br>&nbsp;<br>"
-        f"<b>{custom_emoji(COIN_EMOJI)} Монеты:</b> {_fmt(user['coins'])}<br>"
-        f"<b>{MINERAL_EMOJI} Минералы:</b> {_fmt(player_minerals(user))}<br>"
-        f"<b>👑 Привилегия:</b> {privilege}"
-        "<br>&nbsp;<br></p>"
+        f"<p><b>{settings.name_html(user)}</b></p>"
         "<blockquote><i>Твои запасы и статус в одном месте. "
         "Прокачивай уровень, чтобы стать сильнее.</i></blockquote>"
+        f"<p><b>{custom_emoji(COIN_EMOJI)} Монеты:</b> {_fmt(user['coins'])}<br>"
+        f"<b>{MINERAL_EMOJI} Минералы:</b> {_fmt(player_minerals(user))}<br>"
+        f"<b>{custom_emoji(PRIVILEGE_EMOJI)} Привилегия:</b> {privilege}</p>"
     )
 
 
@@ -2161,8 +2160,24 @@ async def on_upgrade_back(callback: CallbackQuery):
 
 
 # ---------- Лаборатория: экраны ----------
-def _fmt(n: int) -> str:
-    return f"{n:,}".replace(",", " ")
+NUMBER_SUFFIXES = ("", "K", "M", "B", "T", "Qa", "Qi", "Sx", "Sp", "Oc", "No", "Dc")
+
+
+def _fmt(n) -> str:
+    """Короткая запись чисел: 999, 1K, 1.5K, 1M, 2.35B, 1T, 1Qa и так далее.
+    Без округления вверх: 999 999 это 999.99K, а не 1000K."""
+    n = int(n)
+    sign = "\u2212" if n < 0 else ""
+    a = abs(n)
+    if a < 1000:
+        return f"{sign}{a}"
+    idx = 1
+    while idx < len(NUMBER_SUFFIXES) - 1 and a >= 1000 ** (idx + 1):
+        idx += 1
+    div = 1000 ** idx
+    whole, frac = divmod(a, div)
+    text = f"{whole}.{frac * 100 // div:02d}".rstrip("0").rstrip(".")
+    return f"{sign}{text}{NUMBER_SUFFIXES[idx]}"
 
 
 def _pct(n: int) -> str:
