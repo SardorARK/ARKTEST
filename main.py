@@ -347,6 +347,7 @@ def player_lack(user: dict) -> list[str]:
 # ---------- Статистика игрока: сколько заработано за 24 часа / неделю / месяц / всё время ----------
 # Заработок считается по росту баланса: бот видит каждое сохранение игрока (раз в секунду)
 # и добавляет к статистике всё, что стало больше, чем в прошлый раз. Расходы не вычитаются.
+STAT_BTN_EMOJI = ("5203993413346680064", "📊")      # кнопка «Статистика»
 STAT_LEVEL_EMOJI = ("5372898310841462316", "⭐️")   # перед «Уровень» в статистике
 STAT_BOSS_EMOJI = ("5372865660500067203", "☠️")    # перед «Боссов убито» в статистике
 PSTAT_KEYS = ("coins", "meat", "fruit", "minerals")
@@ -2031,8 +2032,8 @@ def player_profile_kb() -> InlineKeyboardMarkup:
                 InlineKeyboardButton(
                     text="Статистика",
                     callback_data="pst:open",
-                    style=ButtonStyle.PRIMARY,
-                    icon_custom_emoji_id=INFO_EMOJI[0],
+                    style=ButtonStyle.SUCCESS,
+                    icon_custom_emoji_id=STAT_BTN_EMOJI[0],
                 ),
             ],
             [InlineKeyboardButton(
