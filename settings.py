@@ -939,7 +939,7 @@ def _rbtn(label_html: str, data: str, style: str) -> str:
 def skin_html(user: dict, with_image: bool = False) -> str:
     """Все скины сразу. Надет: зелёный, куплен: синий, не куплен: красный (нажатие открывает покупку)."""
     cur = skin_of(user)
-    sample = ((has_nick(user) and (user.get("nick_plain") or "")) or "Kerry2026")[:NICK_MAX]
+    sample = ((has_nick(user) and (user.get("nick_plain") or "")) or "Zoro")[:NICK_MAX]
     btns = []
     for k in SKINS:
         if k == cur:
