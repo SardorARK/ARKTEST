@@ -344,6 +344,105 @@ def player_lack(user: dict) -> list[str]:
     return lack
 
 
+# ---------- Статистика игрока: сколько заработано за 24 часа / неделю / месяц / всё время ----------
+# Заработок считается по росту баланса: бот видит каждое сохранение игрока (раз в секунду)
+# и добавляет к статистике всё, что стало больше, чем в прошлый раз. Расходы не вычитаются.
+PSTAT_KEYS = ("coins", "meat", "fruit", "minerals")
+PSTAT_FIELD = {"coins": "coins", "meat": "meat", "fruit": "fruit", "minerals": MINERALS_FIELD}
+PSTAT_DAYS = 30
+
+
+def _pstat_num(value) -> int:
+    try:
+        return max(0, int(value))
+    except (TypeError, ValueError):
+        return 0
+
+
+def track_player_stats(user: dict, now: float | None = None) -> None:
+    """Добавляет к статистике игрока всё, что прибавилось в запасах с прошлой проверки."""
+    import time as _time
+    now = _time.time() if now is None else now
+    st = user.get("stat")
+    if not isinstance(st, dict):
+        st = user["stat"] = {}
+    for key in ("t", "l", "h", "d"):
+        if not isinstance(st.get(key), dict):
+            st[key] = {}
+
+    earned = [0] * len(PSTAT_KEYS)
+    for i, res in enumerate(PSTAT_KEYS):
+        cur = _pstat_num(user.get(PSTAT_FIELD[res], 0))
+        last = st["l"].get(res)
+        if last is None:               # первая проверка: просто запоминаем, что есть сейчас
+            st["l"][res] = cur
+            continue
+        if cur > last:
+            earned[i] = cur - last
+        if cur != last:
+            st["l"][res] = cur
+    if not any(earned):
+        return
+
+    for i, res in enumerate(PSTAT_KEYS):
+        st["t"][res] = _pstat_num(st["t"].get(res, 0)) + earned[i]
+    hour, day = str(int(now // 3600)), str(int(now // 86400))
+    for bucket, key in ((st["h"], hour), (st["d"], day)):
+        row = bucket.get(key)
+        if not (isinstance(row, list) and len(row) == len(PSTAT_KEYS)):
+            row = bucket[key] = [0] * len(PSTAT_KEYS)
+        for i, v in enumerate(earned):
+            row[i] += v
+    # храним только последние 25 часов и 31 день
+    for bucket, now_idx, keep in ((st["h"], int(now // 3600), 25), (st["d"], int(now // 86400), PSTAT_DAYS + 1)):
+        for k in [k for k in bucket if not k.lstrip("-").isdigit() or int(k) <= now_idx - keep]:
+            del bucket[k]
+
+
+def player_earned(user: dict, period: str, now: float | None = None) -> list[int]:
+    """Сколько заработано за период: day / week / month / all (в порядке PSTAT_KEYS)."""
+    import time as _time
+    now = _time.time() if now is None else now
+    st = user.get("stat") if isinstance(user.get("stat"), dict) else {}
+    if period == "all":
+        t = st.get("t") if isinstance(st.get("t"), dict) else {}
+        return [_pstat_num(t.get(res, 0)) for res in PSTAT_KEYS]
+    if period == "day":
+        bucket, edge = st.get("h"), int(now // 3600) - 24
+    else:
+        days = 7 if period == "week" else PSTAT_DAYS
+        bucket, edge = st.get("d"), int(now // 86400) - days
+    total = [0] * len(PSTAT_KEYS)
+    if isinstance(bucket, dict):
+        for k, row in bucket.items():
+            if k.lstrip("-").isdigit() and int(k) > edge and isinstance(row, list):
+                for i in range(min(len(row), len(total))):
+                    total[i] += _pstat_num(row[i])
+    return total
+
+
+if not getattr(store, "_pstat_patched", False):
+    _orig_store_sanitize = store.sanitize
+
+    def _sanitize_and_track(uid, user):
+        _orig_store_sanitize(uid, user)
+        try:
+            track_player_stats(user)
+        except Exception:
+            logging.exception("статистика игрока %s: не удалось обновить", uid)
+
+    store.sanitize = _sanitize_and_track
+    store._pstat_patched = True
+
+
+def boss_kills_of(user_id: int) -> int:
+    try:
+        row = boss.STATS.get("total", {}).get(str(user_id), {})
+        return max(0, int(row.get("kills", 0)))
+    except Exception:
+        return 0
+
+
 # ---------- Уровень игрока перед ником (везде, где показывается ник) ----------
 DIGIT_EMOJI = (
     ("5440872443247876191", "0️⃣"), ("5420247722529673741", "1️⃣"),
@@ -900,6 +999,34 @@ def player_profile_html(user_id: int, with_image: bool = False) -> str:
         f"<b>{MINERAL_EMOJI} Минералы:</b> {_fmt(player_minerals(user))}<br>"
         f"<b>{custom_emoji(PRIVILEGE_EMOJI)} Привилегия:</b> {privilege}</p>"
         f"{GAP}"
+    )
+
+
+def player_stats_html(user_id: int, with_image: bool = False) -> str:
+    """Rich-карточка «Статистика»: заработок за периоды, убитые боссы, уровни."""
+    user = get_user(user_id)
+    track_player_stats(user)          # чтобы только что полученное уже было видно
+    image = '<img src="tg://photo?id=pet"/>' if with_image else ""
+    icons = (custom_emoji(COIN_EMOJI), MEAT_EMOJI, FRUIT_EMOJI, MINERAL_EMOJI)
+
+    blocks = []
+    for title, period in (("За 24 часа", "day"), ("За неделю", "week"),
+                          ("За месяц", "month"), ("За всё время", "all")):
+        values = player_earned(user, period)
+        line = "  ·  ".join(f"{icon} {_fmt(v)}" for icon, v in zip(icons, values))
+        blocks.append(f"<b>{title}</b><br>{line}")
+
+    return (
+        f"{image}"
+        f"<p><b>{settings.name_html(user)}</b></p>"
+        "<blockquote><i>Сколько ты заработал: монеты, мясо, фрукты и минералы. "
+        "Считается по росту запасов.</i></blockquote>"
+        f"{GAP}"
+        f"<p>{'<br>&nbsp;<br>'.join(blocks)}</p>"
+        f"{GAP}"
+        f"<p><b>{custom_emoji(boss.BOSS_EMOJI)} Боссов убито:</b> {_fmt(boss_kills_of(user_id))}<br>"
+        f"<b>{custom_emoji(LEVEL_EMOJI)} Уровень игрока:</b> {player_level(user)}/{PLAYER_MAX_LEVEL}<br>"
+        f"<b>{custom_emoji(LEVEL_EMOJI)} Уровень питомца:</b> {user.get('level', 1)}/{MAX_LEVEL}</p>"
     )
 
 
@@ -1893,12 +2020,20 @@ async def on_menu_stock(callback: CallbackQuery):
 def player_profile_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(
-                text="Уровень",
-                callback_data="plv:open",
-                style=ButtonStyle.SUCCESS,
-                icon_custom_emoji_id=PLAYER_UP_EMOJI[0],
-            )],
+            [
+                InlineKeyboardButton(
+                    text="Уровень",
+                    callback_data="plv:open",
+                    style=ButtonStyle.SUCCESS,
+                    icon_custom_emoji_id=PLAYER_UP_EMOJI[0],
+                ),
+                InlineKeyboardButton(
+                    text="Статистика",
+                    callback_data="pst:open",
+                    style=ButtonStyle.PRIMARY,
+                    icon_custom_emoji_id=INFO_EMOJI[0],
+                ),
+            ],
             [InlineKeyboardButton(
                 text="Назад",
                 callback_data="menu:back",
@@ -1935,6 +2070,20 @@ async def on_menu_player(callback: CallbackQuery):
         lambda with_image: player_profile_html(callback.from_user.id, with_image),
         player_profile_kb(),
         force_new=True,
+    )
+
+
+@dp.callback_query(F.data == "pst:open")
+async def on_player_stats(callback: CallbackQuery):
+    if get_user(callback.from_user.id) is None:
+        await callback.answer("Сначала выбери питомца: /start", show_alert=True)
+        return
+    await callback.answer()
+    await show_rich_card(
+        callback,
+        "player",
+        lambda with_image: player_stats_html(callback.from_user.id, with_image),
+        player_back_kb(),
     )
 
 
