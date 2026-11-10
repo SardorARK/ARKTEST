@@ -804,6 +804,13 @@ def stock_html(user_id: int | None = None, with_image: bool = False) -> str:
     )
 
 
+def _simple_bar(have: int, need: int, size: int = 8) -> str:
+    """Простая шкала: 🟩🟩🟩⬜⬜ (37.50%). Заполнена, когда ресурса хватает."""
+    ratio = 1.0 if need <= 0 else min(have / need, 1.0)
+    filled = int(ratio * size)
+    return "🟩" * filled + "⬜" * (size - filled) + f" ({ratio * 100:.2f}%)"
+
+
 def player_html(user_id: int, with_image: bool = False) -> str:
     """Rich-карточка «Профиль»: уровень игрока и что нужно для следующего."""
     user = get_user(user_id)
@@ -830,9 +837,9 @@ def player_html(user_id: int, with_image: bool = False) -> str:
         (f"{MINERAL_EMOJI} Минералы", player_minerals(user), need_min),
         (f"{custom_emoji(COIN_EMOJI)} Монеты", user["coins"], need_coins),
     )
-    rows = "<br>".join(
-        f"<b>{label}: {_fmt(have)}/{_fmt(need)}"
-        f'{" " + custom_emoji(CHECK_EMOJI) if have >= need else ""}</b>'
+    rows = "<br>&nbsp;<br>".join(
+        f"{custom_emoji(DONE_EMOJI) if have >= need else '❌'} | "
+        f"<b>{label}:</b> {_fmt(have)} / {_fmt(need)}<br>{_simple_bar(have, need)}"
         for label, have, need in needs
     )
     lack = player_lack(user)
