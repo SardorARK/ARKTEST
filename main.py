@@ -342,6 +342,46 @@ def player_lack(user: dict) -> list[str]:
     return lack
 
 
+# ---------- Уровень игрока перед ником (везде, где показывается ник) ----------
+DIGIT_EMOJI = (
+    ("5463220794471503187", "0️⃣"), ("5460865065039192915", "1️⃣"),
+    ("5463334361996746932", "2️⃣"), ("5463295204779906622", "3️⃣"),
+    ("5460661625323284905", "4️⃣"), ("5460955061783911747", "5️⃣"),
+    ("5462944713973717558", "6️⃣"), ("5460882584210792152", "7️⃣"),
+    ("5462986147523223422", "8️⃣"), ("5463138408408834171", "9️⃣"),
+)
+
+
+def level_emoji(level: int) -> str:
+    """344 -> 3️⃣4️⃣4️⃣ (по одному эмодзи на каждую цифру)."""
+    return "".join(custom_emoji(DIGIT_EMOJI[int(d)]) for d in str(level))
+
+
+if not getattr(settings, "_level_prefix_patched", False):
+    _orig_name_html = settings.name_html
+    _orig_public_name_html_by_id = settings.public_name_html_by_id
+
+    def _name_with_level(user, *args, **kwargs) -> str:
+        name = _orig_name_html(user, *args, **kwargs)
+        if isinstance(user, dict):
+            return f"{level_emoji(player_level(user))} {name}"
+        return name
+
+    def _public_name_with_level(uid, *args, **kwargs) -> str:
+        name = _orig_public_name_html_by_id(uid, *args, **kwargs)
+        try:
+            user = get_user(uid)
+        except Exception:
+            user = None
+        if isinstance(user, dict):
+            return f"{level_emoji(player_level(user))} {name}"
+        return name
+
+    settings.name_html = _name_with_level
+    settings.public_name_html_by_id = _public_name_with_level
+    settings._level_prefix_patched = True
+
+
 # ---------- Лаборатория питомца ----------
 # Игрок «жертвует» процентами одной характеристики ради другой: источник теряет X%, получатель
 # получает +X% (проценты считаются от итогового значения, с артефактами). Каждая характеристика
@@ -726,7 +766,7 @@ def profile_html(user_id: int, with_image: bool = False) -> str:
 
     return (
         f"{image}"
-        f"<p><b>{custom_emoji(settings.EM_USER)} {settings.name_html(user)}</b><br>&nbsp;<br>"
+        f"<p><b>{settings.name_html(user)}</b><br>&nbsp;<br>"
         f"<b>{escape(pet['name'].upper())} · {escape(pet['rarity'])}</b>"
         "<br>&nbsp;<br>"
         f"<b>{custom_emoji(ELEMENT_LABEL_EMOJI)} Стихия: "
@@ -813,16 +853,48 @@ def _simple_bar(have: int, need: int, size: int = 10) -> str:
     return "▰" * filled + "▱" * (size - filled) + f" ({ratio * 100:.2f}%)"
 
 
-def player_html(user_id: int, with_image: bool = False) -> str:
-    """Rich-карточка «Профиль»: уровень игрока и что нужно для следующего."""
+PRIVILEGE_PERKS = ("arena_reward", "explorer_reward", "boss_damage")
+
+
+def privilege_active(user: dict) -> bool:
+    """Есть ли у игрока активная привилегия: любой её бонус в donate.py больше нуля."""
+    try:
+        return any(float(donate.perk(user, name) or 0) > 0 for name in PRIVILEGE_PERKS)
+    except Exception:
+        return False
+
+
+def profile_html(user_id: int, with_image: bool = False) -> str:
+    """Rich-карточка «Профиль»: ник, монеты, минералы, привилегия."""
+    user = get_user(user_id)
+    image = '<img src="tg://photo?id=pet"/>' if with_image else ""
+    if privilege_active(user):
+        privilege = f"{custom_emoji(DONE_EMOJI)} <b>Активна</b>"
+    else:
+        privilege = f"{custom_emoji(LACK_EMOJI)} <i>Не активна</i>"
+
+    return (
+        f"{image}"
+        f"<p><b>{settings.name_html(user)}</b>"
+        "<br>&nbsp;<br>"
+        f"<b>{custom_emoji(COIN_EMOJI)} Монеты:</b> {_fmt(user['coins'])}<br>"
+        f"<b>{MINERAL_EMOJI} Минералы:</b> {_fmt(player_minerals(user))}<br>"
+        f"<b>👑 Привилегия:</b> {privilege}"
+        "<br>&nbsp;<br></p>"
+        "<blockquote><i>Твои запасы и статус в одном месте. "
+        "Прокачивай уровень, чтобы стать сильнее.</i></blockquote>"
+    )
+
+
+def player_level_html(user_id: int, with_image: bool = False) -> str:
+    """Rich-карточка «Уровень»: уровень игрока и что нужно для следующего."""
     user = get_user(user_id)
     level = player_level(user)
     image = '<img src="tg://photo?id=pet"/>' if with_image else ""
 
     head = (
         f"{image}"
-        f"<p><b>{settings.name_html(user)} "
-        f"{level}/{PLAYER_MAX_LEVEL}</b><br>&nbsp;<br></p>"
+        f"<p><b>{settings.name_html(user)}</b><br>&nbsp;<br></p>"
     )
 
     if level >= PLAYER_MAX_LEVEL:
@@ -1029,7 +1101,7 @@ def profile_back_kb() -> InlineKeyboardMarkup:
 def _menu_greeting(user_id: int | None) -> str:
     """Строка с никнейм игрока под заголовком меню."""
     user = get_user(user_id) if user_id else None
-    return (f"<br>&nbsp;<br><b>{custom_emoji(settings.EM_USER)} {settings.name_html(user)}</b>"
+    return (f"<br>&nbsp;<br><b>{settings.name_html(user)}</b>"
             if user else "")
 
 
@@ -1797,12 +1869,32 @@ async def on_menu_stock(callback: CallbackQuery):
     )
 
 
+def profile_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(
+                text="Уровень",
+                callback_data="plv:open",
+                style=ButtonStyle.SUCCESS,
+                icon_custom_emoji_id=PLAYER_UP_EMOJI[0],
+            )],
+            [InlineKeyboardButton(
+                text="Назад",
+                callback_data="menu:back",
+                style=ButtonStyle.PRIMARY,
+                icon_custom_emoji_id=BACK_EMOJI_ID,
+            )],
+        ]
+    )
+
+
 def player_back_kb() -> InlineKeyboardMarkup:
+    """Из экрана уровня «Назад» возвращает в профиль."""
     return InlineKeyboardMarkup(
         inline_keyboard=[[
             InlineKeyboardButton(
                 text="Назад",
-                callback_data="menu:back",
+                callback_data="menu:player",
                 style=ButtonStyle.PRIMARY,
                 icon_custom_emoji_id=BACK_EMOJI_ID,
             )
@@ -1819,9 +1911,23 @@ async def on_menu_player(callback: CallbackQuery):
     await show_rich_card(
         callback,
         "player",
-        lambda with_image: player_html(callback.from_user.id, with_image),
-        player_back_kb(),
+        lambda with_image: profile_html(callback.from_user.id, with_image),
+        profile_kb(),
         force_new=True,
+    )
+
+
+@dp.callback_query(F.data == "plv:open")
+async def on_player_level(callback: CallbackQuery):
+    if get_user(callback.from_user.id) is None:
+        await callback.answer("Сначала выбери питомца: /start", show_alert=True)
+        return
+    await callback.answer()
+    await show_rich_card(
+        callback,
+        "player",
+        lambda with_image: player_level_html(callback.from_user.id, with_image),
+        player_back_kb(),
     )
 
 
@@ -1850,7 +1956,7 @@ async def on_player_upgrade(callback: CallbackQuery):
     await show_rich_card(
         callback,
         "player",
-        lambda with_image: player_html(callback.from_user.id, with_image),
+        lambda with_image: player_level_html(callback.from_user.id, with_image),
         player_back_kb(),
     )
 
