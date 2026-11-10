@@ -1104,8 +1104,9 @@ def _skin_catalog() -> dict[str, dict]:
     return {k: v for k, v in _skins_mod().SKINS.items() if v.get("shop")}
 
 
-def _skin_back_kb(*top: list) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[*top, _back_btn("set:skin")])
+def _skin_back_kb(key: str, *top: list) -> InlineKeyboardMarkup:
+    """«Назад» возвращает на ту страницу скинов, где лежит этот скин."""
+    return InlineKeyboardMarkup(inline_keyboard=[*top, _back_btn(f"set:skinp:{_skins_mod().skin_page_of(key)}")])
 
 
 def skin_buy_html(user_id: int, key: str, with_image: bool = False) -> str:
@@ -1161,7 +1162,7 @@ async def on_skin_window(callback: CallbackQuery):
         return
     await callback.answer()
     await _cfg["show_rich_card"](callback, IMG_KEY, lambda wi: skin_buy_html(uid, key, wi),
-                                 _skin_back_kb())
+                                 _skin_back_kb(key))
 
 
 @router.callback_query(F.data.regexp(r"^donate:skbuy:\w+$"))
@@ -1207,7 +1208,7 @@ async def on_skin_buy(callback: CallbackQuery):
     await callback.answer()
     await _cfg["show_rich_card"](
         callback, IMG_KEY, lambda wi: skin_done_html(uid, key),
-        _skin_back_kb([_btn("Надеть скин", f"set:skin:{key}", ButtonStyle.SUCCESS, EM_SKIN[0])]),
+        _skin_back_kb(key, [_btn("Надеть скин", f"set:skin:{key}", ButtonStyle.SUCCESS, EM_SKIN[0])]),
     )
 
 
