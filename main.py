@@ -804,13 +804,6 @@ def stock_html(user_id: int | None = None, with_image: bool = False) -> str:
     )
 
 
-def _level_bar(level: int, size: int = 10) -> str:
-    filled = round(level / PLAYER_MAX_LEVEL * size)
-    if level > 1:
-        filled = max(1, filled)
-    return "▰" * filled + "▱" * (size - filled)
-
-
 def player_html(user_id: int, with_image: bool = False) -> str:
     """Rich-карточка «Профиль»: уровень игрока и что нужно для следующего."""
     user = get_user(user_id)
@@ -822,7 +815,7 @@ def player_html(user_id: int, with_image: bool = False) -> str:
         f"<p><b>{custom_emoji(settings.EM_USER)} ПРОФИЛЬ</b><br>&nbsp;<br>"
         f"<b>{settings.name_html(user)}</b></p>"
         f"<p><b>{custom_emoji(LEVEL_EMOJI)} Уровень игрока: {level}/{PLAYER_MAX_LEVEL}</b>"
-        f"<br><b>{_level_bar(level)}</b></p>"
+        "</p>"
     )
 
     if level >= PLAYER_MAX_LEVEL:
@@ -837,12 +830,9 @@ def player_html(user_id: int, with_image: bool = False) -> str:
         (f"{MINERAL_EMOJI} Минералы", player_minerals(user), need_min),
         (f"{custom_emoji(COIN_EMOJI)} Монеты", user["coins"], need_coins),
     )
-    rows = "".join(
-        "<tr>"
-        f"<td><b>{label}</b></td>"
-        f'<td align="center"><b>{_fmt(have)}/{_fmt(need)}'
-        f'{" " + custom_emoji(CHECK_EMOJI) if have >= need else ""}</b></td>'
-        "</tr>"
+    rows = "<br>".join(
+        f"<b>{label}: {_fmt(have)}/{_fmt(need)}"
+        f'{" " + custom_emoji(CHECK_EMOJI) if have >= need else ""}</b>'
         for label, have, need in needs
     )
     lack = player_lack(user)
@@ -856,11 +846,8 @@ def player_html(user_id: int, with_image: bool = False) -> str:
         head
         + "<blockquote><i>Качай уровень игрока: собирай минералы в шахтах, "
         "копи монеты и поднимайся к 500-му уровню.</i></blockquote>"
-        f"<p><b>{custom_emoji(INFO_EMOJI)} Для уровня {level + 1} нужно</b></p>"
-        "<table bordered striped>"
-        "<tr><th><b>Ресурс</b></th><th><b>Есть/нужно</b></th></tr>"
-        f"{rows}"
-        "</table>"
+        f"<p><b>{custom_emoji(INFO_EMOJI)} Для уровня {level + 1} нужно</b>"
+        f"<br>{rows}</p>"
         f"<p>{status}</p>"
         "<tg-button-row>"
         '<tg-button type="callback_data" data="plv:do" '
