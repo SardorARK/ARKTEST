@@ -102,6 +102,8 @@ EM_SAVED = ("5244837092042750681", "📈")     # накоплено
 EM_STATUS = ("5422439311196834318", "💡")    # статус / результат
 EM_OPENED = ("5203996991054432397", "🎁")    # заголовок «кейс открыт»
 
+EM_PRICE = ("5417924076503062111", "💰")      # перед «Цена» в окне покупки скина
+EM_LACK = ("5328093774650293878", "❌")       # «не хватает» (как в уровне игрока в профиле)
 EM_SKIN = ("5445224310270633584", "🔤")      # кнопка и текст «Скины ника»
 IMG_KEY = "donate"           # ключ картинки раздела (если добавишь в IMG_TARGETS)
 CASES_KEY = IMG_KEY          # одно общее фото на весь раздел: все экраны используют IMG_KEY
@@ -1113,20 +1115,20 @@ def skin_buy_html(user_id: int, key: str, with_image: bool = False) -> str:
     crystal = _ce(EM_CRYSTAL)
     meta = st.SKINS[key]
     price = int(meta["shop"]["price"])
-    sample = ((user or {}).get("nick_plain") if st.has_nick(user or {}) else None) or "Kerry2026"
+    sample = ((user or {}).get("nick_plain") if st.has_nick(user or {}) else None) or "Zoro"
     have = get_balance(user)
     out = (f"{_image(with_image)}"
            f"<p><b>{_ce(EM_SKIN)} СКИН НИКА</b></p>"
            "<blockquote><i>Эмодзи вместо букв в твоём нике. Скин остаётся навсегда.</i></blockquote>"
            f"{_balance_line(user)}"
-           + _tree("Скин", [f"Название: <b>{escape(meta['name'])}</b>",
-                            f"Цена: {crystal} <b>{_fmt(price)}</b>"])
+           + _tree("Скин", [f"{_ce(EM_BUY)} <b>{escape(meta['name'])}</b>",
+                            f"{_ce(EM_PRICE)} Цена: <b>{_fmt(price)}</b> {crystal}"])
            + _GAP + f"<p><b>Так выглядит твой ник:</b> {st.apply_skin(sample[:st.NICK_MAX], key)}</p>")
     if st.owns_skin(user, key):
         return out + "<p><b>Этот скин уже у тебя.</b></p>"
     lack = ""
     if have < price:
-        lack = f"<p>{_ce(EM_STATUS)} Не хватает: <b>{_fmt(price - have)} {_plural(price - have)}</b></p>"
+        lack = f"<p>{_ce(EM_LACK)} Не хватает: <b>{_fmt(price - have)}</b> {crystal}</p>"
     return (out + lack + _GAP
             + _rrows([_rbtn(f"{_ce(EM_BUY)} Купить за {crystal} {_fmt(price)}",
                             f"donate:skbuy:{key}", "success" if have >= price else "danger")]))
