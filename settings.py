@@ -457,24 +457,24 @@ SET13_LETTERS = _build_map(_SET13_IDS, "🔤", {}, _DIGIT_FALLBACK)
 
 DEFAULT_SKIN = "plain"
 # Новые скины добавляются сюда: "map" это символ -> (id эмодзи, запасной символ).
-# Если есть "shop", скин продаётся в «Донат → Скины ника»: price кристаллов, limit штук за одно
-# появление в магазине. Скины без "shop" доступны всем.
+# Если есть "shop", скин платный: price кристаллов, покупается один раз и навсегда, лимитов нет.
+# Скины без "shop" доступны всем.
 SKINS: dict[str, dict] = {
     "plain": {"name": "Обычный", "map": None},
     "emoji": {"name": "Эмодзи-буквы", "map": EMOJI_LETTERS},
-    "set1": {"name": "Набор 1", "map": SET1_LETTERS, "shop": {"price": 29, "limit": 5}},
-    "set2": {"name": "Набор 2", "map": SET2_LETTERS, "shop": {"price": 39, "limit": 10}},
-    "set3": {"name": "Набор 3", "map": SET3_LETTERS, "shop": {"price": 49, "limit": 5}},
-    "set4": {"name": "Набор 4", "map": SET4_LETTERS, "shop": {"price": 29, "limit": 10}},
-    "set5": {"name": "Набор 5", "map": SET5_LETTERS, "shop": {"price": 39, "limit": 10}},
-    "set6": {"name": "Набор 6", "map": SET6_LETTERS, "shop": {"price": 499, "limit": 2}},
-    "set7": {"name": "Набор 7", "map": SET7_LETTERS, "shop": {"price": 129, "limit": 4}},
-    "set8": {"name": "Набор 8", "map": SET8_LETTERS, "shop": {"price": 19, "limit": 20}},
-    "set9": {"name": "Набор 9", "map": SET9_LETTERS, "shop": {"price": 59, "limit": 5}},
-    "set10": {"name": "Набор 10", "map": SET10_LETTERS, "shop": {"price": 1029, "limit": 3}},
-    "set11": {"name": "Набор 11", "map": SET11_LETTERS, "shop": {"price": 39, "limit": 10}},
-    "set12": {"name": "Набор 12", "map": SET12_LETTERS, "shop": {"price": 89, "limit": 6}},
-    "set13": {"name": "Набор 13", "map": SET13_LETTERS, "shop": {"price": 399, "limit": 4}},
+    "set1": {"name": "Набор 1", "map": SET1_LETTERS, "shop": {"price": 29}},
+    "set2": {"name": "Набор 2", "map": SET2_LETTERS, "shop": {"price": 39}},
+    "set3": {"name": "Набор 3", "map": SET3_LETTERS, "shop": {"price": 49}},
+    "set4": {"name": "Набор 4", "map": SET4_LETTERS, "shop": {"price": 29}},
+    "set5": {"name": "Набор 5", "map": SET5_LETTERS, "shop": {"price": 39}},
+    "set6": {"name": "Набор 6", "map": SET6_LETTERS, "shop": {"price": 499}},
+    "set7": {"name": "Набор 7", "map": SET7_LETTERS, "shop": {"price": 129}},
+    "set8": {"name": "Набор 8", "map": SET8_LETTERS, "shop": {"price": 19}},
+    "set9": {"name": "Набор 9", "map": SET9_LETTERS, "shop": {"price": 59}},
+    "set10": {"name": "Набор 10", "map": SET10_LETTERS, "shop": {"price": 1029}},
+    "set11": {"name": "Набор 11", "map": SET11_LETTERS, "shop": {"price": 39}},
+    "set12": {"name": "Набор 12", "map": SET12_LETTERS, "shop": {"price": 89}},
+    "set13": {"name": "Набор 13", "map": SET13_LETTERS, "shop": {"price": 399}},
 }
 EM_SKINS_BTN = "5445224310270633584"   # значок кнопки «Скины» в разделе «Никнейм»
 SKINS_FIELD = "nick_skins"       # в профиле: список купленных донатных скинов
@@ -937,18 +937,25 @@ def _rbtn(label_html: str, data: str, style: str) -> str:
 
 
 def skin_html(user: dict, with_image: bool = False) -> str:
+    """Все скины сразу. Надет: зелёный, куплен: синий, не куплен: красный (нажатие открывает покупку)."""
     cur = skin_of(user)
     sample = ((has_nick(user) and (user.get("nick_plain") or "")) or "Kerry2026")[:NICK_MAX]
-    mine = owned_skins(user)
-    btns = [_rbtn(apply_skin(sample, k), f"set:skin:{k}", "success" if k == cur else "primary")
-            for k in mine]
+    btns = []
+    for k in SKINS:
+        if k == cur:
+            btns.append(_rbtn(apply_skin(sample, k), f"set:skin:{k}", "success"))
+        elif owns_skin(user, k):
+            btns.append(_rbtn(apply_skin(sample, k), f"set:skin:{k}", "primary"))
+        else:
+            btns.append(_rbtn(apply_skin(sample, k), f"donate:skin:{k}", "danger"))
     rows = "".join("<tg-button-row>" + "".join(btns[i:i + 2]) + "</tg-button-row>"
                    for i in range(0, len(btns), 2))
     return (
         f"{_image(with_image)}"
         f"<p><b>{_em(EM_NICK)} СКИНЫ НИКА</b></p>"
-        "<blockquote><i>Выбери, как выглядит твой ник. "
-        "Новые скины: Донат → Скины ника.</i></blockquote>"
+        "<blockquote><i>Нажми на скин, чтобы надеть его. "
+        "Зелёный надет сейчас, синий куплен, красный не куплен: "
+        "нажми на него, чтобы увидеть цену и купить.</i></blockquote>"
         + _tree([("Сейчас", name_html(user) if has_nick(user) else escape(default_name(user)))],
                 "Твой ник")
         + _gap()
@@ -1071,7 +1078,7 @@ async def on_skin_pick(callback: CallbackQuery):
         await callback.answer("Такого скина нет", show_alert=True)
         return
     if not owns_skin(user, key):
-        await callback.answer("Этот скин не куплен: он продаётся в разделе «Донат».", show_alert=True)
+        await callback.answer("Этот скин не куплен: нажми на него в списке, чтобы купить.", show_alert=True)
         return
     if not has_nick(user):
         await callback.answer("Сначала задай никнейм: скин применяется к нему.", show_alert=True)
