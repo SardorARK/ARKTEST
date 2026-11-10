@@ -347,6 +347,8 @@ def player_lack(user: dict) -> list[str]:
 # ---------- Статистика игрока: сколько заработано за 24 часа / неделю / месяц / всё время ----------
 # Заработок считается по росту баланса: бот видит каждое сохранение игрока (раз в секунду)
 # и добавляет к статистике всё, что стало больше, чем в прошлый раз. Расходы не вычитаются.
+STAT_LEVEL_EMOJI = ("5372898310841462316", "⭐️")   # перед «Уровень» в статистике
+STAT_BOSS_EMOJI = ("5372865660500067203", "☠️")    # перед «Боссов убито» в статистике
 PSTAT_KEYS = ("coins", "meat", "fruit", "minerals")
 PSTAT_FIELD = {"coins": "coins", "meat": "meat", "fruit": "fruit", "minerals": MINERALS_FIELD}
 PSTAT_DAYS = 30
@@ -1024,8 +1026,8 @@ def player_stats_html(user_id: int, with_image: bool = False) -> str:
         f"{GAP}"
         f"<p>{'<br>&nbsp;<br>'.join(blocks)}</p>"
         f"{GAP}"
-        f"<p><b>{custom_emoji(boss.BOSS_EMOJI)} Боссов убито:</b> {_fmt(boss_kills_of(user_id))}<br>"
-        f"<b>{custom_emoji(LEVEL_EMOJI)} Уровень игрока:</b> {level_emoji(player_level(user))}</p>"
+        f"<p><b>{custom_emoji(STAT_BOSS_EMOJI)} Боссов убито:</b> {_fmt(boss_kills_of(user_id))}<br>"
+        f"<b>{custom_emoji(STAT_LEVEL_EMOJI)} Уровень:</b> {level_emoji(player_level(user))}</p>"
     )
 
 
