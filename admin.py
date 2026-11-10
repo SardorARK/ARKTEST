@@ -179,6 +179,7 @@ def setup(**deps) -> None:
     global _STATE_FILE, _ADS_FILE
     for name, value in deps.items():
         setattr(D, name, value)
+    GIVE_RESOURCES["minerals"] = ("Минералы", D.MINERALS_FIELD)
     ADMIN_IDS.clear()
     ADMIN_IDS.update(D.ADMIN_IDS)
     _STATE_FILE = Path(D.store.path).with_name("admin_state.json")
@@ -908,7 +909,8 @@ async def adm_noop(cb: CallbackQuery):
 
 class PlayerStates(StatesGroup):
     waiting_query = State()     # ждём ID или @юзернейм для поиска
-    waiting_level = State()     # ждём новый уровень
+    waiting_level = State()     # ждём новый уровень питомца
+    waiting_plevel = State()    # ждём новый уровень игрока
     waiting_dm = State()        # ждём сообщение для игрока
     waiting_ban = State()       # ждём ID для бана
     waiting_log_uid = State()   # ждём ID игрока для фильтра журнала
@@ -1082,6 +1084,8 @@ def card_text(uid: str, user: dict) -> str:
         f"{D.custom_emoji(D.COIN_EMOJI)} Монеты: <b>{fmt(_int(user.get('coins')))}</b>",
         f"{D.MEAT_EMOJI} Мясо: <b>{fmt(_int(user.get('meat')))}</b> · "
         f"{D.FRUIT_EMOJI} Фрукты: <b>{fmt(_int(user.get('fruit')))}</b>",
+        f"{D.MINERAL_EMOJI} Минералы: <b>{fmt(_int(user.get(D.MINERALS_FIELD)))}</b> · "
+        f"уровень игрока: <b>{max(1, _int(user.get('plevel', 1)))}/{D.PLAYER_MAX_LEVEL}</b>",
         f"{cases.FRAG} Фрагменты: <b>{fmt(cases.fragments_of(user))}</b>",
         *_donate_lines(user),
     ]
@@ -1143,7 +1147,8 @@ def card_kb(uid: str) -> InlineKeyboardMarkup:
     return _kb(
         [_b("Выдать", f"adm:pm:give:{uid}", S), _b("Снять", f"adm:pm:take:{uid}", R),
          _b("Установить", f"adm:pm:set:{uid}", G)],
-        [_b("Уровень", f"adm:ul:{uid}", G), _b("Артефакты", f"adm:ar:{uid}", G)],
+        [_b("Уровень питомца", f"adm:ul:{uid}", G), _b("Уровень игрока", f"adm:up:{uid}", G)],
+        [_b("Артефакты", f"adm:ar:{uid}", G)],
         [_b("Донат игрока", f"adm:dnu:{uid}", S)],
         [_b("Написать", f"adm:ut:{uid}", G), _b("Вылечить питомца", f"adm:uh:{uid}", S)],
         [_b("Разбанить" if banned else "Забанить", f"adm:ub:{uid}", S if banned else R),
@@ -1207,6 +1212,7 @@ def give_icon(res: str) -> str:
         "fruit": D.FRUIT_EMOJI,
         "meat": D.MEAT_EMOJI,
         "crystals": D.custom_emoji(donate.EM_CRYSTAL),
+        "minerals": D.MINERAL_EMOJI,
     }[res]
 
 
@@ -1248,7 +1254,8 @@ def _res_kb(prefix: str, back: str, suffix: str = "") -> InlineKeyboardMarkup:
          _b("Монеты", f"{prefix}coins{suffix}", S, D.COIN_EMOJI[0])],
         [_b(f"{D.FRUIT_EMOJI} Фрукты", f"{prefix}fruit{suffix}", S),
          _b(f"{D.MEAT_EMOJI} Мясо", f"{prefix}meat{suffix}", S)],
-        [_b("Кристаллы", f"{prefix}crystals{suffix}", S, donate.EM_CRYSTAL[0])],
+        [_b("Кристаллы", f"{prefix}crystals{suffix}", S, donate.EM_CRYSTAL[0]),
+         _b(f"{D.MINERAL_EMOJI} Минералы", f"{prefix}minerals{suffix}", S)],
         _back(back),
     )
 
@@ -1475,6 +1482,55 @@ async def level_receive(message: Message, state: FSMContext):
     await message.answer(f"<b>Уровень изменён</b>: {before} → <b>{after}</b>\n"
                          f"Игрок: {player_label(uid, user)}",
                          reply_markup=_kb([_b("К игроку", f"adm:u:{uid}")]))
+
+
+# ---------- Уровень игрока (раздел «Профиль») ----------
+
+@router.callback_query(F.data.regexp(r"^adm:up:\d+$"))
+async def adm_player_level(cb: CallbackQuery, state: FSMContext):
+    uid = cb.data.split(":")[2]
+    user = await _need_user(cb, uid)
+    if user is None:
+        return
+    await state.clear()
+    await state.set_state(PlayerStates.waiting_plevel)
+    await state.update_data(uid=uid)
+    await _show(
+        cb,
+        f"<b>Уровень игрока</b>\n\nИгрок: {player_label(uid, user)}\n"
+        f"Сейчас: <b>{max(1, _int(user.get('plevel', 1)))}</b>\n\n"
+        f"<i>Отправь новый уровень от 1 до {D.PLAYER_MAX_LEVEL}.</i>",
+        _cancel_kb(f"adm:u:{uid}"),
+    )
+    await cb.answer()
+
+
+@router.message(PlayerStates.waiting_plevel, F.text, _not_cmd)
+async def player_level_receive(message: Message, state: FSMContext):
+    data = await state.get_data()
+    uid = data.get("uid")
+    user = D.users.get(str(uid))
+    if user is None:
+        await state.clear()
+        await message.answer(_main_text(), reply_markup=_main_kb())
+        return
+    raw = message.text.strip()
+    if not raw.isdigit() or not 1 <= int(raw) <= D.PLAYER_MAX_LEVEL:
+        await message.answer(
+            f"<i>Нужно число от 1 до {D.PLAYER_MAX_LEVEL}. Или нажми «Отмена».</i>",
+            reply_markup=_cancel_kb(f"adm:u:{uid}"),
+        )
+        return
+    before, after = max(1, _int(user.get("plevel", 1))), int(raw)
+    user["plevel"] = after
+    ledger("admin_set_player_level", admin=message.from_user.id, uid=uid, before=before, after=after)
+    D.store.flush()
+    await state.clear()
+    await message.answer(
+        f"<b>Уровень игрока изменён</b>: {before} → <b>{after}</b>\n"
+        f"Игрок: {player_label(uid, user)}",
+        reply_markup=_kb([_b("К игроку", f"adm:u:{uid}")]),
+    )
 
 
 # ---------- Артефакты игрока ----------
