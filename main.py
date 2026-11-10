@@ -303,6 +303,7 @@ def upgrade_lack(user: dict) -> list[str]:
 PLAYER_MAX_LEVEL = 500
 MINERALS_FIELD = "minerals"          # поле игрока с минералами (то же, что использует mine.py)
 MINERAL_EMOJI = "🏜"
+LACK_EMOJI = ("5328093774650293878", "🌟")   # ресурса не хватает
 PLAYER_L1_MINERALS = 25              # цена перехода 1 -> 2: 25 минералов и 35 монет
 PLAYER_L1_COINS = 35
 
@@ -804,11 +805,11 @@ def stock_html(user_id: int | None = None, with_image: bool = False) -> str:
     )
 
 
-def _simple_bar(have: int, need: int, size: int = 8) -> str:
-    """Простая шкала: 🟩🟩🟩⬜⬜ (37.50%). Заполнена, когда ресурса хватает."""
+def _simple_bar(have: int, need: int, size: int = 10) -> str:
+    """Простая шкала: ▰▰▰▱▱ (37.50%). Заполнена, когда ресурса хватает."""
     ratio = 1.0 if need <= 0 else min(have / need, 1.0)
     filled = int(ratio * size)
-    return "🟩" * filled + "⬜" * (size - filled) + f" ({ratio * 100:.2f}%)"
+    return "▰" * filled + "▱" * (size - filled) + f" ({ratio * 100:.2f}%)"
 
 
 def player_html(user_id: int, with_image: bool = False) -> str:
@@ -819,8 +820,7 @@ def player_html(user_id: int, with_image: bool = False) -> str:
 
     head = (
         f"{image}"
-        f"<p><b>{custom_emoji(settings.EM_USER)} ПРОФИЛЬ</b><br>&nbsp;<br>"
-        f"<b>{settings.name_html(user)}</b></p>"
+        f"<p><b>{custom_emoji(settings.EM_USER)} {settings.name_html(user)}</b></p>"
         f"<p><b>{custom_emoji(LEVEL_EMOJI)} Уровень игрока: {level}/{PLAYER_MAX_LEVEL}</b>"
         "</p>"
     )
@@ -838,7 +838,7 @@ def player_html(user_id: int, with_image: bool = False) -> str:
         (f"{custom_emoji(COIN_EMOJI)} Монеты", user["coins"], need_coins),
     )
     rows = "<br>&nbsp;<br>".join(
-        f"{custom_emoji(DONE_EMOJI) if have >= need else '❌'} | "
+        f"{custom_emoji(DONE_EMOJI) if have >= need else custom_emoji(LACK_EMOJI)} | "
         f"<b>{label}:</b> {_fmt(have)} / {_fmt(need)}<br>{_simple_bar(have, need)}"
         for label, have, need in needs
     )
@@ -853,8 +853,7 @@ def player_html(user_id: int, with_image: bool = False) -> str:
         head
         + "<blockquote><i>Качай уровень игрока: собирай минералы в шахтах, "
         "копи монеты и поднимайся к 500-му уровню.</i></blockquote>"
-        f"<p><b>{custom_emoji(INFO_EMOJI)} Для уровня {level + 1} нужно</b>"
-        f"<br>{rows}</p>"
+        f"<p>{rows}</p>"
         f"<p>{status}</p>"
         "<tg-button-row>"
         '<tg-button type="callback_data" data="plv:do" '
