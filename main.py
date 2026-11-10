@@ -360,12 +360,27 @@ def level_emoji(level: int) -> str:
 
 
 if not getattr(settings, "_level_prefix_patched", False):
+    import re as _re
+    import sys as _sys
+
     _orig_name_html = settings.name_html
     _orig_public_name_html_by_id = settings.public_name_html_by_id
+    _TOP_FUNC = _re.compile(r"(^|_)top(_|$)|топ|leader|rating", _re.I)
+
+    def _called_from_top() -> bool:
+        """Ник просят для топа (в стеке вызовов есть функция top/leaderboard/rating): без уровня."""
+        frame = _sys._getframe(2)
+        for _ in range(12):
+            if frame is None:
+                break
+            if _TOP_FUNC.search(frame.f_code.co_name):
+                return True
+            frame = frame.f_back
+        return False
 
     def _name_with_level(user, *args, **kwargs) -> str:
         name = _orig_name_html(user, *args, **kwargs)
-        if isinstance(user, dict):
+        if isinstance(user, dict) and not _called_from_top():
             return f"{level_emoji(player_level(user))} {name}"
         return name
 
@@ -375,7 +390,7 @@ if not getattr(settings, "_level_prefix_patched", False):
             user = get_user(uid)
         except Exception:
             user = None
-        if isinstance(user, dict):
+        if isinstance(user, dict) and not _called_from_top():
             return f"{level_emoji(player_level(user))} {name}"
         return name
 
@@ -931,7 +946,8 @@ def player_level_html(user_id: int, with_image: bool = False) -> str:
         f"<p>{status}<br>&nbsp;<br></p>"
         "<tg-button-row>"
         '<tg-button type="callback_data" data="plv:do" '
-        f'style="success">{custom_emoji(PLAYER_UP_EMOJI)} Повысить</tg-button>'
+        f'style="{"danger" if lack else "success"}">'
+        f'{custom_emoji(PLAYER_UP_EMOJI)} Повысить</tg-button>'
         "</tg-button-row>"
     )
 
@@ -1520,7 +1536,7 @@ boss.setup(
     pet_stats=pet_stats,
     pet_images=pet_images,
     STAT_EMOJI=STAT_EMOJI,
-    name_html_of=lambda uid: settings.public_name_html_by_id(uid),    # имена бойцов: никнейм или имя Telegram
+    name_html_of=lambda uid: _orig_public_name_html_by_id(uid),    # имена бойцов (топ): только никнейм, без уровня
     name_plain_of=lambda uid: settings.public_name_plain_by_id(uid),
 )
 dp.include_router(boss.router)
