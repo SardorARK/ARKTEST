@@ -303,6 +303,7 @@ def upgrade_lack(user: dict) -> list[str]:
 PLAYER_MAX_LEVEL = 500
 MINERALS_FIELD = "minerals"          # поле игрока с минералами (то же, что использует mine.py)
 MINERAL_EMOJI = "🏜"
+PLAYER_UP_EMOJI = ("5408869739982246969", "⭐")   # кнопка «Повысить»
 LACK_EMOJI = ("5328093774650293878", "🌟")   # ресурса не хватает
 PLAYER_L1_MINERALS = 25              # цена перехода 1 -> 2: 25 минералов и 35 монет
 PLAYER_L1_COINS = 35
@@ -821,7 +822,7 @@ def player_html(user_id: int, with_image: bool = False) -> str:
     head = (
         f"{image}"
         f"<p><b>{custom_emoji(settings.EM_USER)} {settings.name_html(user)} "
-        f"{level}/{PLAYER_MAX_LEVEL}</b></p>"
+        f"{level}/{PLAYER_MAX_LEVEL}</b><br>&nbsp;</p>"
     )
 
     if level >= PLAYER_MAX_LEVEL:
@@ -856,7 +857,7 @@ def player_html(user_id: int, with_image: bool = False) -> str:
         f"<p>{status}</p>"
         "<tg-button-row>"
         '<tg-button type="callback_data" data="plv:do" '
-        f'style="success">{custom_emoji(UPGRADE_EMOJI)} Повысить</tg-button>'
+        f'style="success">{custom_emoji(PLAYER_UP_EMOJI)} Повысить</tg-button>'
         "</tg-button-row>"
     )
 
