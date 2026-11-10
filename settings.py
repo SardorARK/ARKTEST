@@ -109,6 +109,7 @@ SETTINGS_EMOJI = ("5341715473882955310", "⚙️")
 
 # Эмодзи пунктов настроек: (id, запасной обычный эмодзи)
 EM_NICK = ("5197269100878907942", "✍️")        # никнейм
+EM_SKIN_ON = ("5390846416530716134", "✅")      # галочка на надетом скине
 EM_NOTIF = ("5458603043203327669", "🔔")       # уведомления
 EM_PRIV = ("5843826335088120045", "💬")        # приватность
 EM_HELP = ("5436113877181941026", "❓")        # помощь
@@ -965,9 +966,9 @@ def skin_html(user: dict, with_image: bool = False, page: int = 1) -> str:
 
     def one(k: str) -> str:
         if k == cur:
-            return _rbtn(apply_skin(sample, k), f"set:skin:{k}", "success")
+            return _rbtn(f"{_em(EM_SKIN_ON)} {apply_skin(sample, k)}", f"set:skin:{k}", "success")
         if owns_skin(user, k):
-            return _rbtn(apply_skin(sample, k), f"set:skin:{k}", "primary")
+            return _rbtn(apply_skin(sample, k), f"set:skin:{k}", "success")
         return _rbtn(apply_skin(sample, k), f"donate:skin:{k}", "danger")
 
     keys = skin_pages()[page - 1]
@@ -981,8 +982,8 @@ def skin_html(user: dict, with_image: bool = False, page: int = 1) -> str:
         f"{_image(with_image)}"
         f"<p><b>{_em(EM_NICK)} СКИНЫ НИКА</b></p>"
         "<blockquote><i>Нажми на скин, чтобы надеть его. "
-        "Зелёный надет сейчас, синий куплен, красный не куплен: "
-        "нажми на него, чтобы увидеть цену и купить.</i></blockquote>"
+        "Зелёные доступны тебе, галочка стоит на надетом, красные не куплены: "
+        "нажми на красный, чтобы увидеть цену и купить.</i></blockquote>"
         + _tree([("Сейчас", name_html(user) if has_nick(user) else escape(default_name(user)))],
                 "Твой ник")
         + _gap()
@@ -994,8 +995,9 @@ def skin_kb(user: dict, page: int = 1) -> InlineKeyboardMarkup:
     """Скины лежат кнопками в самом сообщении, внизу переключатель страниц и «Назад»."""
     page = _skin_page_no(page)
     total = len(skin_pages())
-    nav = [_btn(f"Страница {n}", f"set:skinp:{n}", ButtonStyle.SUCCESS if n == page else ButtonStyle.PRIMARY)
-           for n in range(1, total + 1)] if total > 1 else []
+    nav = [_btn("‹", f"set:skinp:{(page - 2) % total + 1}"),
+           _btn(f"{page}/{total}", "set:skinnoop"),
+           _btn("›", f"set:skinp:{page % total + 1}")] if total > 1 else []
     return _kb(nav, [_back("menu:player")])
 
 
@@ -1097,6 +1099,11 @@ async def on_skin(callback: CallbackQuery, state: FSMContext):
         return
     await callback.answer()
     await _show(callback, "settings_skin", lambda wi: skin_html(user, wi, 1), skin_kb(user, 1))
+
+
+@router.callback_query(F.data == "set:skinnoop")
+async def on_skin_noop(callback: CallbackQuery):
+    await callback.answer()
 
 
 @router.callback_query(F.data.regexp(r"^set:skinp:\d+$"))
