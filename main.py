@@ -1002,55 +1002,30 @@ def player_profile_html(user_id: int, with_image: bool = False) -> str:
     )
 
 
-PSTAT_PERIODS = (("day", "24 часа", "За 24 часа"), ("week", "Неделя", "За неделю"),
-                 ("month", "Месяц", "За месяц"), ("all", "Всё время", "За всё время"))
-
-
-def player_stats_html(user_id: int, with_image: bool = False, period: str = "all") -> str:
-    """Rich-карточка «Статистика»: уровень, боссы и заработок за выбранный период."""
+def player_stats_html(user_id: int, with_image: bool = False) -> str:
+    """Rich-карточка «Статистика»: заработок за периоды, убитые боссы, уровень игрока."""
     user = get_user(user_id)
     track_player_stats(user)          # чтобы только что полученное уже было видно
     image = '<img src="tg://photo?id=pet"/>' if with_image else ""
-    title = next((t for key, _, t in PSTAT_PERIODS if key == period), "За всё время")
-    coins, meat, fruit, minerals = player_earned(user, period)
+    icons = (custom_emoji(COIN_EMOJI), MEAT_EMOJI, FRUIT_EMOJI, MINERAL_EMOJI)
+
+    blocks = []
+    for title, period in (("За 24 часа", "day"), ("За неделю", "week"),
+                          ("За месяц", "month"), ("За всё время", "all")):
+        values = player_earned(user, period)
+        line = "  ·  ".join(f"{icon} {_fmt(v)}" for icon, v in zip(icons, values))
+        blocks.append(f"<b>{title}</b><br>{line}")
 
     return (
         f"{image}"
         f"<p><b>{settings.name_html(user)}</b></p>"
-        f"<blockquote><i>Статистика: {title.lower()}. "
+        "<blockquote><i>Сколько ты заработал: монеты, мясо, фрукты и минералы. "
         "Считается по росту запасов.</i></blockquote>"
         f"{GAP}"
-        f"<p><b>{custom_emoji(LEVEL_EMOJI)} Уровень:</b> {player_level(user)}<br>"
-        f"<b>{custom_emoji(boss.BOSS_EMOJI)} Боссов убито:</b> {_fmt(boss_kills_of(user_id))}</p>"
+        f"<p>{'<br>&nbsp;<br>'.join(blocks)}</p>"
         f"{GAP}"
-        f"<p><b>{custom_emoji(COIN_EMOJI)} Заработано монет:</b> {_fmt(coins)}<br>"
-        f"<b>{MEAT_EMOJI} Заработано мяса:</b> {_fmt(meat)}<br>"
-        f"<b>{FRUIT_EMOJI} Заработано фруктов:</b> {_fmt(fruit)}<br>"
-        f"<b>{MINERAL_EMOJI} Найдено минералов:</b> {_fmt(minerals)}</p>"
-    )
-
-
-def player_stats_kb(period: str = "all") -> InlineKeyboardMarkup:
-    """Периоды кнопками; выбранный подсвечен зелёным."""
-    def btn(key: str, label: str) -> InlineKeyboardButton:
-        return InlineKeyboardButton(
-            text=label,
-            callback_data=f"pst:{key}",
-            style=ButtonStyle.SUCCESS if key == period else ButtonStyle.PRIMARY,
-        )
-
-    row = [btn(key, label) for key, label, _ in PSTAT_PERIODS]
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            row[:2],
-            row[2:],
-            [InlineKeyboardButton(
-                text="Назад",
-                callback_data="menu:player",
-                style=ButtonStyle.PRIMARY,
-                icon_custom_emoji_id=BACK_EMOJI_ID,
-            )],
-        ]
+        f"<p><b>{custom_emoji(boss.BOSS_EMOJI)} Боссов убито:</b> {_fmt(boss_kills_of(user_id))}<br>"
+        f"<b>{custom_emoji(LEVEL_EMOJI)} Уровень игрока:</b> {level_emoji(player_level(user))}</p>"
     )
 
 
@@ -2053,7 +2028,7 @@ def player_profile_kb() -> InlineKeyboardMarkup:
                 ),
                 InlineKeyboardButton(
                     text="Статистика",
-                    callback_data="pst:all",
+                    callback_data="pst:open",
                     style=ButtonStyle.PRIMARY,
                     icon_custom_emoji_id=INFO_EMOJI[0],
                 ),
@@ -2097,18 +2072,17 @@ async def on_menu_player(callback: CallbackQuery):
     )
 
 
-@dp.callback_query(F.data.regexp(r"^pst:(day|week|month|all)$"))
+@dp.callback_query(F.data == "pst:open")
 async def on_player_stats(callback: CallbackQuery):
     if get_user(callback.from_user.id) is None:
         await callback.answer("Сначала выбери питомца: /start", show_alert=True)
         return
-    period = callback.data.split(":")[1]
     await callback.answer()
     await show_rich_card(
         callback,
         "player",
-        lambda with_image: player_stats_html(callback.from_user.id, with_image, period),
-        player_stats_kb(period),
+        lambda with_image: player_stats_html(callback.from_user.id, with_image),
+        player_back_kb(),
     )
 
 
