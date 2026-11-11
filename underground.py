@@ -358,7 +358,7 @@ def bag_html(user_id: int, with_image: bool = False) -> str:
     user, ug = load(user_id)
     lines = "<br>".join(
         f"<b>{_oi(k)} {o['name']}</b>: <code>{int(ug['ores'][k])}</code> "
-        f"({fmt(int(ug['ores'][k]) * o['price'])} {_coin()})"
+        f"(<code>{fmt(int(ug['ores'][k]) * o['price'])}</code> {_coin()})"
         for k, o in ORES.items()
     )
     total = [
