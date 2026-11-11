@@ -557,13 +557,8 @@ def list_html(user_id: int, page: int = 0, with_image: bool = False) -> str:
 
 
 def _level_text(user: dict, i: int) -> str:
-    """Нужный уровень обычной фразой."""
-    need = PICKS[i]["need_level"]
-    if not pick_unlocked(user, i):
-        return f"🔒 Откроется на {need} уровне игрока (сейчас у тебя {D.player_level(user)})"
-    if need <= 1:
-        return "✅ Доступна с самого начала"
-    return f"✅ Открыта: доступна с {need} уровня игрока"
+    """Нужный уровень: просто число."""
+    return f"<b>Необходимый уровень</b>: {PICKS[i]['need_level']}"
 
 
 STAT_MIN = 15      # за сколько минут показываем статистику на карточке шахты
@@ -584,11 +579,12 @@ def mine_html(user_id: int, i: int, with_image: bool = False) -> str:
         (f"{_coin()} Монет", rng(clo, chi)),
         (f"{D.MINERAL_EMOJI} Минералов", rng(mlo, mhi)),
     ]
-    level = "" if pick_unlocked(user, i) else f"<p>{_level_text(user, i)}</p>"
+    level = f"<p>{_level_text(user, i)}</p>"
     return (
         f"{_image(with_image)}"
         f"<p><b>{p['name']}</b></p>"
         f"<blockquote><i>{p['desc']}</i></blockquote>"
+        + _gap()
         + _tree(stats, f"В среднем за {STAT_MIN} минут", mono=False)
         + level
     )
