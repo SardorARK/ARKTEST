@@ -305,10 +305,6 @@ def ug_html(user_id: int, with_image: bool = False) -> str:
     ]
     return (
         f"{_image(with_image)}"
-        f"<p><b>{_ug()} ПОДЗЕМНЫЕ ШАХТЫ</b></p>"
-        "<blockquote><i>Спустись под землю: кирка бьёт породу, а в добыче попадаются "
-        "руда и минералы. Минералы повышают уровень игрока. Работает только одна "
-        "шахта за раз.</i></blockquote>"
         + _tree(state, "Состояние", mono=False)
         + _gap()
         + _quote("Добыто, ещё не забрано", _found_rows(ug), expandable=True)
@@ -316,40 +312,35 @@ def ug_html(user_id: int, with_image: bool = False) -> str:
 
 
 def list_html(user_id: int, with_image: bool = False) -> str:
-    """Выбор шахты: WOOD-LVL1..3."""
-    user, ug = load(user_id)
-    rows = []
-    for i, p in enumerate(PICKS):
-        lo, hi = p["drops"]
-        rows.append((
-            f"{p['icon']} {p['name']}", _status(user, ug, i),
-            [("⛏ Копаний", str(p["digs"])), ("📦 Добыча", f"{lo}-{hi} шт.")],
-        ))
-    return (
-        f"{_image(with_image)}"
-        f"<p><b>{_ug()} ШАХТЫ</b></p>"
-        "<blockquote><i>Открой карточку шахты, чтобы узнать её характеристики. "
-        "Открытую шахту можно выбрать и использовать.</i></blockquote>"
-        + _tree(rows, "Шахты WOOD")
-    )
+    """Выбор шахты: текста почти нет, всё видно на кнопках и в карточке."""
+    return f"{_image(with_image)}<p><b>{_ug()} Выбери шахту</b></p>"
+
+
+def _level_text(user: dict, i: int) -> str:
+    """Нужный уровень обычной фразой."""
+    need = PICKS[i]["need_level"]
+    if not pick_unlocked(user, i):
+        return f"🔒 Откроется на {need} уровне игрока (сейчас у тебя {D.player_level(user)})"
+    if need <= 1:
+        return "✅ Доступна с самого начала"
+    return f"✅ Открыта: доступна с {need} уровня игрока"
 
 
 def mine_html(user_id: int, i: int, with_image: bool = False) -> str:
-    """Карточка шахты: только описание и характеристики."""
+    """Карточка шахты: описание, статы за один запуск и нужный уровень."""
     user, ug = load(user_id)
     p = PICKS[i]
     lo, hi = p["drops"]
     stats = [
-        ("⛏ Копаний за запуск", str(p["digs"])),
-        ("📦 Добыча за запуск", f"{lo}-{hi} шт."),
-        ("⏳ Длительность", f"{RUN_MINUTES} мин"),
-        ("🎚 Нужен уровень игрока", f"{p['need_level']} (у тебя {D.player_level(user)})"),
+        (f"⛏ Копаний за {RUN_MINUTES} минут", str(p["digs"])),
+        (f"📦 Добыча за {RUN_MINUTES} минут", f"{lo}-{hi}"),
     ]
     return (
         f"{_image(with_image)}"
         f"<p><b>{p['icon']} {p['name']}</b></p>"
         f"<blockquote><i>{p['desc']}</i></blockquote>"
         + _tree(stats, "Характеристики")
+        + f"<p>{_level_text(user, i)}</p>"
     )
 
 
