@@ -83,7 +83,7 @@ IMG_TARGETS: dict[str, str] = {
 NICK_MIN = 2                     # минимум видимых символов
 NICK_MAX = 12                    # максимум видимых символов
 NICK_COOLDOWN = 300              # пауза между сменами никнейма, секунд
-NICK_PATTERN = re.compile(r"[A-Za-z0-9]+")   # в никнейме только английские буквы и цифры
+NICK_PATTERN = re.compile(r"[A-Za-zА-Яа-яЁё0-9]+")   # в никнейме английские и русские буквы и цифры
 BANNED_PARTS: tuple[str, ...] = ()   # запрещённые слова (в нижнем регистре), например ("admin",)
 RESERVED_BUTTONS = ("Меню", "Арена", "Рынок", "Настройки")   # кнопки нижней клавиатуры
 
@@ -456,6 +456,48 @@ SET11_LETTERS = _build_map(_SET11_IDS, "🔤", {"A": "🅰️"}, _DIGIT_FALLBACK
 SET12_LETTERS = _build_map(_SET12_IDS, "🚩", {}, _DIGIT_FALLBACK)
 SET13_LETTERS = _build_map(_SET13_IDS, "🔤", {}, _DIGIT_FALLBACK)
 
+# Русский набор: А-Я (33 буквы, Ё после Е), затем 0-9
+_RU_ALPHABET = "АБВГДЕЁЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯ"
+_RU_LETTER_IDS = [
+    "5447599835207215055", "5447257307270391115", "5449638329765113236", "5447261816986058076",
+    "5447210096989875815", "5449698880214053784", "5447253222756493391", "5447468924604031759",
+    "5447481891110301441", "5447179117390769713", "5449664030849412471", "5447587684744736414",
+    "5447513523544437065", "5447442905692152565", "5447251320085981568", "5447353905379845003",
+    "5447573373913704749", "5447230712832900093", "5447322079672188622", "5447273383332982933",
+    "5447248197644759368", "5447125172601532302", "5447504761811152527", "5447350778643654936",
+    "5447178971361882917", "5449657274865855858", "5447368216210880101", "5449570941728238113",
+    "5447257874206079406", "5447293638398754172", "5449651377875759753", "5449544158312183877",
+    "5447626837666604366",
+]
+_RU_DIGIT_IDS = [
+    "5447319116144749900", "5447333323896565639", "5447460923079963614", "5447479365669530822",
+    "5447518059029899660", "5447390550040819386", "5447337507194712575", "5447607235435867238",
+    "5447613128130996255", "5447278176516484634",
+]
+assert len(_RU_ALPHABET) == len(_RU_LETTER_IDS) == 33 and len(_RU_DIGIT_IDS) == 10
+RU_LETTERS: dict[str, tuple[str, str]] = {ch: (_RU_LETTER_IDS[i], "🔤") for i, ch in enumerate(_RU_ALPHABET)}
+for _i, _id in enumerate(_RU_DIGIT_IDS):
+    RU_LETTERS[str(_i)] = (_id, _DIGIT_FALLBACK[_i])
+
+# Русский набор 2: А-Я (33 буквы, Ё после Е), затем цифры в порядке 1-9, 0
+_RU2_IDS = [
+    "5447530110708130665", "5447230339170742807", "5447447406817882347", "5447618818962666053",
+    "5447577509967210866", "5447377489045269455", "5447317432517572181", "5447261172740968678",
+    "5447411114344229341", "5447422517482400020", "5447392985287272553", "5447133311564556961",
+    "5447261529223246313", "5447556009360926622", "5447144306680834107", "5447339358325616319",
+    "5447135020961539886", "5449725891263377748", "5447445839154819718", "5447509000943875343",
+    "5447379894226955506", "5447218025499504973", "5447627365947585374", "5447569186320594616",
+    "5447426696485583895", "5447483596212318257", "5447517406194872082", "5447248579896844439",
+    "5447504628667169326", "5447246436708167410", "5447271609511487920", "5449637423527016005",
+    "5447446169867301980", "5447175187495693253", "5447250817574811668", "5447288256804728526",
+    "5449389689813379103", "5447218381981789278", "5447487547582231907", "5449469838198092992",
+    "5447440977251839229", "5447298637740684776", "5447405818649553650",
+]
+assert len(_RU2_IDS) == 43
+RU2_LETTERS: dict[str, tuple[str, str]] = {ch: (_RU2_IDS[i], "🔸") for i, ch in enumerate(_RU_ALPHABET)}
+for _i, _d in enumerate("1234567890"):
+    RU2_LETTERS[_d] = (_RU2_IDS[33 + _i], _DIGIT_FALLBACK[int(_d)])
+
 DEFAULT_SKIN = "plain"
 # Новые скины добавляются сюда: "map" это символ -> (id эмодзи, запасной символ).
 # Если есть "shop", скин платный: price кристаллов, покупается один раз и навсегда, лимитов нет.
@@ -476,7 +518,10 @@ SKINS: dict[str, dict] = {
     "set11": {"name": "Набор 11", "map": SET11_LETTERS, "shop": {"price": 39}},
     "set12": {"name": "Набор 12", "map": SET12_LETTERS, "shop": {"price": 89}},
     "set13": {"name": "Набор 13", "map": SET13_LETTERS, "shop": {"price": 399}},
+    "ru1": {"name": "Русский набор 1", "map": RU_LETTERS, "lang": "ru", "shop": {"price": 39}},
+    "ru2": {"name": "Русский набор 2", "map": RU2_LETTERS, "lang": "ru", "shop": {"price": 39}},
 }
+SKIN_LANGS = ("ru", "en")      # вкладки в списке скинов; у скина без "lang" язык en
 EM_SKINS_BTN = "5445224310270633584"   # значок кнопки «Скины» в разделе «Никнейм»
 SKINS_FIELD = "nick_skins"       # в профиле: список купленных донатных скинов
 
@@ -680,8 +725,8 @@ def _check_text(message: Message) -> tuple[str | None, str | None, str | None]:
     if text.startswith("/"):
         return None, None, "Имя не может начинаться с «/»."
     if not NICK_PATTERN.fullmatch(text):
-        return None, None, ("В имени можно использовать только английские буквы и цифры, "
-                            "без русских букв, пробелов, эмодзи и символов.")
+        return None, None, ("В имени можно использовать только английские и русские буквы и цифры, "
+                            "без пробелов, эмодзи и символов.")
     if any(e.type in FORBIDDEN_ENTITIES for e in entities):
         return None, None, "В имени нельзя использовать ссылки, упоминания и хэштеги."
     if re.search(r"(https?://|t\.me/|www\.|@\w)", text, re.I):
@@ -937,42 +982,66 @@ def _rbtn(label_html: str, data: str, style: str) -> str:
 
 
 SKIN_PAGE_SIZE = 7   # на странице: ник без эмодзи отдельным рядом, 3 ряда по 2 скина и один скин в конце
+_LAT = re.compile(r"[A-Za-z]")
+_CYR = re.compile(r"[А-Яа-яЁё]")
 
 
-def skin_pages() -> list[list[str]]:
-    """Страницы скинов. На каждой первым идёт обычный ник, дальше по SKIN_PAGE_SIZE скинов."""
-    rest = [k for k in SKINS if k != DEFAULT_SKIN]
+def skin_lang(key: str) -> str:
+    """Язык скина: ru для русских букв, en для остальных."""
+    return (SKINS.get(key) or {}).get("lang", "en")
+
+
+def _lang_no(lang: str) -> str:
+    return lang if lang in SKIN_LANGS else "en"
+
+
+def skin_pages(lang: str = "en") -> list[list[str]]:
+    """Страницы скинов одного языка. На каждой первым идёт обычный ник, дальше по SKIN_PAGE_SIZE скинов."""
+    lang = _lang_no(lang)
+    rest = [k for k in SKINS if k != DEFAULT_SKIN and skin_lang(k) == lang]
     return [rest[i:i + SKIN_PAGE_SIZE] for i in range(0, len(rest), SKIN_PAGE_SIZE)] or [[]]
 
 
 def skin_page_of(key: str) -> int:
-    """Номер страницы (с 1), на которой лежит скин."""
-    for n, page in enumerate(skin_pages(), 1):
+    """Номер страницы (с 1) внутри вкладки своего языка, на которой лежит скин."""
+    for n, page in enumerate(skin_pages(skin_lang(key)), 1):
         if key in page:
             return n
     return 1
 
 
-def _skin_page_no(page: int) -> int:
-    return max(1, min(int(page), len(skin_pages())))
+def _skin_page_no(page: int, lang: str = "en") -> int:
+    return max(1, min(int(page), len(skin_pages(lang))))
 
 
-def skin_html(user: dict, with_image: bool = False, page: int = 1) -> str:
-    """Скины по страницам. Надет: зелёный, куплен: синий, не куплен: красный (нажатие открывает покупку)."""
+def skin_sample(user: dict | None, lang: str = "en") -> str:
+    """Ник для примера на вкладке: свой, если в нём есть буквы этого языка, иначе Zoro или Зоро."""
+    nick = ((user or {}).get("nick_plain") if has_nick(user or {}) else "") or ""
+    if (_CYR if lang == "ru" else _LAT).search(nick):
+        return nick[:NICK_MAX]
+    return "Зоро" if lang == "ru" else "Zoro"
+
+
+def skin_html(user: dict, with_image: bool = False, page: int = 1, lang: str = "en") -> str:
+    """Скины по вкладкам RU/EN и страницам. Зелёный доступен, галочка на надетом, красный не куплен."""
     cur = skin_of(user)
-    sample = ((has_nick(user) and (user.get("nick_plain") or "")) or "Zoro")[:NICK_MAX]
-    page = _skin_page_no(page)
+    lang = _lang_no(lang)
+    sample = skin_sample(user, lang)
+    page = _skin_page_no(page, lang)
 
     def one(k: str) -> str:
         if k == cur:
-            return _rbtn(f"{_em(EM_SKIN_ON)} {apply_skin(sample, k)}", f"set:skin:{k}", "success")
+            return _rbtn(f"{_em(EM_SKIN_ON)} {apply_skin(sample, k)}", f"set:skin:{k}:{lang}", "success")
         if owns_skin(user, k):
-            return _rbtn(apply_skin(sample, k), f"set:skin:{k}", "success")
+            return _rbtn(apply_skin(sample, k), f"set:skin:{k}:{lang}", "success")
         return _rbtn(apply_skin(sample, k), f"donate:skin:{k}", "danger")
 
-    keys = skin_pages()[page - 1]
+    keys = skin_pages(lang)[page - 1]
     pairs, last = (keys[:-1], keys[-1]) if len(keys) % 2 else (keys, None)
-    rows = "<tg-button-row>" + one(DEFAULT_SKIN) + "</tg-button-row>"
+    tabs = "".join(_rbtn(t.upper(), f"set:skinp:{t}:1", "success" if t == lang else "primary")
+                   for t in SKIN_LANGS)
+    rows = "<tg-button-row>" + tabs + "</tg-button-row>"
+    rows += "<tg-button-row>" + one(DEFAULT_SKIN) + "</tg-button-row>"
     rows += "".join("<tg-button-row>" + "".join(one(k) for k in pairs[i:i + 2]) + "</tg-button-row>"
                     for i in range(0, len(pairs), 2))
     if last:
@@ -982,7 +1051,8 @@ def skin_html(user: dict, with_image: bool = False, page: int = 1) -> str:
         f"<p><b>{_em((EM_SKINS_BTN, '🔤'))} СКИНЫ НИКА</b></p>"
         "<blockquote><i>Нажми на скин, чтобы надеть его. "
         "Зелёные доступны тебе, галочка стоит на надетом, красные не куплены: "
-        "нажми на красный, чтобы увидеть цену и купить.</i></blockquote>"
+        "нажми на красный, чтобы увидеть цену и купить. "
+        "RU для русских букв, EN для английских.</i></blockquote>"
         + _tree([("Сейчас", name_html(user) if has_nick(user) else escape(default_name(user)))],
                 "Твой ник")
         + _gap()
@@ -990,13 +1060,14 @@ def skin_html(user: dict, with_image: bool = False, page: int = 1) -> str:
     )
 
 
-def skin_kb(user: dict, page: int = 1) -> InlineKeyboardMarkup:
+def skin_kb(user: dict, page: int = 1, lang: str = "en") -> InlineKeyboardMarkup:
     """Скины лежат кнопками в самом сообщении, внизу переключатель страниц и «Назад»."""
-    page = _skin_page_no(page)
-    total = len(skin_pages())
-    nav = [_btn("‹", f"set:skinp:{(page - 2) % total + 1}"),
+    lang = _lang_no(lang)
+    page = _skin_page_no(page, lang)
+    total = len(skin_pages(lang))
+    nav = [_btn("‹", f"set:skinp:{lang}:{(page - 2) % total + 1}"),
            _btn(f"{page}/{total}", "set:skinnoop"),
-           _btn("›", f"set:skinp:{page % total + 1}")] if total > 1 else []
+           _btn("›", f"set:skinp:{lang}:{page % total + 1}")] if total > 1 else []
     return _kb(nav, [_back("menu:player")])
 
 
@@ -1105,25 +1176,31 @@ async def on_skin_noop(callback: CallbackQuery):
     await callback.answer()
 
 
-@router.callback_query(F.data.regexp(r"^set:skinp:\d+$"))
+@router.callback_query(F.data.regexp(r"^set:skinp:(?:[a-z]{2}:)?\d+$"))
 async def on_skin_page(callback: CallbackQuery):
     user = await _need_user(callback)
     if user is None:
         return
-    page = _skin_page_no(int(callback.data.split(":")[2]))
+    parts = callback.data.split(":")
+    lang = _lang_no(parts[2]) if len(parts) == 4 else "en"
+    page = _skin_page_no(int(parts[-1]), lang)
     await callback.answer()
-    await _show(callback, "settings_skin", lambda wi: skin_html(user, wi, page), skin_kb(user, page))
+    await _show(callback, "settings_skin", lambda wi: skin_html(user, wi, page, lang),
+                skin_kb(user, page, lang))
 
 
-@router.callback_query(F.data.regexp(r"^set:skin:\w+$"))
+@router.callback_query(F.data.regexp(r"^set:skin:\w+(?::[a-z]{2})?$"))
 async def on_skin_pick(callback: CallbackQuery):
     user = await _need_user(callback)
     if user is None:
         return
-    key = callback.data.split(":")[2]
+    parts = callback.data.split(":")
+    key = parts[2]
     if key not in SKINS:
         await callback.answer("Такого скина нет", show_alert=True)
         return
+    # у «Обычного» языка нет: остаёмся на вкладке, с которой нажали
+    lang = skin_lang(key) if key != DEFAULT_SKIN else _lang_no(parts[3] if len(parts) == 4 else "en")
     if not owns_skin(user, key):
         await callback.answer("Этот скин не куплен: нажми на него в списке, чтобы купить.", show_alert=True)
         return
@@ -1138,8 +1215,9 @@ async def on_skin_pick(callback: CallbackQuery):
     _save_users()
     _led("nick_skin", uid=str(callback.from_user.id), old=old, new=key)
     await callback.answer(f"Скин: {SKINS[key]['name']}")
-    page = skin_page_of(key)
-    await _show(callback, "settings_skin", lambda wi: skin_html(user, wi, page), skin_kb(user, page))
+    page = skin_page_of(key) if key != DEFAULT_SKIN else 1
+    await _show(callback, "settings_skin", lambda wi: skin_html(user, wi, page, lang),
+                skin_kb(user, page, lang))
 
 
 @router.callback_query(F.data == "set:nick_reset")
