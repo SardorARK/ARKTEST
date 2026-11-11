@@ -810,11 +810,11 @@ def name_html(user: dict | None) -> str:
     if nick and not _is_legacy_nick(user) and _valid_html(nick):
         skin = skin_of(user)
         plain = user.get("nick_plain")
-        if skin != DEFAULT_SKIN and isinstance(plain, str) and plain:
+        if skin != DEFAULT_SKIN and isinstance(plain, str) and plain and skin_fits(plain[:NICK_MAX], skin):
             return apply_skin(plain[:NICK_MAX], skin)
         return nick
     # ника нет: скин применяется к имени из Telegram, если оно подходит под правила ника
-    if skin_of(user) != DEFAULT_SKIN and tg_name_fits(user):
+    if skin_of(user) != DEFAULT_SKIN and tg_name_fits(user) and skin_fits(user["tg_name"], skin_of(user)):
         return apply_skin(user["tg_name"], skin_of(user))
     return escape(default_name(user))
 
@@ -841,6 +841,14 @@ def tg_name_fits(user: dict | None) -> bool:
     if not NICK_MIN <= len(name) <= NICK_MAX:
         return False
     return not any(part in name.lower() for part in BANNED_PARTS)
+
+
+def skin_fits(text: str, key: str) -> bool:
+    """Подходит ли скин к тексту: английский скин не для русских букв, русский не для английских."""
+    if key == DEFAULT_SKIN:
+        return True
+    cyr, lat = bool(_CYR.search(text)), bool(_LAT.search(text))
+    return not cyr if skin_lang(key) == "en" else not lat
 
 
 def skin_base(user: dict | None) -> str | None:
@@ -1475,6 +1483,13 @@ async def on_skin_pick(callback: CallbackQuery):
             f"без пробелов, от {NICK_MIN} до {NICK_MAX} символов. Задай никнейм.",
             show_alert=True,
         )
+        return
+    if not skin_fits(skin_base(user), key):
+        if skin_lang(key) == "ru":
+            msg = "Русский скин не подходит к нику с английскими буквами. Измени ник на русский."
+        else:
+            msg = "Английский скин не подходит к нику с русскими буквами. Измени ник на английский."
+        await callback.answer(msg, show_alert=True)
         return
     if skin_of(user) == key:
         await callback.answer("Этот скин уже выбран")
