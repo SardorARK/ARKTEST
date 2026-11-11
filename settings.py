@@ -557,7 +557,7 @@ assert len(_RU5_IDS) == len(_RU5_ALPHABET) + 10
 RU5_LETTERS: dict[str, tuple[str, str]] = {ch: (_RU5_IDS[i], "😀") for i, ch in enumerate(_RU5_ALPHABET)}
 for _i, _d in enumerate("1234567890"):
     RU5_LETTERS[_d] = (_RU5_IDS[32 + _i], _DIGIT_FALLBACK[int(_d)])
-RU5_LETTERS["Н"] = ("5323256121056570549", "▫️")   # Н в наборе нет, взято отдельное эмодзи
+RU5_LETTERS["Н"] = ("5463021310420464478", "🙃")   # Н в наборе нет, взято отдельное эмодзи
 
 # Русский набор 6: А-Я (33 буквы, Ё после Е), затем цифры 0-9
 _RU6_IDS = [
