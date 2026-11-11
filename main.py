@@ -51,6 +51,7 @@ import arena
 import exrn
 import settings
 import mine
+import underground       # «Подземная шахта» (underground.py)
 import quick_cmds
 import friends
 import gift              # передача ресурсов игроку: «дать @ник» (gift.py)
@@ -1443,6 +1444,7 @@ IMG_TARGETS: dict[str, str] = {
     **market.IMG_TARGETS,
     **gift.IMG_TARGETS,
     **mine.IMG_TARGETS,
+    **underground.IMG_TARGETS,
     **boss.IMG_TARGETS,
     **cases.IMG_TARGETS,
     **equipment.IMG_TARGETS,
@@ -1599,6 +1601,22 @@ mine.setup(
     take_mine_boost=donate.take_mine_boost,    # эликсир одноразовый: расходуется при запуске
 )
 dp.include_router(mine.router)
+
+# «Подземная шахта» (underground.py): свои данные и кнопки ug:*, простую шахту не трогает
+underground.setup(
+    get_user=get_user,
+    save_users=save_users,
+    send_rich_card=send_rich_card,
+    show_rich_card=show_rich_card,
+    custom_emoji=custom_emoji,
+    COIN_EMOJI=COIN_EMOJI,
+    INFO_EMOJI=INFO_EMOJI,
+    BACK_EMOJI_ID=BACK_EMOJI_ID,
+    player_level=player_level,                 # уровни кирок открываются по уровню игрока
+    MINERALS_FIELD=MINERALS_FIELD,
+    MINERAL_EMOJI=MINERAL_EMOJI,
+)
+dp.include_router(underground.router)
 
 def drop_any_artifact(user: dict, tier: str):
     """Из сундука выпадает артефакт питомца, шахты или исследователей (поровну, в каждой редкости по 5 + 5 + 5)."""
