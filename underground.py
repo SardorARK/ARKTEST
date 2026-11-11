@@ -219,6 +219,8 @@ PICKS = _build_picks()
 PAGES = math.ceil(len(PICKS) / PER_PAGE)
 
 # Кастомные эмодзи заголовков (можно заменить на свои id)
+LEVEL_EMOJI = ("6028435952299413210", "ℹ")   # перед «Необходимый уровень»
+LOCK_EMOJI_ID = "5296369303661067030"        # замок на кнопке закрытой шахты
 UG_EMOJI = ("5461047575379466857", "⛏")      # как у шахты; поменяй на свой id при желании
 
 # Куда админ может добавить фото через /img
@@ -552,13 +554,12 @@ def ug_html(user_id: int, with_image: bool = False) -> str:
 
 def list_html(user_id: int, page: int = 0, with_image: bool = False) -> str:
     """Выбор шахты: текста почти нет, всё видно на кнопках и в карточке."""
-    return (f"{_image(with_image)}<p><b>{_ug()} Выбери шахту</b></p>"
-            f"<p>Страница {page + 1} из {PAGES}</p>")
+    return f"{_image(with_image)}<p><b>{_ug()} Выбери шахту</b></p>"
 
 
 def _level_text(user: dict, i: int) -> str:
     """Нужный уровень: просто число."""
-    return f"<b>Необходимый уровень</b>: {PICKS[i]['need_level']}"
+    return f"{D.custom_emoji(LEVEL_EMOJI)} <b>Необходимый уровень</b>: {PICKS[i]['need_level']}"
 
 
 STAT_MIN = 15      # за сколько минут показываем статистику на карточке шахты
@@ -586,6 +587,7 @@ def mine_html(user_id: int, i: int, with_image: bool = False) -> str:
         f"<blockquote><i>{p['desc']}</i></blockquote>"
         + _gap()
         + _tree(stats, f"В среднем за {STAT_MIN} минут", mono=False)
+        + _gap()
         + level
     )
 
@@ -713,7 +715,8 @@ def mine_kb(i: int):
         user, ug = load(user_id)
         p = PICKS[i]
         if not pick_unlocked(user, i):
-            main = _btn(f"🔒 Нужен {p['need_level']} уровень", f"ug:locked:{i}", ButtonStyle.DANGER)
+            main = _btn(f"Нужен {p['need_level']} уровень", f"ug:locked:{i}", ButtonStyle.DANGER,
+                        LOCK_EMOJI_ID)
         elif i == selected(ug):
             main = _checked("Используется", f"ug:use:{i}")
         else:
