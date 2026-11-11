@@ -68,14 +68,11 @@ ORES: dict[str, dict] = {
 # LVL2 и LVL3 это рост примерно на четверть за ступень, цифры можно менять свободно.
 PICKS = [
     {"name": "WOOD-LVL1", "icon": "🪵", "digs": 50, "drops": (30, 50), "need_level": 1,
-     "desc": "Неглубокий штрек. Порода мягкая, кирка справляется без труда.",
-     "perk": "Доступна сразу, лучший старт для новичка"},
+     "desc": "Неглубокий штрек. Порода мягкая, кирка справляется без труда."},
     {"name": "WOOD-LVL2", "icon": "🪵", "digs": 60, "drops": (38, 60), "need_level": 3,
-     "desc": "Глубже и богаче. Здесь уже нужна опытная рука.",
-     "perk": "Больше копаний и больше добычи за один запуск"},
+     "desc": "Глубже и богаче. Здесь уже нужна опытная рука."},
     {"name": "WOOD-LVL3", "icon": "🪵", "digs": 70, "drops": (46, 70), "need_level": 5,
-     "desc": "Самый глубокий штрек. Добычи больше всего, а порода крепче.",
-     "perk": "Самая богатая добыча среди шахт WOOD"},
+     "desc": "Самый глубокий штрек. Добычи больше всего, а порода крепче."},
 ]
 
 # Кастомные эмодзи заголовков (можно заменить на свои id)
@@ -275,19 +272,6 @@ def _found_rows(ug: dict) -> list:
     return rows
 
 
-def _avg_drops(p: dict) -> float:
-    return sum(p["drops"]) / 2
-
-
-def _advantage(i: int) -> str:
-    """Преимущество шахты: описание и, для старших шахт, прибавка к добыче."""
-    p = PICKS[i]
-    if i == 0:
-        return p["perk"]
-    gain = round((_avg_drops(p) / _avg_drops(PICKS[0]) - 1) * 100)
-    return f"{p['perk']}. Добыча за запуск примерно на {gain}% больше, чем у {PICKS[0]['name']}"
-
-
 # ---------- Экраны ----------
 
 def ug_html(user_id: int, with_image: bool = False) -> str:
@@ -344,40 +328,21 @@ def list_html(user_id: int, with_image: bool = False) -> str:
 
 
 def mine_html(user_id: int, i: int, with_image: bool = False) -> str:
-    """Карточка шахты: характеристики, преимущество, состояние и добыча."""
+    """Карточка шахты: только описание и характеристики."""
     user, ug = load(user_id)
     p = PICKS[i]
-    run = ug["run"]
     lo, hi = p["drops"]
-    plevel = D.player_level(user)
-
     stats = [
         ("⛏ Копаний за запуск", str(p["digs"])),
         ("📦 Добыча за запуск", f"{lo}-{hi} шт."),
         ("⏳ Длительность", f"{RUN_MINUTES} мин"),
-        ("🎚 Нужен уровень игрока", f"{p['need_level']} (у тебя {plevel})"),
+        ("🎚 Нужен уровень игрока", f"{p['need_level']} (у тебя {D.player_level(user)})"),
     ]
-    state = [("📋 Статус", _status(user, ug, i))]
-    if run is not None and run["pick"] == i:
-        now = time.time()
-        frac = (now - run["start"]) / max(1.0, run["end"] - run["start"])
-        state += [
-            ("⏳ Прогресс", _bar(frac)),
-            ("⏱ До конца", fmt_dur(run["end"] - now)),
-            ("⛏ Копаний", f"{run['given']}/{len(run['plan'])}"),
-        ]
-    state.append(("🔁 Запусков сегодня", f"{runs_today(ug)}/{DAILY_RUNS}"))
-
     return (
         f"{_image(with_image)}"
         f"<p><b>{p['icon']} {p['name']}</b></p>"
         f"<blockquote><i>{p['desc']}</i></blockquote>"
         + _tree(stats, "Характеристики")
-        + _gap()
-        + f"<p><b>Преимущество</b></p><blockquote>{_advantage(i)}.</blockquote>"
-        + _tree(state, "Состояние")
-        + _gap()
-        + _quote("Добыто, ещё не забрано", _found_rows(ug), expandable=True)
     )
 
 
@@ -400,7 +365,7 @@ def bag_html(user_id: int, with_image: bool = False) -> str:
         "Продай её за монеты.</i></blockquote>"
         + _quote("Руда", rows)
         + _gap()
-        + _quote("Итого", total)
+        + _tree(total, "Итого")
     )
 
 
@@ -463,15 +428,7 @@ def mine_kb(i: int):
             main = _btn("✅ Используется", f"ug:use:{i}", ButtonStyle.SUCCESS)
         else:
             main = _btn("Использовать", f"ug:use:{i}", ButtonStyle.SUCCESS)
-        rows = [[main]]
-        if pick_unlocked(user, i) and i == selected(ug) and _can_start(ug):
-            rows.append([_btn(f"Запустить ({RUN_MINUTES} мин)", f"ug:start:{i}"),
-                         _btn("🔄 Обновить", f"ug:m:{i}", ButtonStyle.PRIMARY)])
-        else:
-            rows.append([_btn("🔄 Обновить", f"ug:m:{i}", ButtonStyle.PRIMARY)])
-        rows.append([_collect_btn(ug, f":{i}")])
-        rows.append(_back("ug:list"))
-        return InlineKeyboardMarkup(inline_keyboard=rows)
+        return InlineKeyboardMarkup(inline_keyboard=[[main], _back("ug:list")])
     return kb
 
 
