@@ -5,7 +5,8 @@ user["ug"], свои кнопки (callback_data начинается с «ug:»
 кнопка «Подземная шахта» (ug:open) и кнопка «Назад» (mine:open).
 
 Как это работает:
-  * Игрок запускает шахту кнопкой нужного уровня кирки. Один запуск длится RUN_MINUTES минут.
+  * Кнопка «Подземная шахта» ведёт на выбор из трёх шахт (WOOD-LVL1..3). Игрок открывает одну
+    и запускает её. Одновременно работает только одна шахта. Один запуск длится RUN_MINUTES минут.
   * В момент запуска результат всего запуска бросается заранее (план копаний), а на экране
     открывается постепенно по времени. Перезаход в бот или нажатие кнопок результат не меняет.
   * Добычу нужно забрать кнопкой «Забрать». Руда уходит в рюкзак, минералы сразу идут
@@ -75,8 +76,8 @@ UG_EMOJI = ("5461047575379466857", "⛏")      # как у шахты; поме�
 
 # Куда админ может добавить фото через /img
 IMG_TARGETS: dict[str, str] = {
-    "ug": "Подземная шахта",
-    "ug_info": "Подземная шахта: цены и шансы",
+    "ug": "Подземные шахты (выбор)",
+    "ug_mine": "Подземная шахта (карточка шахты)",
 }
 
 
@@ -214,108 +215,68 @@ def _image(with_image: bool) -> str:
     return '<img src="tg://photo?id=pet"/>' if with_image else ""
 
 
-def _expected_run(pick: dict) -> tuple[int, int]:
-    """(монет, минералов) в среднем за запуск, для экрана «Цены и шансы»."""
-    drops = sum(pick["drops"]) / 2
-    wsum = sum(o["weight"] for o in ORES.values())
-    avg_ore = sum(o["price"] * o["weight"] for o in ORES.values()) / wsum
-    minerals = drops * MINERAL_CHANCE / 100
-    coins = drops * (1 - MINERAL_CHANCE / 100) * avg_ore
-    return round(coins), round(minerals)
+def _loot_line(box: dict) -> str:
+    """Короткая строка добычи: 🪨 3  ⚫ 2  🟠 1"""
+    parts = [f"{o['icon']} {box[k]}" for k, o in ORES.items()]
+    if "mineral" in box:
+        parts.append(f"{D.MINERAL_EMOJI} {box['mineral']}")
+    return "  ".join(parts)
+
+
+def _status(user: dict, ug: dict, i: int) -> str:
+    """Короткий статус шахты i для кнопки и карточки."""
+    run = ug["run"]
+    if run is not None:
+        return "работает" if run["pick"] == i else "занята"
+    if not pick_unlocked(user, i):
+        return f"с {PICKS[i]['need_level']} ур."
+    if runs_left(ug) <= 0:
+        return "лимит на сегодня"
+    wait = cooldown_left(ug)
+    if wait > 0:
+        return f"отдых {fmt_dur(wait)}"
+    return "готова"
 
 
 # ---------- Экраны ----------
 
 def ug_html(user_id: int, with_image: bool = False) -> str:
+    """Выбор шахты: три шахты, общий рюкзак."""
     user, ug = load(user_id)
-    run = ug["run"]
-
-    if run is not None:
-        now = time.time()
-        pk = PICKS[run["pick"]]
-        total = len(run["plan"])
-        frac = (now - run["start"]) / max(1.0, run["end"] - run["start"])
-        state = [
-            (f"{_ug()} Шахта", "Работает 🟢"),
-            ("🪵 Кирка", pk["name"]),
-            ("⏳ Прогресс", _bar(frac)),
-            ("⏱ До конца", fmt_dur(run["end"] - now)),
-            ("⛏ Копаний", f"{run['given']}/{total}"),
-        ]
-    else:
-        wait = cooldown_left(ug)
-        left = runs_left(ug)
-        if left <= 0:
-            status = "Лимит на сегодня исчерпан"
-        elif wait > 0:
-            status = f"Отдых, ещё {fmt_dur(wait)}"
-        else:
-            status = "Готова к запуску"
-        state = [
-            (f"{_ug()} Шахта", "Стоит 🔴"),
-            ("📋 Статус", status),
-            ("🔁 Запусков сегодня", f"{runs_today(ug)}/{DAILY_RUNS}"),
-            ("⏳ Длительность", f"{RUN_MINUTES} мин"),
-        ]
-
-    pend = ug["pending"]
-    found = [
-        (f"{o['icon']} {o['name']}", f"{pend[k]} шт.") for k, o in ORES.items()
-    ] + [(f"{D.MINERAL_EMOJI} Минералы", f"{pend['mineral']} шт.")]
-
-    bag = [
-        (f"{o['icon']} {o['name']}", f"{ug['ores'][k]} шт.") for k, o in ORES.items()
-    ] + [(f"{_coin()} Стоимость рюкзака", fmt(bag_value(ug)))]
-
-    return (
-        f"{_image(with_image)}"
-        f"<p><b>{_ug()} ПОДЗЕМНАЯ ШАХТА</b></p>"
-        "<blockquote><i>Спустись под землю: кирка бьёт породу, а в добыче попадаются "
-        "руда и минералы. Минералы повышают уровень игрока.</i></blockquote>"
-        + _tree(state, "Состояние")
-        + _gap()
-        + _tree(found, "Добыто, ещё не забрано")
-        + _gap()
-        + _tree(bag, "Рюкзак с рудой")
-    )
-
-
-def info_html(user_id: int, with_image: bool = False) -> str:
-    user, ug = load(user_id)
-    wsum = sum(o["weight"] for o in ORES.values())
-    ore_share = 100 - MINERAL_CHANCE
-    chances = [(f"{D.MINERAL_EMOJI} Минерал", f"{MINERAL_CHANCE}%")]
-    for k, o in ORES.items():
-        share = ore_share * o["weight"] / wsum
-        chances.append((f"{o['icon']} {o['name']} ({o['price']} монет)", f"{share:.0f}%"))
-
-    levels = []
-    for i, p in enumerate(PICKS):
-        lo, hi = p["drops"]
-        coins, mins = _expected_run(p)
-        mark = "открыта" if pick_unlocked(user, i) else f"с {p['need_level']} уровня игрока"
-        levels.append((
-            f"{p['icon']} {p['name']}", mark,
-            [("Копаний", str(p["digs"])),
-             ("Добыча за запуск", f"{lo}-{hi}"),
-             ("В среднем", f"~{coins} монет и ~{mins} минералов")],
-        ))
-
-    rules = [
-        ("⏳ Запуск", f"{RUN_MINUTES} мин"),
-        ("😴 Пауза между запусками", f"{COOLDOWN_MIN} мин"),
-        ("🔁 Запусков в сутки", str(DAILY_RUNS)),
+    rows = [
+        ("🔁 Запусков сегодня", f"{runs_today(ug)}/{DAILY_RUNS}"),
+        (f"{_coin()} Руда в рюкзаке", f"{fmt(bag_value(ug))}"),
     ]
     return (
         f"{_image(with_image)}"
-        f"<p><b>{_ug()} ЦЕНЫ И ШАНСЫ</b></p>"
-        "<blockquote><i>Шанс показан на одно удачное копание. "
-        "Чем дешевле руда, тем она чаще.</i></blockquote>"
-        + _tree(chances, "Что выпадает")
+        f"<p><b>{_ug()} ПОДЗЕМНЫЕ ШАХТЫ</b></p>"
+        "<blockquote><i>Выбери шахту. Работает одна за раз.</i></blockquote>"
+        + _tree(rows)
+    )
+
+
+def mine_html(user_id: int, i: int, with_image: bool = False) -> str:
+    """Одна шахта: статус, добыча, рюкзак."""
+    user, ug = load(user_id)
+    p = PICKS[i]
+    run = ug["run"]
+    rows = [("📋 Статус", _status(user, ug, i))]
+    if run is not None and run["pick"] == i:
+        now = time.time()
+        frac = (now - run["start"]) / max(1.0, run["end"] - run["start"])
+        rows.append(("⏳ Прогресс", _bar(frac)))
+        rows.append(("⏱ До конца", fmt_dur(run["end"] - now)))
+    lo, hi = p["drops"]
+    info = [("⛏ Копаний", str(p["digs"])), ("📦 Добыча", f"{lo}-{hi}")]
+    return (
+        f"{_image(with_image)}"
+        f"<p><b>{p['icon']} {p['name']}</b></p>"
+        + _tree(rows)
         + _gap()
-        + _tree(levels, "Кирки")
+        + _tree(info)
         + _gap()
-        + _tree(rules, "Правила")
+        + f"<p><b>Добыто:</b> {_loot_line(ug['pending'])}</p>"
+        + f"<p><b>Рюкзак:</b> {_loot_line(ug['ores'])}</p>"
     )
 
 
@@ -331,54 +292,73 @@ def _back(data: str) -> list[InlineKeyboardButton]:
     return [_btn("Назад", data, ButtonStyle.PRIMARY, D.BACK_EMOJI_ID)]
 
 
+def _sell_btn(ug: dict, suffix: str) -> InlineKeyboardButton:
+    value = bag_value(ug)
+    label = f"Продать руду (+{fmt(value)})" if value else "Продать руду"
+    return _btn(label, f"ug:sell{suffix}", emoji_id=D.COIN_EMOJI[0])
+
+
 def ug_kb(user_id: int) -> InlineKeyboardMarkup:
     user, ug = load(user_id)
-    rows: list[list[InlineKeyboardButton]] = []
-
-    if is_running(ug):
-        rows.append([_btn("🔄 Обновить", "ug:open", ButtonStyle.PRIMARY)])
-    else:
-        ready = runs_left(ug) > 0 and cooldown_left(ug) <= 0
-        for i, p in enumerate(PICKS):
-            if not pick_unlocked(user, i):
-                rows.append([_btn(f"🔒 {p['name']} (нужен {p['need_level']} ур. игрока)",
-                                  f"ug:locked:{i}", ButtonStyle.DANGER)])
-            elif ready:
-                rows.append([_btn(f"{p['icon']} Запустить {p['name']}", f"ug:start:{i}")])
-            else:
-                rows.append([_btn(f"{p['icon']} {p['name']}", "ug:open", ButtonStyle.PRIMARY)])
-
-    take = pending_total(ug)
-    if take:
-        rows.append([_btn(f"📦 Забрать добычу ({take})", "ug:collect")])
-    if bag_value(ug):
-        rows.append([_btn(f"Продать руду (+{fmt(bag_value(ug))})", "ug:sell", emoji_id=D.COIN_EMOJI[0])])
-    rows.append([_btn("📊 Цены и шансы", "ug:info", ButtonStyle.PRIMARY)])
+    rows = []
+    for i, p in enumerate(PICKS):
+        if not pick_unlocked(user, i):
+            rows.append([_btn(f"🔒 {p['name']}: с {p['need_level']} ур. игрока",
+                              f"ug:locked:{i}", ButtonStyle.DANGER)])
+        else:
+            rows.append([_btn(f"{p['icon']} {p['name']}: {_status(user, ug, i)}",
+                              f"ug:m:{i}", ButtonStyle.PRIMARY)])
+    if pending_total(ug):
+        rows.append([_btn(f"📦 Забрать добычу ({pending_total(ug)})", "ug:collect")])
+    rows.append([_sell_btn(ug, "")])
     rows.append(_back("mine:open"))
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def info_kb(user_id: int) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[_back("ug:open")])
+def mine_kb(i: int):
+    def kb(user_id: int) -> InlineKeyboardMarkup:
+        user, ug = load(user_id)
+        run = ug["run"]
+        rows = []
+        if run is not None and run["pick"] == i:
+            rows.append([_btn("🔄 Обновить", f"ug:m:{i}", ButtonStyle.PRIMARY)])
+        elif run is None and runs_left(ug) > 0 and cooldown_left(ug) <= 0:
+            rows.append([_btn(f"Запустить на {RUN_MINUTES} мин", f"ug:start:{i}")])
+        else:
+            rows.append([_btn("🔄 Обновить", f"ug:m:{i}", ButtonStyle.PRIMARY)])
+        if pending_total(ug):
+            rows.append([_btn(f"📦 Забрать добычу ({pending_total(ug)})", f"ug:collect:{i}")])
+        rows.append([_sell_btn(ug, f":{i}")])
+        rows.append(_back("ug:open"))
+        return InlineKeyboardMarkup(inline_keyboard=rows)
+    return kb
 
 
 # ---------- Отправка ----------
 
-SCREENS = {
-    "ug": (ug_html, ug_kb),
-    "ug_info": (info_html, info_kb),
-}
+SCREENS = {"ug": (ug_html, ug_kb)}
+for _i in range(len(PICKS)):
+    SCREENS[f"ug_mine_{_i}"] = (
+        lambda uid, wi=False, i=_i: mine_html(uid, i, wi),
+        mine_kb(_i),
+    )
+
+
+def img_key(key: str) -> str:
+    """У всех карточек шахт одно общее фото."""
+    return "ug_mine" if key.startswith("ug_mine_") else key
 
 
 async def send_screen(bot, chat_id: int, user_id: int, key: str) -> None:
     html, kb = SCREENS[key]
-    await D.send_rich_card(bot, chat_id, key, lambda wi: html(user_id, wi), kb(user_id))
+    await D.send_rich_card(bot, chat_id, img_key(key), lambda wi: html(user_id, wi), kb(user_id))
 
 
 async def send_preview(bot, chat_id: int, user_id: int, key: str) -> None:
-    """Предпросмотр для /img: без кнопок под сообщением."""
+    """Предпросмотр для /img: без кнопок под сообщением. Ключ \"ug_mine\" показывает первую шахту."""
+    key = "ug_mine_0" if key == "ug_mine" else key
     html, _ = SCREENS[key]
-    await D.send_rich_card(bot, chat_id, key, lambda wi: html(user_id, wi))
+    await D.send_rich_card(bot, chat_id, img_key(key), lambda wi: html(user_id, wi))
 
 
 async def _require_user(callback: CallbackQuery) -> dict | None:
@@ -391,7 +371,25 @@ async def _require_user(callback: CallbackQuery) -> dict | None:
 async def _show(callback: CallbackQuery, key: str) -> None:
     uid = callback.from_user.id
     html, kb = SCREENS[key]
-    await D.show_rich_card(callback, key, lambda wi: html(uid, wi), kb(uid))
+    await D.show_rich_card(callback, img_key(key), lambda wi: html(uid, wi), kb(uid))
+
+
+def _index(callback: CallbackQuery, pos: int = 2) -> int | None:
+    """Номер шахты из callback_data (или None, если его нет или он неверный)."""
+    parts = callback.data.split(":")
+    if len(parts) <= pos:
+        return None
+    try:
+        i = int(parts[pos])
+    except ValueError:
+        return None
+    return i if 0 <= i < len(PICKS) else None
+
+
+async def _back_to_screen(callback: CallbackQuery) -> None:
+    """После «Забрать» и «Продать»: остаёмся на той же шахте или в общем списке."""
+    i = _index(callback)
+    await _show(callback, f"ug_mine_{i}" if i is not None else "ug")
 
 
 # ---------- Хендлеры ----------
@@ -404,25 +402,33 @@ async def on_open(callback: CallbackQuery):
     await _show(callback, "ug")
 
 
-@router.callback_query(F.data == "ug:info")
-async def on_info(callback: CallbackQuery):
-    if await _require_user(callback) is None:
+@router.callback_query(F.data.regexp(r"^ug:m:\d+$"))
+async def on_mine(callback: CallbackQuery):
+    user = await _require_user(callback)
+    if user is None:
+        return
+    i = _index(callback)
+    if i is None:
+        await callback.answer()
+        return
+    if not pick_unlocked(user, i):
+        await callback.answer(f"{PICKS[i]['name']} откроется на {PICKS[i]['need_level']} уровне игрока.",
+                              show_alert=True)
         return
     await callback.answer()
-    await _show(callback, "ug_info")
+    await _show(callback, f"ug_mine_{i}")
 
 
 @router.callback_query(F.data.regexp(r"^ug:locked:\d+$"))
 async def on_locked(callback: CallbackQuery):
     if await _require_user(callback) is None:
         return
-    try:
-        p = PICKS[int(callback.data.split(":")[2])]
-    except (ValueError, IndexError):
+    i = _index(callback)
+    if i is None:
         await callback.answer()
         return
     await callback.answer(
-        f"{p['name']} откроется на {p['need_level']} уровне игрока. "
+        f"{PICKS[i]['name']} откроется на {PICKS[i]['need_level']} уровне игрока. "
         "Минералы из шахты помогут его набрать.",
         show_alert=True,
     )
@@ -433,12 +439,8 @@ async def on_start(callback: CallbackQuery):
     user = await _require_user(callback)
     if user is None:
         return
-    try:
-        i = int(callback.data.split(":")[2])
-    except ValueError:
-        await callback.answer()
-        return
-    if not 0 <= i < len(PICKS):
+    i = _index(callback)
+    if i is None:
         await callback.answer()
         return
 
@@ -447,8 +449,8 @@ async def on_start(callback: CallbackQuery):
     p = PICKS[i]
 
     if is_running(ug):
-        await callback.answer("Шахта уже работает.", show_alert=True)
-        await _show(callback, "ug")
+        await callback.answer("Одна шахта уже работает. Дождись её конца.", show_alert=True)
+        await _show(callback, f"ug_mine_{i}")
         return
     if not pick_unlocked(user, i):
         await callback.answer(f"{p['name']} откроется на {p['need_level']} уровне игрока.",
@@ -474,11 +476,11 @@ async def on_start(callback: CallbackQuery):
         "given": 0,
     }
     D.save_users()
-    await callback.answer(f"Шахта запущена на {RUN_MINUTES} мин!")
-    await _show(callback, "ug")
+    await callback.answer(f"{p['name']} запущена на {RUN_MINUTES} мин!")
+    await _show(callback, f"ug_mine_{i}")
 
 
-@router.callback_query(F.data == "ug:collect")
+@router.callback_query(F.data.regexp(r"^ug:collect(:\d+)?$"))
 async def on_collect(callback: CallbackQuery):
     user = await _require_user(callback)
     if user is None:
@@ -498,24 +500,25 @@ async def on_collect(callback: CallbackQuery):
     if minerals:
         user[D.MINERALS_FIELD] = int(user.get(D.MINERALS_FIELD, 0) or 0) + minerals
     D.save_users()
-    note = f"Минералов получено: {minerals}. " if minerals else ""
-    await callback.answer(f"{note}Руда лежит в рюкзаке.")
-    await _show(callback, "ug")
+    note = f"Минералов: +{minerals}. " if minerals else ""
+    await callback.answer(f"{note}Руда в рюкзаке.")
+    await _back_to_screen(callback)
 
 
-@router.callback_query(F.data == "ug:sell")
+@router.callback_query(F.data.regexp(r"^ug:sell(:\d+)?$"))
 async def on_sell(callback: CallbackQuery):
     user = await _require_user(callback)
     if user is None:
         return
     ug = get_ug(user)
+    settle(ug)
     gain = bag_value(ug)
     if gain < 1:
-        await callback.answer("Рюкзак пуст: продавать нечего.", show_alert=True)
+        await callback.answer("Рюкзак пуст. Сначала забери добычу.", show_alert=True)
         return
     for k in ORES:
         ug["ores"][k] = 0
     user["coins"] += gain
     D.save_users()
-    await callback.answer(f"Продано. Получено монет: {fmt(gain)}")
-    await _show(callback, "ug")
+    await callback.answer(f"Продано. Монет: +{fmt(gain)}")
+    await _back_to_screen(callback)
