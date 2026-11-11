@@ -28,7 +28,7 @@ from aiogram import F, Router
 from aiogram.enums import ButtonStyle
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup
 
-from mine import _bar, _button, _gap, _note, _tree, fmt, fmt_dur   # оформление как в «Шахтах»
+from mine import _bar, _gap, fmt, fmt_dur   # оформление как в «Шахтах»
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -48,7 +48,7 @@ def setup(**deps) -> None:
 # ---------- Баланс подземной шахты (всё меняется только здесь) ----------
 
 RUN_MINUTES = 15         # длительность одного запуска
-COOLDOWN_MIN = 60        # пауза после окончания запуска до следующего
+COOLDOWN_MIN = 10        # пауза после окончания запуска до следующего
 DAILY_RUNS = 4           # сколько запусков в сутки (счёт по дате UTC)
 
 MINERAL_CHANCE = 35      # шанс (%), что копание даст минерал; всё остальное это руда
@@ -228,10 +228,34 @@ def _image(with_image: bool) -> str:
     return '<img src="tg://photo?id=pet"/>' if with_image else ""
 
 
+def _line(label: str, value: str) -> str:
+    """Подпись жирным, значение моноширинным (по нажатию копируется)."""
+    if value == "":
+        return f"<b>{label}</b>"
+    return f"<b>{label}</b>: <code>{value}</code>"
+
+
+def _tree(rows: list, title: str = "") -> str:
+    """Блок с рамочкой ├ └ как в «Шахтах». Строка: (подпись, значение) или
+    (подпись, значение, [вложенные (подпись, значение)])."""
+    lines = []
+    for n, row in enumerate(rows):
+        label, value = row[0], row[1]
+        kids = row[2] if len(row) > 2 else []
+        last = n == len(rows) - 1
+        lines.append(f"{'└' if last else '├'} {_line(label, value)}")
+        pad = "&nbsp;&nbsp;&nbsp;" if last else "│&nbsp;&nbsp;"
+        for k, (kl, kv) in enumerate(kids):
+            kmark = "└" if k == len(kids) - 1 else "├"
+            lines.append(f"{pad}{kmark} {_line(kl, kv)}")
+    head = f"<b>{title}</b><br>" if title else ""
+    return f"<p>{head}{'<br>'.join(lines)}</p>"
+
+
 def _quote(title: str, rows: list, expandable: bool = False) -> str:
     """Заголовок и блок-цитата со строками «подпись: значение».
     expandable=True: цитата сворачивается (Telegram: <blockquote expandable>)."""
-    lines = "<br>".join(f"{lab}: <b>{val}</b>" if val != "" else lab for lab, val in rows)
+    lines = "<br>".join(_line(lab, val) for lab, val in rows)
     tag = "<blockquote expandable>" if expandable else "<blockquote>"
     return f"<p><b>{title}</b></p>{tag}{lines}</blockquote>"
 
