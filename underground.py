@@ -388,7 +388,7 @@ def bag_html(user_id: int, with_image: bool = False) -> str:
 
 # ---------- Клавиатуры ----------
 
-def _btn(text: str, data: str, style: ButtonStyle = ButtonStyle.SUCCESS,
+def _btn(text: str, data: str, style: ButtonStyle | None = ButtonStyle.SUCCESS,
          emoji_id: str | None = None) -> InlineKeyboardButton:
     return InlineKeyboardButton(text=text, callback_data=data, style=style,
                                 icon_custom_emoji_id=emoji_id)
@@ -418,19 +418,26 @@ def ug_kb(user_id: int) -> InlineKeyboardMarkup:
 
 
 def list_kb(user_id: int) -> InlineKeyboardMarkup:
-    """Используемая шахта с галочкой, открытые зелёные, закрытые красные."""
+    """Перед каждой группой шахт (WOOD, ROCK) стоит мёртвая кнопка-заголовок без цвета.
+    Используемая шахта с галочкой, открытые зелёные, закрытые красные."""
     user, ug = load(user_id)
     sel = selected(ug)
-    mines = []
+    groups: dict[str, list[InlineKeyboardButton]] = {}
     for i, p in enumerate(PICKS):
         if not pick_unlocked(user, i):
-            mines.append(_btn(p["name"], f"ug:m:{i}", ButtonStyle.DANGER))
+            btn = _btn(p["name"], f"ug:m:{i}", ButtonStyle.DANGER)
         elif i == sel:
-            mines.append(_btn(f"✅ {p['name']}", f"ug:m:{i}", ButtonStyle.SUCCESS))
+            btn = _btn(f"✅ {p['name']}", f"ug:m:{i}", ButtonStyle.SUCCESS)
         else:
-            mines.append(_btn(p["name"], f"ug:m:{i}", ButtonStyle.SUCCESS))
-    rows = [mines[n:n + 3] for n in range(0, len(mines), 3)]      # по три шахты в ряд
-    return InlineKeyboardMarkup(inline_keyboard=rows + [_back("ug:open")])
+            btn = _btn(p["name"], f"ug:m:{i}", ButtonStyle.SUCCESS)
+        groups.setdefault(p["name"].split("-")[0], []).append(btn)
+
+    rows: list[list[InlineKeyboardButton]] = []
+    for group, buttons in groups.items():
+        rows.append([_btn(group, "ug:noop", None)])           # мёртвая кнопка-заголовок
+        rows += [buttons[n:n + 3] for n in range(0, len(buttons), 3)]
+    rows.append(_back("ug:open"))
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def mine_kb(i: int):
@@ -520,6 +527,12 @@ async def on_open(callback: CallbackQuery):
         return
     await callback.answer()
     await _show(callback, "ug")
+
+
+@router.callback_query(F.data == "ug:noop")
+async def on_noop(callback: CallbackQuery):
+    """Мёртвая кнопка-заголовок: ничего не делает, только гасит «часики»."""
+    await callback.answer()
 
 
 @router.callback_query(F.data == "ug:list")
