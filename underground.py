@@ -225,7 +225,11 @@ LOCK_EMOJI = (LOCK_EMOJI_ID, "🔒")
 TIME_EMOJI = ("5891211339170326418", "⌛️")    # песочные часы: время запуска
 BOX_EMOJI_ID = "5854908544712707500"         # кнопка «Забрать»
 START_EMOJI_ID = "5906852613629941703"       # кнопка «Запустить»
-STOP_EMOJI_ID = "5907027122446145395"        # кнопка «Остановить»           # замок в списке времени запуска
+STOP_EMOJI_ID = "5907027122446145395"        # кнопка «Остановить»
+PROGRESS_EMOJI = ("5346141991732273337", "📶")   # строка «Прогресс»
+LEFT_EMOJI = ("5850317551090800862", "⏰")       # строка «До конца»
+MINES_EMOJI_ID = "5465589000783812364"       # кнопка «Шахты»
+REFRESH_EMOJI_ID = "4940489017889129308"     # кнопка «Обновить»           # замок в списке времени запуска
 
 # Куда админ может добавить фото через /img
 IMG_TARGETS: dict[str, str] = {
@@ -533,8 +537,8 @@ def ug_html(user_id: int, with_image: bool = False) -> str:
     state = [
         (f"{_ug()} Шахта", pk["name"]),
         (f"{D.custom_emoji(TIME_EMOJI)} Время запуска", total),
-        ("⏳ Прогресс", _bar(frac)),
-        ("⏱ До конца", left),
+        (f"{D.custom_emoji(PROGRESS_EMOJI)} Прогресс", _bar(frac)),
+        (f"{D.custom_emoji(LEFT_EMOJI)} До конца", left),
     ]
     if run is None:
         wait = cooldown_left(ug)
@@ -680,17 +684,20 @@ def _collect_btn(ug: dict, suffix: str = "") -> InlineKeyboardButton:
 
 
 def ug_kb(user_id: int) -> InlineKeyboardMarkup:
+    """Компактно: 2 кнопки в ряд, чтобы клавиатура не уходила вниз."""
     _, ug = load(user_id)
     sel = selected(ug)
-    rows = [[_btn("⛏ Шахты", f"ug:list:{sel // PER_PAGE}", ButtonStyle.PRIMARY),
-             _btn("🎒 Рюкзак", "ug:bag", ButtonStyle.PRIMARY)],
-            [_btn("Время запуска", "ug:time", ButtonStyle.PRIMARY, TIME_EMOJI[0])]]
+    rows = [
+        [_btn("Шахты", f"ug:list:{sel // PER_PAGE}", ButtonStyle.PRIMARY, MINES_EMOJI_ID),
+         _btn("🎒 Рюкзак", "ug:bag", ButtonStyle.PRIMARY)],
+        [_btn("Время запуска", "ug:time", ButtonStyle.PRIMARY, TIME_EMOJI[0]),
+         _collect_btn(ug)],
+    ]
     if ug["run"] is None:       # если рано, бот скажет причину: отдых
         rows.append([_btn("Запустить", f"ug:start:{sel}", ButtonStyle.SUCCESS, START_EMOJI_ID)])
     else:
-        rows.append([_btn("Остановить", "ug:stop", ButtonStyle.DANGER, STOP_EMOJI_ID)])
-        rows.append([_btn("🔄 Обновить", "ug:open", ButtonStyle.PRIMARY)])
-    rows.append([_collect_btn(ug)])
+        rows.append([_btn("Остановить", "ug:stop", ButtonStyle.DANGER, STOP_EMOJI_ID),
+                     _btn("Обновить", "ug:open", ButtonStyle.PRIMARY, REFRESH_EMOJI_ID)])
     rows.append(_back("mine:open"))
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
