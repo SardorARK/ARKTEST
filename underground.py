@@ -58,8 +58,9 @@ MINERAL_CHANCE = 35      # шанс (%), что копание даст мине
 # камень 27%, уголь 22%, медь 16% (плюс 35% минерал).
 ORES: dict[str, dict] = {
     "stone": {"name": "Камень", "icon": "🪨", "price": 3, "weight": 50},
-    "coal": {"name": "Уголь", "icon": "⚫", "price": 5, "weight": 40},
-    "copper": {"name": "Медь", "icon": "🟠", "price": 8, "weight": 30},
+    "coal": {"name": "Уголь", "icon": "💎", "price": 5, "weight": 40,
+             "emoji": ("5773638078321135255", "💎")},     # кастомный эмодзи угля
+    "copper": {"name": "Медь", "icon": "🍁", "price": 8, "weight": 30},
 }
 
 # Кирки. digs: сколько копаний за запуск, drops: сколько из них дадут добычу (от и до),
@@ -79,8 +80,10 @@ UG_EMOJI = ("5461047575379466857", "⛏")      # как у шахты; поме�
 
 # Куда админ может добавить фото через /img
 IMG_TARGETS: dict[str, str] = {
-    "ug": "Подземные шахты (выбор)",
-    "ug_mine": "Подземная шахта (карточка шахты)",
+    "ug": "Подземные шахты",
+    "ug_list": "Подземные шахты: выбор шахты",
+    "ug_mine": "Подземные шахты: карточка шахты (общее фото)",
+    "ug_bag": "Подземные шахты: рюкзак",
 }
 
 
@@ -214,25 +217,23 @@ def _ug() -> str:
     return D.custom_emoji(UG_EMOJI)
 
 
+def _oi(key: str) -> str:
+    """Значок руды в тексте: кастомный, если задан, иначе обычный."""
+    o = ORES[key]
+    return D.custom_emoji(o["emoji"]) if o.get("emoji") else o["icon"]
+
+
 def _image(with_image: bool) -> str:
     return '<img src="tg://photo?id=pet"/>' if with_image else ""
 
 
-def _loot_line(box: dict) -> str:
-    """Короткая строка добычи: 🪨 3  ⚫ 2  🟠 1"""
-    parts = [f"{o['icon']} {box[k]}" for k, o in ORES.items()]
-    if "mineral" in box:
-        parts.append(f"{D.MINERAL_EMOJI} {box['mineral']}")
-    return "  ".join(parts)
-
-
 def _status(user: dict, ug: dict, i: int) -> str:
-    """Короткий статус шахты i для кнопки и карточки."""
+    """Короткий статус шахты i."""
     run = ug["run"]
     if run is not None:
         return "работает" if run["pick"] == i else "занята"
     if not pick_unlocked(user, i):
-        return f"с {PICKS[i]['need_level']} ур."
+        return f"с {PICKS[i]['need_level']} ур. игрока"
     if runs_left(ug) <= 0:
         return "лимит на сегодня"
     wait = cooldown_left(ug)
@@ -241,22 +242,16 @@ def _status(user: dict, ug: dict, i: int) -> str:
     return "готова"
 
 
-# ---------- Экраны ----------
-
 def _found_rows(ug: dict) -> list:
-    rows = [(f"{o['icon']} {o['name']}", f"{ug['pending'][k]} шт.") for k, o in ORES.items()]
+    rows = [(f"{_oi(k)} {o['name']}", f"{ug['pending'][k]} шт.") for k, o in ORES.items()]
     rows.append((f"{D.MINERAL_EMOJI} Минералы", f"{ug['pending']['mineral']} шт."))
     return rows
 
 
-def _bag_rows(ug: dict) -> list:
-    rows = [(f"{o['icon']} {o['name']}", f"{ug['ores'][k]} шт.") for k, o in ORES.items()]
-    rows.append((f"{_coin()} Стоимость рюкзака", fmt(bag_value(ug))))
-    return rows
-
+# ---------- Экраны ----------
 
 def ug_html(user_id: int, with_image: bool = False) -> str:
-    """Раздел «Шахты»: общее состояние и выбор одной из трёх шахт."""
+    """Меню раздела: состояние и добыча. Шахты и рюкзак открываются кнопками."""
     user, ug = load(user_id)
     run = ug["run"]
 
@@ -285,28 +280,39 @@ def ug_html(user_id: int, with_image: bool = False) -> str:
         ("⏳ Длительность запуска", f"{RUN_MINUTES} мин"),
         ("😴 Пауза между запусками", f"{COOLDOWN_MIN} мин"),
     ]
+    return (
+        f"{_image(with_image)}"
+        f"<p><b>{_ug()} ПОДЗЕМНЫЕ ШАХТЫ</b></p>"
+        "<blockquote><i>Спустись под землю: кирка бьёт породу, а в добыче попадаются "
+        "руда и минералы. Минералы повышают уровень игрока. Работает только одна "
+        "шахта за раз.</i></blockquote>"
+        + _tree(state, "Состояние")
+        + _gap()
+        + _tree(_found_rows(ug), "Добыто, ещё не забрано")
+    )
 
-    mines = [
-        (f"{p['icon']} {p['name']}", _status(user, ug, i)) for i, p in enumerate(PICKS)
-    ]
+
+def list_html(user_id: int, with_image: bool = False) -> str:
+    """Выбор шахты: WOOD-LVL1..3."""
+    user, ug = load(user_id)
+    rows = []
+    for i, p in enumerate(PICKS):
+        lo, hi = p["drops"]
+        rows.append((
+            f"{p['icon']} {p['name']}", _status(user, ug, i),
+            [("⛏ Копаний", str(p["digs"])), ("📦 Добыча", f"{lo}-{hi} шт.")],
+        ))
     return (
         f"{_image(with_image)}"
         f"<p><b>{_ug()} ШАХТЫ</b></p>"
-        "<blockquote><i>Спустись под землю: кирка бьёт породу, а в добыче попадаются "
-        "руда и минералы. Минералы повышают уровень игрока. Выбери шахту ниже: "
-        "работает только одна за раз.</i></blockquote>"
-        + _tree(state, "Состояние")
-        + _gap()
-        + _tree(mines, "Шахты")
-        + _gap()
-        + _tree(_found_rows(ug), "Добыто, ещё не забрано")
-        + _gap()
-        + _tree(_bag_rows(ug), "Рюкзак с рудой")
+        "<blockquote><i>Выбери одну шахту и запусти её. Пока она работает, "
+        "остальные заняты.</i></blockquote>"
+        + _tree(rows, "Шахты WOOD")
     )
 
 
 def mine_html(user_id: int, i: int, with_image: bool = False) -> str:
-    """Одна шахта: что это за шахта, состояние, добыча и рюкзак."""
+    """Одна шахта: что это за шахта, состояние и добыча."""
     user, ug = load(user_id)
     p = PICKS[i]
     run = ug["run"]
@@ -338,8 +344,29 @@ def mine_html(user_id: int, i: int, with_image: bool = False) -> str:
         + _tree(state, "Состояние")
         + _gap()
         + _tree(_found_rows(ug), "Добыто, ещё не забрано")
+    )
+
+
+def bag_html(user_id: int, with_image: bool = False) -> str:
+    """Рюкзак: сколько какой руды лежит и сколько она стоит."""
+    user, ug = load(user_id)
+    rows = []
+    for k, o in ORES.items():
+        n = int(ug["ores"][k])
+        rows.append((f"{_oi(k)} {o['name']}", f"{n} шт. · {fmt(n * o['price'])} монет",
+                     [("Цена за штуку", f"{o['price']} монет")]))
+    total = [
+        (f"{_coin()} Стоимость рюкзака", fmt(bag_value(ug))),
+        (f"{D.MINERAL_EMOJI} Минералы", f"{int(user.get(D.MINERALS_FIELD, 0) or 0)} шт. (на счёте игрока)"),
+    ]
+    return (
+        f"{_image(with_image)}"
+        "<p><b>🎒 РЮКЗАК</b></p>"
+        "<blockquote><i>Здесь лежит руда, которую ты забрал из шахт. "
+        "Продай её за монеты.</i></blockquote>"
+        + _tree(rows, "Руда")
         + _gap()
-        + _tree(_bag_rows(ug), "Рюкзак с рудой")
+        + _tree(total, "Итого")
     )
 
 
@@ -355,18 +382,21 @@ def _back(data: str) -> list[InlineKeyboardButton]:
     return [_btn("Назад", data, ButtonStyle.PRIMARY, D.BACK_EMOJI_ID)]
 
 
-def _action_row(ug: dict, suffix: str) -> list[InlineKeyboardButton]:
-    """«Забрать» и «Продать» в одном ряду."""
+def _collect_btn(ug: dict, suffix: str = "") -> InlineKeyboardButton:
     take = pending_total(ug)
-    value = bag_value(ug)
-    return [
-        _btn(f"📦 Забрать ({take})" if take else "📦 Забрать", f"ug:collect{suffix}"),
-        _btn(f"Продать (+{fmt(value)})" if value else "Продать", f"ug:sell{suffix}",
-             emoji_id=D.COIN_EMOJI[0]),
-    ]
+    return _btn(f"📦 Забрать ({take})" if take else "📦 Забрать", f"ug:collect{suffix}")
 
 
 def ug_kb(user_id: int) -> InlineKeyboardMarkup:
+    _, ug = load(user_id)
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [_btn("⛏ Шахты", "ug:list", ButtonStyle.PRIMARY), _btn("🎒 Рюкзак", "ug:bag", ButtonStyle.PRIMARY)],
+        [_collect_btn(ug)],
+        _back("mine:open"),
+    ])
+
+
+def list_kb(user_id: int) -> InlineKeyboardMarkup:
     user, ug = load(user_id)
     run = ug["run"]
     mines = []
@@ -377,11 +407,7 @@ def ug_kb(user_id: int) -> InlineKeyboardMarkup:
             on = run is not None and run["pick"] == i
             mines.append(_btn(f"{p['icon']} {p['name']}", f"ug:m:{i}",
                               ButtonStyle.SUCCESS if on else ButtonStyle.PRIMARY))
-    return InlineKeyboardMarkup(inline_keyboard=[
-        mines,                              # три шахты в одном ряду
-        _action_row(ug, ""),
-        _back("mine:open"),
-    ])
+    return InlineKeyboardMarkup(inline_keyboard=[mines, _back("ug:open")])
 
 
 def mine_kb(i: int):
@@ -395,15 +421,27 @@ def mine_kb(i: int):
             first = [refresh]
         return InlineKeyboardMarkup(inline_keyboard=[
             first,
-            _action_row(ug, f":{i}"),
-            _back("ug:open"),
+            [_collect_btn(ug, f":{i}")],
+            _back("ug:list"),
         ])
     return kb
 
 
+def bag_kb(user_id: int) -> InlineKeyboardMarkup:
+    _, ug = load(user_id)
+    value = bag_value(ug)
+    sell = _btn(f"Продать всё (+{fmt(value)})" if value else "Продать всё", "ug:sell",
+                emoji_id=D.COIN_EMOJI[0])
+    return InlineKeyboardMarkup(inline_keyboard=[[sell], _back("ug:open")])
+
+
 # ---------- Отправка ----------
 
-SCREENS = {"ug": (ug_html, ug_kb)}
+SCREENS = {
+    "ug": (ug_html, ug_kb),
+    "ug_list": (list_html, list_kb),
+    "ug_bag": (bag_html, bag_kb),
+}
 for _i in range(len(PICKS)):
     SCREENS[f"ug_mine_{_i}"] = (
         lambda uid, wi=False, i=_i: mine_html(uid, i, wi),
@@ -422,7 +460,7 @@ async def send_screen(bot, chat_id: int, user_id: int, key: str) -> None:
 
 
 async def send_preview(bot, chat_id: int, user_id: int, key: str) -> None:
-    """Предпросмотр для /img: без кнопок под сообщением. Ключ \"ug_mine\" показывает первую шахту."""
+    """Предпросмотр для /img: без кнопок под сообщением. Ключ «ug_mine» показывает первую шахту."""
     key = "ug_mine_0" if key == "ug_mine" else key
     html, _ = SCREENS[key]
     await D.send_rich_card(bot, chat_id, img_key(key), lambda wi: html(user_id, wi))
@@ -453,12 +491,6 @@ def _index(callback: CallbackQuery, pos: int = 2) -> int | None:
     return i if 0 <= i < len(PICKS) else None
 
 
-async def _back_to_screen(callback: CallbackQuery) -> None:
-    """После «Забрать» и «Продать»: остаёмся на той же шахте или в общем списке."""
-    i = _index(callback)
-    await _show(callback, f"ug_mine_{i}" if i is not None else "ug")
-
-
 # ---------- Хендлеры ----------
 
 @router.callback_query(F.data == "ug:open")
@@ -467,6 +499,22 @@ async def on_open(callback: CallbackQuery):
         return
     await callback.answer()
     await _show(callback, "ug")
+
+
+@router.callback_query(F.data == "ug:list")
+async def on_list(callback: CallbackQuery):
+    if await _require_user(callback) is None:
+        return
+    await callback.answer()
+    await _show(callback, "ug_list")
+
+
+@router.callback_query(F.data == "ug:bag")
+async def on_bag(callback: CallbackQuery):
+    if await _require_user(callback) is None:
+        return
+    await callback.answer()
+    await _show(callback, "ug_bag")
 
 
 @router.callback_query(F.data.regexp(r"^ug:m:\d+$"))
@@ -569,23 +617,23 @@ async def on_collect(callback: CallbackQuery):
     D.save_users()
     note = f"Минералов: +{minerals}. " if minerals else ""
     await callback.answer(f"{note}Руда в рюкзаке.")
-    await _back_to_screen(callback)
+    i = _index(callback)
+    await _show(callback, f"ug_mine_{i}" if i is not None else "ug")
 
 
-@router.callback_query(F.data.regexp(r"^ug:sell(:\d+)?$"))
+@router.callback_query(F.data == "ug:sell")
 async def on_sell(callback: CallbackQuery):
     user = await _require_user(callback)
     if user is None:
         return
     ug = get_ug(user)
-    settle(ug)
     gain = bag_value(ug)
     if gain < 1:
-        await callback.answer("Рюкзак пуст. Сначала забери добычу.", show_alert=True)
+        await callback.answer("Рюкзак пуст. Сначала забери добычу в шахте.", show_alert=True)
         return
     for k in ORES:
         ug["ores"][k] = 0
     user["coins"] += gain
     D.save_users()
     await callback.answer(f"Продано. Монет: +{fmt(gain)}")
-    await _back_to_screen(callback)
+    await _show(callback, "ug_bag")
