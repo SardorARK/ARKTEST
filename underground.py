@@ -301,19 +301,26 @@ def pick_unlocked(user: dict, i: int) -> bool:
 
 # ---------- Цены, доход, формат чисел ----------
 
-_UNITS = ((10 ** 18, "квинт"), (10 ** 15, "квадр"), (10 ** 12, "трлн"),
-          (10 ** 9, "млрд"), (10 ** 6, "млн"), (10 ** 3, "тыс"))
+NUMBER_SUFFIXES = ("", "K", "M", "B", "T", "Qa", "Qi", "Sx", "Sp", "Oc", "No", "Dc")
 
 
 def short(n: float) -> str:
-    """Короткая запись числа: 12 500 000 -> «12.5 млн»."""
-    n = int(n)
-    for value, name in _UNITS:
-        if n >= value:
-            x = n / value
-            s = f"{x:.1f}" if x < 100 else f"{x:.0f}"
-            return f"{s.removesuffix('.0')} {name}"
-    return str(n)
+    """Короткая запись чисел как в main.py: 999, 1.5K, 12.5M, 2.35B ... Без округления вверх."""
+    a = abs(int(n))
+    if a < 1000:
+        return str(a)
+    idx = 1
+    while idx < len(NUMBER_SUFFIXES) - 1 and a >= 1000 ** (idx + 1):
+        idx += 1
+    div = 1000 ** idx
+    whole, frac = divmod(a, div)
+    text = f"{whole}.{frac * 100 // div:02d}".rstrip("0").rstrip(".")
+    return f"{text}{NUMBER_SUFFIXES[idx]}"
+
+
+def rng(lo: int, hi: int) -> str:
+    """Диапазон в одной записи: 150K-175K (если края равны, одно число)."""
+    return short(lo) if short(lo) == short(hi) else f"{short(lo)}-{short(hi)}"
 
 
 def _sig(x: float, digits: int = 3) -> int:
@@ -340,6 +347,13 @@ def coins_range(p: dict, minutes: int) -> tuple[int, int]:
 def coins_avg(p: dict, minutes: int) -> float:
     lo, hi = coins_range(p, minutes)
     return (lo + hi) / 2
+
+
+def ore_range(p: dict, minutes: int) -> tuple[int, int]:
+    """Сколько штук руды (без минералов) даст шахта за minutes минут: от и до, с множителем шахты."""
+    lo, hi = drops_range(p, minutes)
+    k = (100 - MINERAL_CHANCE) / 100 * p["qty"]
+    return int(lo * k), int(hi * k)
 
 
 def minerals_range(p: dict, minutes: int) -> tuple[int, int]:
@@ -552,26 +566,31 @@ def _level_text(user: dict, i: int) -> str:
     return f"✅ Открыта: доступна с {need} уровня игрока"
 
 
+STAT_MIN = 15      # за сколько минут показываем статистику на карточке шахты
+
+
 def mine_html(user_id: int, i: int, with_image: bool = False) -> str:
-    """Карточка шахты: описание, статы и доход за 4 часа, нужный уровень."""
+    """Карточка шахты: описание, средняя добыча за STAT_MIN минут, нужный уровень."""
     user, ug = load(user_id)
     p = PICKS[i]
-    dlo, dhi = drops_range(p, 60)
-    clo, chi = coins_range(p, 240)
-    mlo, mhi = minerals_range(p, 240)
+    dlo, dhi = drops_range(p, STAT_MIN)
+    olo, ohi = ore_range(p, STAT_MIN)
+    clo, chi = coins_range(p, STAT_MIN)
+    mlo, mhi = minerals_range(p, STAT_MIN)
     stats = [
-        ("⛏ Копаний в час", fmt(p["digs_h"])),
-        ("📦 Добыча в час", f"{fmt(dlo)}-{fmt(dhi)}"),
-        ("✖ Руды за одну добычу", f"×{fmt(p['qty'])}"),
-        (f"{_coin()} Монет за 4 часа", f"{short(clo)} - {short(chi)}"),
-        (f"{D.MINERAL_EMOJI} Минералов за 4 часа", f"{short(mlo)} - {short(mhi)}"),
+        ("⛏ Копаний", short(round(p["digs_h"] * STAT_MIN / 60))),
+        ("📦 Добыча", rng(dlo, dhi)),
+        ("🪨 Руды", rng(olo, ohi)),
+        (f"{_coin()} Монет", rng(clo, chi)),
+        (f"{D.MINERAL_EMOJI} Минералов", rng(mlo, mhi)),
     ]
+    level = "" if pick_unlocked(user, i) else f"<p>{_level_text(user, i)}</p>"
     return (
         f"{_image(with_image)}"
         f"<p><b>{p['name']}</b></p>"
         f"<blockquote><i>{p['desc']}</i></blockquote>"
-        + _tree(stats, "Характеристики")
-        + f"<p>{_level_text(user, i)}</p>"
+        + _tree(stats, f"В среднем за {STAT_MIN} минут", mono=False)
+        + level
     )
 
 
@@ -698,8 +717,7 @@ def mine_kb(i: int):
         user, ug = load(user_id)
         p = PICKS[i]
         if not pick_unlocked(user, i):
-            main = _btn(f"🔒 Откроется на {p['need_level']} уровне игрока", f"ug:locked:{i}",
-                        ButtonStyle.DANGER)
+            main = _btn(f"🔒 Нужен {p['need_level']} уровень", f"ug:locked:{i}", ButtonStyle.DANGER)
         elif i == selected(ug):
             main = _checked("Используется", f"ug:use:{i}")
         else:
