@@ -1106,7 +1106,7 @@ def _skin_catalog() -> dict[str, dict]:
 
 def _skin_back_kb(key: str, *top: list) -> InlineKeyboardMarkup:
     """«Назад» возвращает на ту страницу скинов, где лежит этот скин."""
-    return InlineKeyboardMarkup(inline_keyboard=[*top, _back_btn(f"set:skinp:{_skins_mod().skin_page_of(key)}")])
+    return InlineKeyboardMarkup(inline_keyboard=[*top, _back_btn(f"set:skinp:{_skins_mod().skin_lang(key)}:{_skins_mod().skin_page_of(key)}")])
 
 
 def skin_buy_html(user_id: int, key: str, with_image: bool = False) -> str:
@@ -1116,7 +1116,7 @@ def skin_buy_html(user_id: int, key: str, with_image: bool = False) -> str:
     crystal = _ce(EM_CRYSTAL)
     meta = st.SKINS[key]
     price = int(meta["shop"]["price"])
-    sample = ((user or {}).get("nick_plain") if st.has_nick(user or {}) else None) or "Zoro"
+    sample = st.skin_sample(user, st.skin_lang(key))
     have = get_balance(user)
     out = (f"{_image(with_image)}"
            f"<p><b>{_ce(EM_SKIN)} СКИН НИКА</b></p>"
@@ -1124,7 +1124,7 @@ def skin_buy_html(user_id: int, key: str, with_image: bool = False) -> str:
            f"{_balance_line(user)}"
            + _tree("Скин", [f"{_ce(EM_BUY)} <b>{escape(meta['name'])}</b>",
                             f"{_ce(EM_PRICE)} Цена: <b>{_fmt(price)}</b> {crystal}"])
-           + _GAP + f"<p><b>Так выглядит твой ник:</b> {st.apply_skin(sample[:st.NICK_MAX], key)}</p>")
+           + _GAP + f"<p><b>Так выглядит твой ник:</b> {st.apply_skin(sample, key)}</p>")
     if st.owns_skin(user, key):
         return out + "<p><b>Этот скин уже у тебя.</b></p>"
     lack = ""
