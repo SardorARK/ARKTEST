@@ -1,24 +1,25 @@
-"""Раздел «Подземная шахта»: активная добыча руды и минералов шахтами WOOD-LVL1..3 и ROCK-LVL1..3.
+"""Раздел «Подземная шахта»: активная добыча руды и минералов. 90 шахт (30 пород × 3 уровня).
 
 Модуль самостоятельный и не трогает данные простой шахты (mine.py): свои данные игрока
 user["ug"], свои кнопки (callback_data начинается с «ug:»). Единственная связь с mine.py:
 кнопка «Подземная шахта» (ug:open) и кнопка «Назад» (mine:open).
 
 Как это работает:
-  * Кнопка «Подземная шахта» ведёт на выбор из шести шахт (WOOD-LVL1..3 и ROCK-LVL1..3). Игрок открывает одну
-    и запускает её. Одновременно работает только одна шахта. Один запуск длится RUN_MINUTES минут.
-  * В момент запуска результат всего запуска бросается заранее (план копаний), а на экране
-    открывается постепенно по времени. Перезаход в бот или нажатие кнопок результат не меняет.
+  * Кнопка «Подземная шахта» ведёт на выбор из 90 шахт (по 15 на странице). Игрок выбирает шахту
+    кнопкой «Использовать» и запускает её. Одновременно работает только одна шахта.
+  * При запуске игрок выбирает ВРЕМЯ КОПАНИЯ: 25 мин (бесплатно, DAILY_RUNS раз в сутки), а также
+    45 мин, 1, 2, 4, 8, 12, 24 и 48 часов за монеты (DURATIONS). Цена считается от дохода шахты.
+  * В момент запуска результат всего запуска бросается заранее и режется на сегменты, на экране
+    он открывается постепенно по времени. Перезаход в бот результат не меняет.
   * Добычу нужно забрать кнопкой «Забрать». Руда уходит в рюкзак, минералы сразу идут
     в общий счёт игрока (поле MINERALS_FIELD, то же, что использует уровень игрока).
   * Руду продают кнопкой «Продать руду» по фиксированным ценам (ORES).
-  * Чтобы экономика не рушилась: пауза между запусками (COOLDOWN_MIN) и лимит запусков
-    в сутки (DAILY_RUNS).
 
-Подключение в main.py: см. README_underground.md.
+Подключение в main.py не меняется (underground.setup(...) и underground.router).
 """
 
 import logging
+import math
 import random
 import time
 from datetime import datetime
@@ -45,17 +46,13 @@ def setup(**deps) -> None:
         setattr(D, name, value)
 
 
-# ---------- Баланс подземной шахты (всё меняется только здесь) ----------
+# ======================= БАЛАНС (всё меняется только здесь) =======================
 
-RUN_MINUTES = 15         # длительность одного запуска
 COOLDOWN_MIN = 10        # пауза после окончания запуска до следующего
-DAILY_RUNS = 4           # сколько запусков в сутки (счёт по дате UTC)
+DAILY_RUNS = 4           # сколько БЕСПЛАТНЫХ запусков в сутки (счёт по дате UTC)
+MINERAL_CHANCE = 35      # шанс (%), что добыча окажется минералом; всё остальное руда
 
-MINERAL_CHANCE = 35      # шанс (%), что копание даст минерал; всё остальное это руда
-
-# Руда: цена за штуку и вес при выборе. Из «руды» (65% копаний) камень выпадает чаще всего,
-# дорогая медь реже всего. Веса 50 : 40 : 30 дают в общем счёте примерно
-# камень 27%, уголь 22%, медь 16% (плюс 35% минерал).
+# Руда: цена за штуку и вес при выборе.
 ORES: dict[str, dict] = {
     "stone": {"name": "Камень", "icon": "🪨", "price": 3, "weight": 50},
     "coal": {"name": "Уголь", "icon": "💎", "price": 5, "weight": 40,
@@ -63,36 +60,163 @@ ORES: dict[str, dict] = {
     "copper": {"name": "Медь", "icon": "🍁", "price": 8, "weight": 30},
 }
 
-# Шахты. digs: копаний за запуск; drops: сколько из них дадут добычу (от и до);
-# need_level: нужный уровень игрока. WOOD-LVL1 задан по условию (50 копаний, 30-50 добычи).
-#
-# Баланс: добыча растёт ступенями примерно на 15-25%, а уровни открытия поставлены по цене
-# уровней игрока (формула в main.py: 25 * L**1.35 минералов, 35 * L**1.5 монет):
-#   до 3 ур. нужно 89 минералов, до 5 ур. 361, до 8 ур. 1208, до 11 ур. 2667, до 15 ур. 5699.
-# Одна шахта даёт в среднем 0.35 минерала и 3.2 монеты на каждую добычу (см. ORES),
-# а запусков в сутки не больше DAILY_RUNS, поэтому следующая ступень открывается не быстрее,
-# чем за несколько дней игры на предыдущей.
-#   шахта      копаний  добыча   в среднем за запуск (монет / минералов)   уровень игрока
-#   WOOD-LVL1     50    30-50      128 / 14                                  1
-#   WOOD-LVL2     60    38-60      157 / 17                                  3
-#   WOOD-LVL3     70    46-70      185 / 20                                  5
-#   ROCK-LVL1     80    55-80      216 / 24                                  8
-#   ROCK-LVL2     90    62-90      243 / 27                                  11
-#   ROCK-LVL3    100    70-100     272 / 30                                  15
-PICKS = [
-    {"name": "WOOD-LVL1", "digs": 50, "drops": (30, 50), "need_level": 1,
-     "desc": "Неглубокий штрек. Порода мягкая, кирка справляется без труда."},
-    {"name": "WOOD-LVL2", "digs": 60, "drops": (38, 60), "need_level": 3,
-     "desc": "Глубже и богаче. Здесь уже нужна опытная рука."},
-    {"name": "WOOD-LVL3", "digs": 70, "drops": (46, 70), "need_level": 5,
-     "desc": "Самый глубокий штрек в деревянных шахтах. Добычи много, а порода крепче."},
-    {"name": "ROCK-LVL1", "digs": 80, "drops": (55, 80), "need_level": 8,
-     "desc": "Каменные шахты: плотная порода и жилы побогаче. Здесь работают всерьёз."},
-    {"name": "ROCK-LVL2", "digs": 90, "drops": (62, 90), "need_level": 11,
-     "desc": "Глубокие каменные залежи. Копать тяжело, зато добыча щедрая."},
-    {"name": "ROCK-LVL3", "digs": 100, "drops": (70, 100), "need_level": 15,
-     "desc": "Самая глубокая шахта. Крепчайшая порода и самая богатая добыча."},
+# ---------- Время копания ----------
+# (минут, доля цены от ожидаемого дохода за это время, подпись).
+# Первое время бесплатное (доля 0), но не чаще DAILY_RUNS раз в сутки.
+# Остальное стоит монет. Доля растёт с длиной: чем дольше запуск, тем он дороже за час.
+# Цена всегда считается от дохода выбранной шахты, поэтому на любой шахте она «больно» бьёт
+# по кошельку, но запуск остаётся прибыльным (на 48 часах чистая прибыль около 20%).
+FREE_MINUTES = 25
+DURATIONS: list[tuple[int, float, str]] = [
+    (25,   0.00, "25 мин"),
+    (45,   0.25, "45 мин"),
+    (60,   0.30, "1 час"),
+    (120,  0.36, "2 часа"),
+    (240,  0.42, "4 часа"),
+    (480,  0.50, "8 часов"),
+    (720,  0.58, "12 часов"),
+    (1440, 0.68, "24 часа"),
+    (2880, 0.80, "48 часов"),
 ]
+
+# ---------- Шахты ----------
+# 30 пород × 3 уровня = 90 шахт. Первые шесть (WOOD, ROCK) остались прежними по названиям и
+# порядку, поэтому старые сохранения (sel, run.pick) продолжают работать.
+TIERS = [
+    "WOOD", "ROCK", "CLAY", "COAL", "COPPER", "TIN", "BRONZE", "IRON", "STEEL", "SILVER",
+    "GOLD", "COBALT", "NICKEL", "TITAN", "QUARTZ", "JADE", "AMBER", "RUBY", "SAPPHIRE",
+    "EMERALD", "TOPAZ", "AMETHYST", "OPAL", "DIAMOND", "OBSIDIAN", "MITHRIL", "ADAMANT",
+    "PLATINUM", "ONYX", "ETHER",
+]
+LEVELS_PER_TIER = 3
+PER_PAGE = 15                      # шахт на одной странице выбора (5 пород × 3 уровня)
+
+TARGET_MINE = 15                   # к этой шахте доход должен быть ...
+TARGET_COINS_4H = 12_500_000       # ... 10-15 млн монет за 4 часа (это середина; разброс ±18%)
+GROWTH_16_45 = 1.22                # рост дохода от шахты к шахте на шахтах 16-45
+GROWTH_46_90 = 1.10                # ... на шахтах 46-90
+
+LEVEL_FIRST = (1, 3, 5, 8, 11, 15)     # уровни игрока для первых шести шахт (как раньше)
+LEVEL_LAST = 450                       # уровень игрока для 90-й шахты (максимум в игре 500)
+HOURS_PER_STEP = 12                    # сколько часов добычи на шахте нужно, чтобы набрать минералов
+                                       # на уровень следующей шахты (калибровка минералов)
+
+# Формула цены уровня игрока в main.py: round(25 * L ** 1.35) минералов.
+# Если поменяешь её там, поменяй здесь, иначе минералы шахт разойдутся с уровнями.
+PLAYER_L1_MINERALS = 25
+PLAYER_MIN_EXP = 1.35
+
+TIER_DESC = {
+    "CLAY": "Сырые глинистые пласты. Липко, зато спокойно.",
+    "COAL": "Чёрные угольные пласты и запах гари.",
+    "COPPER": "Зелёные прожилки меди на каждой стене.",
+    "TIN": "Серебристые оловянные жилы и узкие тёмные ходы.",
+    "BRONZE": "Старые бронзовые выработки, оставленные предками.",
+    "IRON": "Тяжёлая железная руда и гул вагонеток.",
+    "STEEL": "Закалённая порода, о которую тупятся кирки.",
+    "SILVER": "Холодный блеск серебряных жил в темноте.",
+    "GOLD": "Золотая лихорадка: каждая жила стоит целого состояния.",
+    "COBALT": "Синеватый камень, от которого светится воздух.",
+    "NICKEL": "Глубокие штреки с редкими никелевыми линзами.",
+    "TITAN": "Титановые пласты крепче почти всего, что знают шахтёры.",
+    "QUARTZ": "Кварцевые залы, где эхо звенит, как колокол.",
+    "JADE": "Зелёные нефритовые залежи и влажный воздух.",
+    "AMBER": "Янтарные пещеры с застывшим светом.",
+    "RUBY": "Красные кристаллы, горячие на ощупь.",
+    "SAPPHIRE": "Глубокая синева сапфировых жил.",
+    "EMERALD": "Изумрудные галереи, где камни растут из стен.",
+    "TOPAZ": "Топазовые гроты, блестящие даже без света.",
+    "AMETHYST": "Фиолетовые друзы размером с человека.",
+    "OPAL": "Переливчатые опаловые пласты и странные тени.",
+    "DIAMOND": "Алмазные трубки: самая твёрдая порода на свете.",
+    "OBSIDIAN": "Чёрное вулканическое стекло и жар из глубины.",
+    "MITHRIL": "Лёгкий серебристый металл из старых легенд.",
+    "ADAMANT": "Несокрушимый адамант: кирка звенит, но берёт своё.",
+    "PLATINUM": "Редчайшие платиновые жилы на огромной глубине.",
+    "ONYX": "Бездонные ониксовые штольни без единого луча света.",
+    "ETHER": "Предел глубин: порода здесь едва ли не живая.",
+}
+LEVEL_DESC = {
+    1: "Верхний горизонт: добыча попроще.",
+    2: "Средний горизонт: жилы богаче.",
+    3: "Нижний горизонт: самая щедрая добыча.",
+}
+OLD_DESC = {      # описания первых шести шахт остались прежними
+    "WOOD-LVL1": "Неглубокий штрек. Порода мягкая, кирка справляется без труда.",
+    "WOOD-LVL2": "Глубже и богаче. Здесь уже нужна опытная рука.",
+    "WOOD-LVL3": "Самый глубокий штрек в деревянных шахтах. Добычи много, а порода крепче.",
+    "ROCK-LVL1": "Каменные шахты: плотная порода и жилы побогаче. Здесь работают всерьёз.",
+    "ROCK-LVL2": "Глубокие каменные залежи. Копать тяжело, зато добыча щедрая.",
+    "ROCK-LVL3": "Самая глубокая шахта из каменных. Крепчайшая порода и богатая добыча.",
+}
+
+
+def _digs_per_hour(n: int) -> int:
+    """Копаний в час на шахте номер n (с 1). Первые шесть как раньше (50-100 за 15 минут)."""
+    return 200 + 40 * (n - 1) if n <= 6 else 400 + 5 * (n - 6)
+
+
+def _need_level(n: int) -> int:
+    """Уровень игрока для шахты номер n (n может выйти за 90 для расчёта минералов)."""
+    if n <= len(LEVEL_FIRST):
+        return LEVEL_FIRST[n - 1]
+    step = (LEVEL_LAST - LEVEL_FIRST[-1]) / (len(TIERS) * LEVELS_PER_TIER - len(LEVEL_FIRST))
+    return round(LEVEL_FIRST[-1] + (n - len(LEVEL_FIRST)) * step)
+
+
+def _lo_frac(n: int) -> float:
+    """Нижняя граница доли копаний, которые дают добычу (верхняя всегда 100%)."""
+    return min(0.70, 0.60 + 0.02 * (n - 1))
+
+
+def _coin_per_drop() -> float:
+    """Средние монеты с одной добычи при множителе ×1 (минерал монет не даёт)."""
+    tw = sum(o["weight"] for o in ORES.values())
+    avg_price = sum(o["price"] * o["weight"] for o in ORES.values()) / tw
+    return avg_price * (100 - MINERAL_CHANCE) / 100
+
+
+def _target_coins_4h(n: int, base_n1: float) -> float:
+    """Желаемый средний доход за 4 часа на шахте n: рост от шахты 1 до TARGET_MINE, дальше свои темпы."""
+    if n <= TARGET_MINE:
+        return base_n1 * (TARGET_COINS_4H / base_n1) ** ((n - 1) / (TARGET_MINE - 1))
+    t = TARGET_COINS_4H
+    for k in range(TARGET_MINE + 1, n + 1):
+        t *= GROWTH_16_45 if k <= 45 else GROWTH_46_90
+    return t
+
+
+def _build_picks() -> list[dict]:
+    total = len(TIERS) * LEVELS_PER_TIER
+    cpd = _coin_per_drop()
+    picks = []
+    # доход шахты 1 при множителе ×1: опорная точка для роста
+    base_n1 = 4 * _digs_per_hour(1) * (1 + _lo_frac(1)) / 2 * cpd
+    for n in range(1, total + 2):                      # +1 нужен для расчёта минералов 90-й шахты
+        tier, lvl = TIERS[(n - 1) // LEVELS_PER_TIER] if n <= total else "", (n - 1) % LEVELS_PER_TIER + 1
+        dph, lo = _digs_per_hour(n), _lo_frac(n)
+        avg_drops_4h = 4 * dph * (1 + lo) / 2
+        qty = max(1, round(_target_coins_4h(n, base_n1) / (avg_drops_4h * cpd))) if n <= total else 1
+        picks.append({"n": n, "tier": tier, "lvl": lvl, "digs_h": dph, "lo": lo,
+                      "need_level": _need_level(n), "qty": qty})
+    # минералы: за HOURS_PER_STEP часов добычи на шахте n игрок должен набрать на подъём до уровня шахты n+1
+    for n in range(1, total + 1):
+        p = picks[n - 1]
+        step_cost = sum(round(PLAYER_L1_MINERALS * L ** PLAYER_MIN_EXP)
+                        for L in range(p["need_level"], max(p["need_level"] + 1, picks[n]["need_level"])))
+        per_hour_x1 = p["digs_h"] * (1 + p["lo"]) / 2 * MINERAL_CHANCE / 100
+        p["mqty"] = max(1, round(step_cost / (HOURS_PER_STEP * per_hour_x1)))
+    out = []
+    for p in picks[:total]:
+        name = f"{p['tier']}-LVL{p['lvl']}"
+        p["name"] = name
+        p["desc"] = OLD_DESC.get(name) or f"{TIER_DESC[p['tier']]} {LEVEL_DESC[p['lvl']]}"
+        out.append(p)
+    return out
+
+
+PICKS = _build_picks()
+PAGES = math.ceil(len(PICKS) / PER_PAGE)
 
 # Кастомные эмодзи заголовков (можно заменить на свои id)
 UG_EMOJI = ("5461047575379466857", "⛏")      # как у шахты; поменяй на свой id при желании
@@ -102,6 +226,7 @@ IMG_TARGETS: dict[str, str] = {
     "ug": "Подземные шахты",
     "ug_list": "Подземные шахты: выбор шахты",
     "ug_mine": "Подземные шахты: карточка шахты (общее фото)",
+    "ug_run": "Подземные шахты: выбор времени копания",
     "ug_bag": "Подземные шахты: рюкзак",
 }
 
@@ -110,13 +235,16 @@ IMG_TARGETS: dict[str, str] = {
 # user["ug"] = {
 #   "ores": {"stone": int, "coal": int, "copper": int},   рюкзак
 #   "pending": {"stone": int, "coal": int, "copper": int, "mineral": int},   добыто, но не забрано
-#   "run": {"start": float, "end": float, "pick": int, "plan": "sc.x..", "given": int} | None
-#   "last_end": float, "day": "YYYY-MM-DD", "day_runs": int,
+#   "run": {"start", "end", "pick", "dur", "segs": [[s, c, p, x], ...], "given": int, "q", "mq"} | None
+#   "last_end": float, "day": "YYYY-MM-DD", "day_runs": int,   (day_runs: бесплатные запуски за день)
 #   "sel": номер выбранной («используемой») шахты,
 # }
-# plan: по символу на каждое копание: s камень, c уголь, p медь, x минерал, «.» пусто.
+# segs: добыча запуска, нарезанная на сегменты по времени: камень, уголь, медь, минералы (штук добычи).
+# q и mq: множители руды и минералов на одну добычу (берутся с шахты при запуске).
+# Старый формат run с полем "plan" (строка по символу на копание) тоже поддерживается.
 
 PLAN_CODE = {"s": "stone", "c": "coal", "p": "copper"}
+SEG_KEYS = ("stone", "coal", "copper", "mineral")
 
 
 def get_ug(user: dict) -> dict:
@@ -152,6 +280,7 @@ def runs_today(ug: dict) -> int:
 
 
 def runs_left(ug: dict) -> int:
+    """Сколько бесплатных запусков осталось на сегодня."""
     return max(0, DAILY_RUNS - runs_today(ug))
 
 
@@ -170,20 +299,79 @@ def pick_unlocked(user: dict, i: int) -> bool:
     return D.player_level(user) >= PICKS[i]["need_level"]
 
 
-def roll_plan(pick: dict) -> str:
-    """Бросает весь запуск заранее: какие копания дадут добычу и какую именно."""
-    digs = pick["digs"]
-    lo, hi = pick["drops"]
-    n = min(digs, random.randint(lo, hi))
-    plan = ["."] * digs
-    ore_codes = list(PLAN_CODE)
-    ore_weights = [ORES[PLAN_CODE[c]]["weight"] for c in ore_codes]
-    for idx in random.sample(range(digs), n):
-        if random.random() * 100 < MINERAL_CHANCE:
-            plan[idx] = "x"
-        else:
-            plan[idx] = random.choices(ore_codes, ore_weights)[0]
-    return "".join(plan)
+# ---------- Цены, доход, формат чисел ----------
+
+_UNITS = ((10 ** 18, "квинт"), (10 ** 15, "квадр"), (10 ** 12, "трлн"),
+          (10 ** 9, "млрд"), (10 ** 6, "млн"), (10 ** 3, "тыс"))
+
+
+def short(n: float) -> str:
+    """Короткая запись числа: 12 500 000 -> «12.5 млн»."""
+    n = int(n)
+    for value, name in _UNITS:
+        if n >= value:
+            x = n / value
+            s = f"{x:.1f}" if x < 100 else f"{x:.0f}"
+            return f"{s.removesuffix('.0')} {name}"
+    return str(n)
+
+
+def _sig(x: float, digits: int = 3) -> int:
+    """Округление до значащих цифр (цены получаются «ровными»)."""
+    if x < 10 ** digits:
+        return max(1, round(x))
+    step = 10 ** (len(str(int(x))) - digits)
+    return round(x / step) * step
+
+
+def drops_range(p: dict, minutes: int) -> tuple[int, int]:
+    """Сколько добычи (штук) даст шахта за minutes минут: от и до."""
+    digs = round(p["digs_h"] * minutes / 60)
+    return round(digs * p["lo"]), digs
+
+
+def coins_range(p: dict, minutes: int) -> tuple[int, int]:
+    """Ожидаемый доход монетами за minutes минут: от и до (по среднему составу руды)."""
+    lo, hi = drops_range(p, minutes)
+    per = _coin_per_drop() * p["qty"]
+    return int(lo * per), int(hi * per)
+
+
+def coins_avg(p: dict, minutes: int) -> float:
+    lo, hi = coins_range(p, minutes)
+    return (lo + hi) / 2
+
+
+def minerals_range(p: dict, minutes: int) -> tuple[int, int]:
+    lo, hi = drops_range(p, minutes)
+    k = MINERAL_CHANCE / 100 * p["mqty"]
+    return int(lo * k), int(hi * k)
+
+
+def run_price(i: int, d: int) -> int:
+    """Цена запуска шахты i на время DURATIONS[d] (0 для бесплатного)."""
+    minutes, share, _ = DURATIONS[d]
+    if share <= 0:
+        return 0
+    return _sig(coins_avg(PICKS[i], minutes) * share)
+
+
+def roll_run(pick: dict, minutes: int) -> list[list[int]]:
+    """Бросает весь запуск заранее и режет на сегменты по времени.
+    Сегмент: [камень, уголь, медь, минералы] (штук добычи, без множителей)."""
+    segs_n = max(1, min(144, minutes))
+    lo, hi = drops_range(pick, minutes)
+    n = random.randint(lo, hi)
+    segs = [[0, 0, 0, 0] for _ in range(segs_n)]
+    codes = [0, 1, 2, 3]
+    ore_w = [ORES[k]["weight"] for k in ("stone", "coal", "copper")]
+    wsum = sum(ore_w)
+    weights = [(100 - MINERAL_CHANCE) * w / wsum for w in ore_w] + [MINERAL_CHANCE]
+    types = random.choices(codes, weights, k=n)
+    places = random.choices(range(segs_n), k=n)
+    for seg, t in zip(places, types):
+        segs[seg][t] += 1
+    return segs
 
 
 def settle(ug: dict) -> bool:
@@ -192,18 +380,34 @@ def settle(ug: dict) -> bool:
     if run is None:
         return False
     now = time.time()
-    total = len(run["plan"])
     span = max(1.0, run["end"] - run["start"])
-    done = total if now >= run["end"] else min(total, int(total * (now - run["start"]) / span))
     changed = False
-    if done > run["given"]:
-        for ch in run["plan"][run["given"]:done]:
-            if ch == "x":
-                ug["pending"]["mineral"] += 1
-            elif ch in PLAN_CODE:
-                ug["pending"][PLAN_CODE[ch]] += 1
-        run["given"] = done
-        changed = True
+
+    if "plan" in run:                         # старый формат: символ на копание, множители ×1
+        plan = run["plan"]
+        total = len(plan)
+        done = total if now >= run["end"] else min(total, int(total * (now - run["start"]) / span))
+        if done > run["given"]:
+            for ch in plan[run["given"]:done]:
+                if ch == "x":
+                    ug["pending"]["mineral"] += 1
+                elif ch in PLAN_CODE:
+                    ug["pending"][PLAN_CODE[ch]] += 1
+            run["given"] = done
+            changed = True
+    else:
+        segs = run["segs"]
+        total = len(segs)
+        done = total if now >= run["end"] else min(total, int(total * (now - run["start"]) / span))
+        if done > run["given"]:
+            q, mq = int(run.get("q", 1)), int(run.get("mq", 1))
+            for seg in segs[run["given"]:done]:
+                for idx, key in enumerate(SEG_KEYS):
+                    if seg[idx]:
+                        ug["pending"][key] += seg[idx] * (mq if key == "mineral" else q)
+            run["given"] = done
+            changed = True
+
     if now >= run["end"]:
         ug["last_end"] = run["end"]
         ug["run"] = None
@@ -285,22 +489,17 @@ def selected(ug: dict) -> int:
     return sel if isinstance(sel, int) and 0 <= sel < len(PICKS) else 0
 
 
-def _status(user: dict, ug: dict, i: int) -> str:
-    """Короткий статус шахты i."""
-    run = ug["run"]
-    if not pick_unlocked(user, i):
-        return f"закрыта, нужен {PICKS[i]['need_level']} ур. игрока"
-    if run is not None and run["pick"] == i:
-        return "работает"
-    if i == selected(ug):
-        return "используется ✅"
-    return "открыта"
-
-
 def _found_rows(ug: dict) -> list:
-    rows = [(f"{_oi(k)} {o['name']}", str(ug['pending'][k])) for k, o in ORES.items()]
-    rows.append((f"{D.MINERAL_EMOJI} Минералы", str(ug['pending']['mineral'])))
+    rows = [(f"{_oi(k)} {o['name']}", fmt(ug['pending'][k])) for k, o in ORES.items()]
+    rows.append((f"{D.MINERAL_EMOJI} Минералы", fmt(ug['pending']['mineral'])))
     return rows
+
+
+def _dur_label(minutes: int) -> str:
+    for m, _, label in DURATIONS:
+        if m == minutes:
+            return label
+    return fmt_dur(minutes * 60)
 
 
 # ---------- Экраны ----------
@@ -315,13 +514,20 @@ def ug_html(user_id: int, with_image: bool = False) -> str:
         frac = (now - run["start"]) / max(1.0, run["end"] - run["start"])
         pk = PICKS[run["pick"]]
         left = fmt_dur(run["end"] - now)
+        total = _dur_label(int(run.get("dur") or round((run["end"] - run["start"]) / 60)))
     else:
-        frac, pk, left = 0.0, PICKS[selected(ug)], "—"
+        frac, pk, left, total = 0.0, PICKS[selected(ug)], "—", "—"
     state = [
         (f"{_ug()} Шахта", pk["name"]),
+        ("🕒 Время копания", total),
         ("⏳ Прогресс", _bar(frac)),
         ("⏱ До конца", left),
     ]
+    if run is None:
+        wait = cooldown_left(ug)
+        if wait > 0:
+            state.append(("💤 Отдых", fmt_dur(wait)))
+        state.append(("🎁 Бесплатных запусков", f"{runs_left(ug)}/{DAILY_RUNS}"))
     return (
         f"{_image(with_image)}"
         + _tree(state, "Состояние", mono=False)
@@ -330,9 +536,10 @@ def ug_html(user_id: int, with_image: bool = False) -> str:
     )
 
 
-def list_html(user_id: int, with_image: bool = False) -> str:
+def list_html(user_id: int, page: int = 0, with_image: bool = False) -> str:
     """Выбор шахты: текста почти нет, всё видно на кнопках и в карточке."""
-    return f"{_image(with_image)}<p><b>{_ug()} Выбери шахту</b></p>"
+    return (f"{_image(with_image)}<p><b>{_ug()} Выбери шахту</b></p>"
+            f"<p>Страница {page + 1} из {PAGES}</p>")
 
 
 def _level_text(user: dict, i: int) -> str:
@@ -346,13 +553,18 @@ def _level_text(user: dict, i: int) -> str:
 
 
 def mine_html(user_id: int, i: int, with_image: bool = False) -> str:
-    """Карточка шахты: описание, статы за один запуск и нужный уровень."""
+    """Карточка шахты: описание, статы и доход за 4 часа, нужный уровень."""
     user, ug = load(user_id)
     p = PICKS[i]
-    lo, hi = p["drops"]
+    dlo, dhi = drops_range(p, 60)
+    clo, chi = coins_range(p, 240)
+    mlo, mhi = minerals_range(p, 240)
     stats = [
-        (f"⛏ Копаний за {RUN_MINUTES} минут", str(p["digs"])),
-        (f"📦 Добыча за {RUN_MINUTES} минут", f"{lo}-{hi}"),
+        ("⛏ Копаний в час", fmt(p["digs_h"])),
+        ("📦 Добыча в час", f"{fmt(dlo)}-{fmt(dhi)}"),
+        ("✖ Руды за одну добычу", f"×{fmt(p['qty'])}"),
+        (f"{_coin()} Монет за 4 часа", f"{short(clo)} - {short(chi)}"),
+        (f"{D.MINERAL_EMOJI} Минералов за 4 часа", f"{short(mlo)} - {short(mhi)}"),
     ]
     return (
         f"{_image(with_image)}"
@@ -363,17 +575,38 @@ def mine_html(user_id: int, i: int, with_image: bool = False) -> str:
     )
 
 
+def run_html(user_id: int, i: int, with_image: bool = False) -> str:
+    """Выбор времени копания: сколько стоит и сколько принесёт."""
+    user, ug = load(user_id)
+    p = PICKS[i]
+    rows = []
+    for d, (minutes, share, label) in enumerate(DURATIONS):
+        lo, hi = coins_range(p, minutes)
+        price = run_price(i, d)
+        cost = f"{short(price)}" if price else f"бесплатно ({runs_left(ug)}/{DAILY_RUNS})"
+        rows.append((label, f"{cost} → {short(lo)}-{short(hi)}"))
+    return (
+        f"{_image(with_image)}"
+        f"<p><b>{_ug()} {p['name']}: время копания</b></p>"
+        "<blockquote><i>Чем дольше копаешь, тем дороже запуск. "
+        "Справа указан доход монетами после продажи руды.</i></blockquote>"
+        + _quote("Цена → доход", rows)
+        + _gap()
+        + _tree([(f"{_coin()} Твои монеты", fmt(user.get("coins", 0)))])
+    )
+
+
 def bag_html(user_id: int, with_image: bool = False) -> str:
     """Рюкзак: сколько штук руды и на сколько монет. Монеты вне моно: эмодзи в нём не работает."""
     user, ug = load(user_id)
     lines = "<br>".join(
-        f"<b>{_oi(k)} {o['name']}</b>: <code>{int(ug['ores'][k])}</code> "
-        f"(<code>{fmt(int(ug['ores'][k]) * o['price'])}</code> {_coin()})"
+        f"<b>{_oi(k)} {o['name']}</b>: <code>{fmt(int(ug['ores'][k]))}</code> "
+        f"(<code>{short(int(ug['ores'][k]) * o['price'])}</code> {_coin()})"
         for k, o in ORES.items()
     )
     total = [
         (f"{_coin()} Стоимость рюкзака", fmt(bag_value(ug))),
-        (f"{D.MINERAL_EMOJI} Минералы на счёте", str(int(user.get(D.MINERALS_FIELD, 0) or 0))),
+        (f"{D.MINERAL_EMOJI} Минералы на счёте", fmt(int(user.get(D.MINERALS_FIELD, 0) or 0))),
     ]
     return (
         f"{_image(with_image)}"
@@ -400,15 +633,15 @@ def _back(data: str) -> list[InlineKeyboardButton]:
 
 def _collect_btn(ug: dict, suffix: str = "") -> InlineKeyboardButton:
     take = pending_total(ug)
-    return _btn(f"📦 Забрать ({take})" if take else "📦 Забрать", f"ug:collect{suffix}")
+    return _btn(f"📦 Забрать ({short(take)})" if take else "📦 Забрать", f"ug:collect{suffix}")
 
 
 def ug_kb(user_id: int) -> InlineKeyboardMarkup:
     _, ug = load(user_id)
     sel = selected(ug)
-    rows = [[_btn("⛏ Шахты", "ug:list", ButtonStyle.PRIMARY),
+    rows = [[_btn("⛏ Шахты", f"ug:list:{sel // PER_PAGE}", ButtonStyle.PRIMARY),
              _btn("🎒 Рюкзак", "ug:bag", ButtonStyle.PRIMARY)]]
-    if ug["run"] is None:       # если рано, бот скажет причину: отдых или лимит на сегодня
+    if ug["run"] is None:       # если рано, бот скажет причину: отдых
         rows.append([_btn(f"Запустить {PICKS[sel]['name']}", f"ug:start:{sel}")])
     else:
         rows.append([_btn("🔄 Обновить", "ug:open", ButtonStyle.PRIMARY)])
@@ -417,25 +650,33 @@ def ug_kb(user_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def list_kb(user_id: int) -> InlineKeyboardMarkup:
-    """Перед каждой группой шахт (WOOD, ROCK) стоит мёртвая кнопка-заголовок без цвета.
+def list_kb(user_id: int, page: int = 0) -> InlineKeyboardMarkup:
+    """Страница шахт: перед каждой породой мёртвая кнопка-заголовок без цвета, под ней три уровня.
     Используемая шахта с галочкой, открытые зелёные, закрытые красные."""
     user, ug = load(user_id)
     sel = selected(ug)
-    groups: dict[str, list[InlineKeyboardButton]] = {}
-    for i, p in enumerate(PICKS):
-        if not pick_unlocked(user, i):
-            btn = _btn(p["name"], f"ug:m:{i}", ButtonStyle.DANGER)
-        elif i == sel:
-            btn = _btn(f"✅ {p['name']}", f"ug:m:{i}", ButtonStyle.SUCCESS)
-        else:
-            btn = _btn(p["name"], f"ug:m:{i}", ButtonStyle.SUCCESS)
-        groups.setdefault(p["name"].split("-")[0], []).append(btn)
-
+    page = max(0, min(page, PAGES - 1))
     rows: list[list[InlineKeyboardButton]] = []
-    for group, buttons in groups.items():
-        rows.append([_btn(group, "ug:noop", None)])           # мёртвая кнопка-заголовок
-        rows += [buttons[n:n + 3] for n in range(0, len(buttons), 3)]
+    chunk = PICKS[page * PER_PAGE:(page + 1) * PER_PAGE]
+    for t in range(0, len(chunk), LEVELS_PER_TIER):
+        tier = chunk[t:t + LEVELS_PER_TIER]
+        rows.append([_btn(tier[0]["tier"], "ug:noop", None)])           # мёртвая кнопка-заголовок
+        buttons = []
+        for p in tier:
+            i = p["n"] - 1
+            if not pick_unlocked(user, i):
+                buttons.append(_btn(f"LVL{p['lvl']}", f"ug:m:{i}", ButtonStyle.DANGER))
+            elif i == sel:
+                buttons.append(_btn(f"✅ LVL{p['lvl']}", f"ug:m:{i}", ButtonStyle.SUCCESS))
+            else:
+                buttons.append(_btn(f"LVL{p['lvl']}", f"ug:m:{i}", ButtonStyle.SUCCESS))
+        rows.append(buttons)
+    nav = [
+        _btn("◀", f"ug:list:{page - 1}" if page > 0 else "ug:noop", ButtonStyle.PRIMARY),
+        _btn(f"{page + 1}/{PAGES}", "ug:noop", None),
+        _btn("▶", f"ug:list:{page + 1}" if page < PAGES - 1 else "ug:noop", ButtonStyle.PRIMARY),
+    ]
+    rows.append(nav)
     rows.append(_back("ug:open"))
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -451,35 +692,70 @@ def mine_kb(i: int):
             main = _btn("✅ Используется", f"ug:use:{i}", ButtonStyle.SUCCESS)
         else:
             main = _btn("Использовать", f"ug:use:{i}", ButtonStyle.SUCCESS)
-        return InlineKeyboardMarkup(inline_keyboard=[[main], _back("ug:list")])
+        return InlineKeyboardMarkup(inline_keyboard=[[main], _back(f"ug:list:{i // PER_PAGE}")])
+    return kb
+
+
+def run_kb(i: int):
+    def kb(user_id: int) -> InlineKeyboardMarkup:
+        user, ug = load(user_id)
+        coins = int(user.get("coins", 0) or 0)
+        buttons = []
+        for d, (minutes, share, label) in enumerate(DURATIONS):
+            price = run_price(i, d)
+            if price == 0:
+                text = f"{label} · бесплатно"
+                style = ButtonStyle.SUCCESS if runs_left(ug) > 0 else ButtonStyle.DANGER
+            else:
+                text = f"{label} · {short(price)}"
+                style = ButtonStyle.SUCCESS if coins >= price else ButtonStyle.DANGER
+            buttons.append(_btn(text, f"ug:go:{i}:{d}", style))
+        rows = [buttons[n:n + 3] for n in range(0, len(buttons), 3)]
+        rows.append(_back("ug:open"))
+        return InlineKeyboardMarkup(inline_keyboard=rows)
     return kb
 
 
 def bag_kb(user_id: int) -> InlineKeyboardMarkup:
     _, ug = load(user_id)
     value = bag_value(ug)
-    sell = _btn(f"Продать всё (+{fmt(value)})" if value else "Продать всё", "ug:sell",
+    sell = _btn(f"Продать всё (+{short(value)})" if value else "Продать всё", "ug:sell",
                 emoji_id=D.COIN_EMOJI[0])
     return InlineKeyboardMarkup(inline_keyboard=[[sell], _back("ug:open")])
 
 
 # ---------- Отправка ----------
+# Экраны: «ug», «ug_bag», «ug_list_<страница>», «ug_mine_<шахта>», «ug_run_<шахта>».
 
 SCREENS = {
     "ug": (ug_html, ug_kb),
-    "ug_list": (list_html, list_kb),
     "ug_bag": (bag_html, bag_kb),
 }
+for _pg in range(PAGES):
+    SCREENS[f"ug_list_{_pg}"] = (
+        lambda uid, wi=False, pg=_pg: list_html(uid, pg, wi),
+        lambda uid, pg=_pg: list_kb(uid, pg),
+    )
 for _i in range(len(PICKS)):
     SCREENS[f"ug_mine_{_i}"] = (
         lambda uid, wi=False, i=_i: mine_html(uid, i, wi),
         mine_kb(_i),
     )
+    SCREENS[f"ug_run_{_i}"] = (
+        lambda uid, wi=False, i=_i: run_html(uid, i, wi),
+        run_kb(_i),
+    )
 
 
 def img_key(key: str) -> str:
-    """У всех карточек шахт одно общее фото."""
-    return "ug_mine" if key.startswith("ug_mine_") else key
+    """Общие фото: у всех карточек шахт одно, у всех страниц выбора одно, у всех окон времени одно."""
+    if key.startswith("ug_mine_"):
+        return "ug_mine"
+    if key.startswith("ug_run_"):
+        return "ug_run"
+    if key.startswith("ug_list_"):
+        return "ug_list"
+    return key
 
 
 async def send_screen(bot, chat_id: int, user_id: int, key: str) -> None:
@@ -488,8 +764,8 @@ async def send_screen(bot, chat_id: int, user_id: int, key: str) -> None:
 
 
 async def send_preview(bot, chat_id: int, user_id: int, key: str) -> None:
-    """Предпросмотр для /img: без кнопок под сообщением. Ключ «ug_mine» показывает первую шахту."""
-    key = "ug_mine_0" if key == "ug_mine" else key
+    """Предпросмотр для /img: без кнопок под сообщением."""
+    key = {"ug_mine": "ug_mine_0", "ug_run": "ug_run_0", "ug_list": "ug_list_0"}.get(key, key)
     html, _ = SCREENS[key]
     await D.send_rich_card(bot, chat_id, img_key(key), lambda wi: html(user_id, wi))
 
@@ -507,16 +783,21 @@ async def _show(callback: CallbackQuery, key: str) -> None:
     await D.show_rich_card(callback, img_key(key), lambda wi: html(uid, wi), kb(uid))
 
 
-def _index(callback: CallbackQuery, pos: int = 2) -> int | None:
-    """Номер шахты из callback_data (или None, если его нет или он неверный)."""
+def _num(callback: CallbackQuery, pos: int, limit: int) -> int | None:
+    """Число из callback_data на позиции pos (или None, если его нет, оно неверное или вне 0..limit-1)."""
     parts = callback.data.split(":")
     if len(parts) <= pos:
         return None
     try:
-        i = int(parts[pos])
+        v = int(parts[pos])
     except ValueError:
         return None
-    return i if 0 <= i < len(PICKS) else None
+    return v if 0 <= v < limit else None
+
+
+def _index(callback: CallbackQuery, pos: int = 2) -> int | None:
+    """Номер шахты из callback_data."""
+    return _num(callback, pos, len(PICKS))
 
 
 # ---------- Хендлеры ----------
@@ -535,12 +816,16 @@ async def on_noop(callback: CallbackQuery):
     await callback.answer()
 
 
-@router.callback_query(F.data == "ug:list")
+@router.callback_query(F.data.regexp(r"^ug:list(:\d+)?$"))
 async def on_list(callback: CallbackQuery):
-    if await _require_user(callback) is None:
+    user = await _require_user(callback)
+    if user is None:
         return
+    page = _num(callback, 2, PAGES)
+    if page is None:
+        page = selected(get_ug(user)) // PER_PAGE
     await callback.answer()
-    await _show(callback, "ug_list")
+    await _show(callback, f"ug_list_{page}")
 
 
 @router.callback_query(F.data == "ug:bag")
@@ -601,8 +886,30 @@ async def on_use(callback: CallbackQuery):
     await _show(callback, f"ug_mine_{i}")
 
 
+async def _check_can_run(callback: CallbackQuery, user: dict, ug: dict, i: int) -> bool:
+    """Общие проверки перед запуском. Если нельзя, отвечает игроку и возвращает False."""
+    p = PICKS[i]
+    if is_running(ug):
+        await callback.answer("Одна шахта уже работает. Дождись её конца.", show_alert=True)
+        await _show(callback, "ug")
+        return False
+    if not pick_unlocked(user, i):
+        await callback.answer(f"{p['name']} откроется на {p['need_level']} уровне игрока.",
+                              show_alert=True)
+        return False
+    if i != selected(ug):
+        await callback.answer("Сначала выбери эту шахту кнопкой «Использовать».", show_alert=True)
+        return False
+    wait = cooldown_left(ug)
+    if wait > 0:
+        await callback.answer(f"Шахта отдыхает. Ещё {fmt_dur(wait)}.", show_alert=True)
+        return False
+    return True
+
+
 @router.callback_query(F.data.regexp(r"^ug:start:\d+$"))
 async def on_start(callback: CallbackQuery):
+    """Кнопка «Запустить»: открывает выбор времени копания."""
     user = await _require_user(callback)
     if user is None:
         return
@@ -610,43 +917,64 @@ async def on_start(callback: CallbackQuery):
     if i is None:
         await callback.answer()
         return
+    ug = get_ug(user)
+    if settle(ug):
+        D.save_users()
+    if not await _check_can_run(callback, user, ug, i):
+        return
+    await callback.answer()
+    await _show(callback, f"ug_run_{i}")
 
+
+@router.callback_query(F.data.regexp(r"^ug:go:\d+:\d+$"))
+async def on_go(callback: CallbackQuery):
+    """Выбрано время копания: списываем цену и запускаем шахту."""
+    user = await _require_user(callback)
+    if user is None:
+        return
+    i = _index(callback)
+    d = _num(callback, 3, len(DURATIONS))
+    if i is None or d is None:
+        await callback.answer()
+        return
     ug = get_ug(user)
     settle(ug)
-    p = PICKS[i]
+    if not await _check_can_run(callback, user, ug, i):
+        return
 
-    if is_running(ug):
-        await callback.answer("Одна шахта уже работает. Дождись её конца.", show_alert=True)
-        await _show(callback, "ug")
-        return
-    if not pick_unlocked(user, i):
-        await callback.answer(f"{p['name']} откроется на {p['need_level']} уровне игрока.",
-                              show_alert=True)
-        return
-    if i != selected(ug):
-        await callback.answer("Сначала выбери эту шахту кнопкой «Использовать».", show_alert=True)
-        return
-    if runs_left(ug) <= 0:
-        await callback.answer("На сегодня запуски закончились. Приходи завтра.", show_alert=True)
-        return
-    wait = cooldown_left(ug)
-    if wait > 0:
-        await callback.answer(f"Шахта отдыхает. Ещё {fmt_dur(wait)}.", show_alert=True)
-        return
+    p = PICKS[i]
+    minutes, _, label = DURATIONS[d]
+    price = run_price(i, d)
+    if price == 0:
+        if runs_left(ug) <= 0:
+            await callback.answer("Бесплатные запуски на сегодня закончились. "
+                                  "Выбери платное время или приходи завтра.", show_alert=True)
+            return
+        if ug["day"] != _today():
+            ug["day"], ug["day_runs"] = _today(), 0
+        ug["day_runs"] += 1
+    else:
+        coins = int(user.get("coins", 0) or 0)
+        if coins < price:
+            await callback.answer(f"Не хватает монет: нужно {fmt(price)}, у тебя {fmt(coins)}.",
+                                  show_alert=True)
+            return
+        user["coins"] = coins - price
 
     now = time.time()
-    if ug["day"] != _today():
-        ug["day"], ug["day_runs"] = _today(), 0
-    ug["day_runs"] += 1
     ug["run"] = {
         "start": now,
-        "end": now + RUN_MINUTES * 60,
+        "end": now + minutes * 60,
         "pick": i,
-        "plan": roll_plan(p),
+        "dur": minutes,
+        "segs": roll_run(p, minutes),
         "given": 0,
+        "q": p["qty"],
+        "mq": p["mqty"],
     }
     D.save_users()
-    await callback.answer(f"{p['name']} запущена на {RUN_MINUTES} мин!")
+    cost = f" Списано: {fmt(price)}." if price else ""
+    await callback.answer(f"{p['name']} запущена на {label}!{cost}")
     await _show(callback, "ug")
 
 
@@ -670,10 +998,9 @@ async def on_collect(callback: CallbackQuery):
     if minerals:
         user[D.MINERALS_FIELD] = int(user.get(D.MINERALS_FIELD, 0) or 0) + minerals
     D.save_users()
-    note = f"Минералов: +{minerals}. " if minerals else ""
+    note = f"Минералов: +{fmt(minerals)}. " if minerals else ""
     await callback.answer(f"{note}Руда в рюкзаке.")
-    i = _index(callback)
-    await _show(callback, f"ug_mine_{i}" if i is not None else "ug")
+    await _show(callback, "ug")
 
 
 @router.callback_query(F.data == "ug:sell")
