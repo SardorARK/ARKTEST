@@ -228,14 +228,14 @@ def _image(with_image: bool) -> str:
     return '<img src="tg://photo?id=pet"/>' if with_image else ""
 
 
-def _line(label: str, value: str) -> str:
-    """Подпись жирным, значение моноширинным (по нажатию копируется)."""
+def _line(label: str, value: str, mono: bool = True) -> str:
+    """Подпись жирным, значение моноширинным (по нажатию копируется) или обычным."""
     if value == "":
         return f"<b>{label}</b>"
-    return f"<b>{label}</b>: <code>{value}</code>"
+    return f"<b>{label}</b>: <code>{value}</code>" if mono else f"<b>{label}</b>: {value}"
 
 
-def _tree(rows: list, title: str = "") -> str:
+def _tree(rows: list, title: str = "", mono: bool = True) -> str:
     """Блок с рамочкой ├ └ как в «Шахтах». Строка: (подпись, значение) или
     (подпись, значение, [вложенные (подпись, значение)])."""
     lines = []
@@ -243,11 +243,11 @@ def _tree(rows: list, title: str = "") -> str:
         label, value = row[0], row[1]
         kids = row[2] if len(row) > 2 else []
         last = n == len(rows) - 1
-        lines.append(f"{'└' if last else '├'} {_line(label, value)}")
+        lines.append(f"{'└' if last else '├'} {_line(label, value, mono)}")
         pad = "&nbsp;&nbsp;&nbsp;" if last else "│&nbsp;&nbsp;"
         for k, (kl, kv) in enumerate(kids):
             kmark = "└" if k == len(kids) - 1 else "├"
-            lines.append(f"{pad}{kmark} {_line(kl, kv)}")
+            lines.append(f"{pad}{kmark} {_line(kl, kv, mono)}")
     head = f"<b>{title}</b><br>" if title else ""
     return f"<p>{head}{'<br>'.join(lines)}</p>"
 
@@ -278,47 +278,30 @@ def _status(user: dict, ug: dict, i: int) -> str:
     return "открыта"
 
 
-def _ready_text(ug: dict) -> str:
-    """Можно ли запускать шахту прямо сейчас."""
-    if ug["run"] is not None:
-        return "Идёт запуск"
-    if runs_left(ug) <= 0:
-        return "Лимит на сегодня исчерпан"
-    wait = cooldown_left(ug)
-    if wait > 0:
-        return f"Отдых, ещё {fmt_dur(wait)}"
-    return "Готова к запуску"
-
-
 def _found_rows(ug: dict) -> list:
-    rows = [(f"{_oi(k)} {o['name']}", f"{ug['pending'][k]} шт.") for k, o in ORES.items()]
-    rows.append((f"{D.MINERAL_EMOJI} Минералы", f"{ug['pending']['mineral']} шт."))
+    rows = [(f"{_oi(k)} {o['name']}", str(ug['pending'][k])) for k, o in ORES.items()]
+    rows.append((f"{D.MINERAL_EMOJI} Минералы", str(ug['pending']['mineral'])))
     return rows
 
 
 # ---------- Экраны ----------
 
 def ug_html(user_id: int, with_image: bool = False) -> str:
-    """Меню раздела: состояние и добыча. Шахты и рюкзак открываются кнопками."""
+    """Меню раздела: шахта, прогресс и время до конца. Шахты и рюкзак открываются кнопками."""
     user, ug = load(user_id)
     run = ug["run"]
-    sel = PICKS[selected(ug)]
 
-    state = [(f"{_ug()} Используется", f"{sel['icon']} {sel['name']}")]
     if run is not None:
         now = time.time()
         frac = (now - run["start"]) / max(1.0, run["end"] - run["start"])
-        state += [
-            ("🟢 Идёт запуск", PICKS[run["pick"]]["name"]),
-            ("⏳ Прогресс", _bar(frac)),
-            ("⏱ До конца", fmt_dur(run["end"] - now)),
-        ]
+        pk = PICKS[run["pick"]]
+        left = fmt_dur(run["end"] - now)
     else:
-        state.append(("📋 Статус", _ready_text(ug)))
-    state += [
-        ("🔁 Запусков сегодня", f"{runs_today(ug)}/{DAILY_RUNS}"),
-        ("⏳ Длительность запуска", f"{RUN_MINUTES} мин"),
-        ("😴 Пауза между запусками", f"{COOLDOWN_MIN} мин"),
+        frac, pk, left = 0.0, PICKS[selected(ug)], "—"
+    state = [
+        (f"{_ug()} Шахта", f"{pk['icon']} {pk['name']}"),
+        ("⏳ Прогресс", _bar(frac)),
+        ("⏱ До конца", left),
     ]
     return (
         f"{_image(with_image)}"
@@ -326,7 +309,7 @@ def ug_html(user_id: int, with_image: bool = False) -> str:
         "<blockquote><i>Спустись под землю: кирка бьёт породу, а в добыче попадаются "
         "руда и минералы. Минералы повышают уровень игрока. Работает только одна "
         "шахта за раз.</i></blockquote>"
-        + _tree(state, "Состояние")
+        + _tree(state, "Состояние", mono=False)
         + _gap()
         + _quote("Добыто, ещё не забрано", _found_rows(ug), expandable=True)
     )
@@ -371,23 +354,23 @@ def mine_html(user_id: int, i: int, with_image: bool = False) -> str:
 
 
 def bag_html(user_id: int, with_image: bool = False) -> str:
-    """Рюкзак: руда и итог в блоках-цитатах."""
+    """Рюкзак: сколько штук руды и на сколько монет. Монеты вне моно: эмодзи в нём не работает."""
     user, ug = load(user_id)
-    rows = []
-    for k, o in ORES.items():
-        n = int(ug["ores"][k])
-        rows.append((f"{_oi(k)} {o['name']}",
-                     f"{n} шт. · {fmt(n * o['price'])} монет (по {o['price']} за шт.)"))
+    lines = "<br>".join(
+        f"<b>{_oi(k)} {o['name']}</b>: <code>{int(ug['ores'][k])}</code> "
+        f"({fmt(int(ug['ores'][k]) * o['price'])} {_coin()})"
+        for k, o in ORES.items()
+    )
     total = [
         (f"{_coin()} Стоимость рюкзака", fmt(bag_value(ug))),
-        (f"{D.MINERAL_EMOJI} Минералы на счёте", f"{int(user.get(D.MINERALS_FIELD, 0) or 0)} шт."),
+        (f"{D.MINERAL_EMOJI} Минералы на счёте", str(int(user.get(D.MINERALS_FIELD, 0) or 0))),
     ]
     return (
         f"{_image(with_image)}"
         "<p><b>🎒 РЮКЗАК</b></p>"
         "<blockquote><i>Здесь лежит руда, которую ты забрал из шахт. "
         "Продай её за монеты.</i></blockquote>"
-        + _quote("Руда", rows)
+        f"<p><b>Руда</b></p><blockquote>{lines}</blockquote>"
         + _gap()
         + _tree(total, "Итого")
     )
@@ -410,17 +393,15 @@ def _collect_btn(ug: dict, suffix: str = "") -> InlineKeyboardButton:
     return _btn(f"📦 Забрать ({take})" if take else "📦 Забрать", f"ug:collect{suffix}")
 
 
-def _can_start(ug: dict) -> bool:
-    return ug["run"] is None and runs_left(ug) > 0 and cooldown_left(ug) <= 0
-
-
 def ug_kb(user_id: int) -> InlineKeyboardMarkup:
     _, ug = load(user_id)
     sel = selected(ug)
     rows = [[_btn("⛏ Шахты", "ug:list", ButtonStyle.PRIMARY),
              _btn("🎒 Рюкзак", "ug:bag", ButtonStyle.PRIMARY)]]
-    if _can_start(ug):
+    if ug["run"] is None:       # если рано, бот скажет причину: отдых или лимит на сегодня
         rows.append([_btn(f"Запустить {PICKS[sel]['name']}", f"ug:start:{sel}")])
+    else:
+        rows.append([_btn("🔄 Обновить", "ug:open", ButtonStyle.PRIMARY)])
     rows.append([_collect_btn(ug)])
     rows.append(_back("mine:open"))
     return InlineKeyboardMarkup(inline_keyboard=rows)
