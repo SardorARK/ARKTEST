@@ -66,9 +66,12 @@ ORES: dict[str, dict] = {
 # need_level: нужный уровень игрока. WOOD-LVL1 задан по условию (50 копаний, 30-50 добычи);
 # LVL2 и LVL3 это рост примерно на четверть за ступень, цифры можно менять свободно.
 PICKS = [
-    {"name": "WOOD-LVL1", "icon": "🪵", "digs": 50, "drops": (30, 50), "need_level": 1},
-    {"name": "WOOD-LVL2", "icon": "🪵", "digs": 60, "drops": (38, 60), "need_level": 3},
-    {"name": "WOOD-LVL3", "icon": "🪵", "digs": 70, "drops": (46, 70), "need_level": 5},
+    {"name": "WOOD-LVL1", "icon": "🪵", "digs": 50, "drops": (30, 50), "need_level": 1,
+     "desc": "Неглубокий штрек. Порода мягкая, кирка справляется без труда."},
+    {"name": "WOOD-LVL2", "icon": "🪵", "digs": 60, "drops": (38, 60), "need_level": 3,
+     "desc": "Глубже и богаче. Здесь уже нужна опытная рука."},
+    {"name": "WOOD-LVL3", "icon": "🪵", "digs": 70, "drops": (46, 70), "need_level": 5,
+     "desc": "Самый глубокий штрек. Добычи больше всего, а порода крепче."},
 ]
 
 # Кастомные эмодзи заголовков (можно заменить на свои id)
@@ -240,43 +243,103 @@ def _status(user: dict, ug: dict, i: int) -> str:
 
 # ---------- Экраны ----------
 
+def _found_rows(ug: dict) -> list:
+    rows = [(f"{o['icon']} {o['name']}", f"{ug['pending'][k]} шт.") for k, o in ORES.items()]
+    rows.append((f"{D.MINERAL_EMOJI} Минералы", f"{ug['pending']['mineral']} шт."))
+    return rows
+
+
+def _bag_rows(ug: dict) -> list:
+    rows = [(f"{o['icon']} {o['name']}", f"{ug['ores'][k]} шт.") for k, o in ORES.items()]
+    rows.append((f"{_coin()} Стоимость рюкзака", fmt(bag_value(ug))))
+    return rows
+
+
 def ug_html(user_id: int, with_image: bool = False) -> str:
-    """Выбор шахты: три шахты, общий рюкзак."""
+    """Раздел «Шахты»: общее состояние и выбор одной из трёх шахт."""
     user, ug = load(user_id)
-    rows = [
+    run = ug["run"]
+
+    if run is not None:
+        now = time.time()
+        frac = (now - run["start"]) / max(1.0, run["end"] - run["start"])
+        state = [
+            (f"{_ug()} Шахта", f"Работает {PICKS[run['pick']]['name']} 🟢"),
+            ("⏳ Прогресс", _bar(frac)),
+            ("⏱ До конца", fmt_dur(run["end"] - now)),
+        ]
+    else:
+        wait = cooldown_left(ug)
+        if runs_left(ug) <= 0:
+            status = "Лимит на сегодня исчерпан"
+        elif wait > 0:
+            status = f"Отдых, ещё {fmt_dur(wait)}"
+        else:
+            status = "Готова к запуску"
+        state = [
+            (f"{_ug()} Шахты", "Стоят 🔴"),
+            ("📋 Статус", status),
+        ]
+    state += [
         ("🔁 Запусков сегодня", f"{runs_today(ug)}/{DAILY_RUNS}"),
-        (f"{_coin()} Руда в рюкзаке", f"{fmt(bag_value(ug))}"),
+        ("⏳ Длительность запуска", f"{RUN_MINUTES} мин"),
+        ("😴 Пауза между запусками", f"{COOLDOWN_MIN} мин"),
+    ]
+
+    mines = [
+        (f"{p['icon']} {p['name']}", _status(user, ug, i)) for i, p in enumerate(PICKS)
     ]
     return (
         f"{_image(with_image)}"
-        f"<p><b>{_ug()} ПОДЗЕМНЫЕ ШАХТЫ</b></p>"
-        "<blockquote><i>Выбери шахту. Работает одна за раз.</i></blockquote>"
-        + _tree(rows)
+        f"<p><b>{_ug()} ШАХТЫ</b></p>"
+        "<blockquote><i>Спустись под землю: кирка бьёт породу, а в добыче попадаются "
+        "руда и минералы. Минералы повышают уровень игрока. Выбери шахту ниже: "
+        "работает только одна за раз.</i></blockquote>"
+        + _tree(state, "Состояние")
+        + _gap()
+        + _tree(mines, "Шахты")
+        + _gap()
+        + _tree(_found_rows(ug), "Добыто, ещё не забрано")
+        + _gap()
+        + _tree(_bag_rows(ug), "Рюкзак с рудой")
     )
 
 
 def mine_html(user_id: int, i: int, with_image: bool = False) -> str:
-    """Одна шахта: статус, добыча, рюкзак."""
+    """Одна шахта: что это за шахта, состояние, добыча и рюкзак."""
     user, ug = load(user_id)
     p = PICKS[i]
     run = ug["run"]
-    rows = [("📋 Статус", _status(user, ug, i))]
+    lo, hi = p["drops"]
+
+    about = [
+        ("🪵 Кирка", p["name"]),
+        ("⛏ Копаний за запуск", str(p["digs"])),
+        ("📦 Добыча за запуск", f"{lo}-{hi} шт."),
+        ("🎚 Нужен уровень игрока", str(p["need_level"])),
+    ]
+    state = [("📋 Статус", _status(user, ug, i).capitalize())]
     if run is not None and run["pick"] == i:
         now = time.time()
         frac = (now - run["start"]) / max(1.0, run["end"] - run["start"])
-        rows.append(("⏳ Прогресс", _bar(frac)))
-        rows.append(("⏱ До конца", fmt_dur(run["end"] - now)))
-    lo, hi = p["drops"]
-    info = [("⛏ Копаний", str(p["digs"])), ("📦 Добыча", f"{lo}-{hi}")]
+        state += [
+            ("⏳ Прогресс", _bar(frac)),
+            ("⏱ До конца", fmt_dur(run["end"] - now)),
+            ("⛏ Копаний", f"{run['given']}/{len(run['plan'])}"),
+        ]
+    state.append(("🔁 Запусков сегодня", f"{runs_today(ug)}/{DAILY_RUNS}"))
+
     return (
         f"{_image(with_image)}"
         f"<p><b>{p['icon']} {p['name']}</b></p>"
-        + _tree(rows)
+        f"<blockquote><i>{p['desc']}</i></blockquote>"
+        + _tree(about, "О шахте")
         + _gap()
-        + _tree(info)
+        + _tree(state, "Состояние")
         + _gap()
-        + f"<p><b>Добыто:</b> {_loot_line(ug['pending'])}</p>"
-        + f"<p><b>Рюкзак:</b> {_loot_line(ug['ores'])}</p>"
+        + _tree(_found_rows(ug), "Добыто, ещё не забрано")
+        + _gap()
+        + _tree(_bag_rows(ug), "Рюкзак с рудой")
     )
 
 
@@ -292,45 +355,49 @@ def _back(data: str) -> list[InlineKeyboardButton]:
     return [_btn("Назад", data, ButtonStyle.PRIMARY, D.BACK_EMOJI_ID)]
 
 
-def _sell_btn(ug: dict, suffix: str) -> InlineKeyboardButton:
+def _action_row(ug: dict, suffix: str) -> list[InlineKeyboardButton]:
+    """«Забрать» и «Продать» в одном ряду."""
+    take = pending_total(ug)
     value = bag_value(ug)
-    label = f"Продать руду (+{fmt(value)})" if value else "Продать руду"
-    return _btn(label, f"ug:sell{suffix}", emoji_id=D.COIN_EMOJI[0])
+    return [
+        _btn(f"📦 Забрать ({take})" if take else "📦 Забрать", f"ug:collect{suffix}"),
+        _btn(f"Продать (+{fmt(value)})" if value else "Продать", f"ug:sell{suffix}",
+             emoji_id=D.COIN_EMOJI[0]),
+    ]
 
 
 def ug_kb(user_id: int) -> InlineKeyboardMarkup:
     user, ug = load(user_id)
-    rows = []
+    run = ug["run"]
+    mines = []
     for i, p in enumerate(PICKS):
         if not pick_unlocked(user, i):
-            rows.append([_btn(f"🔒 {p['name']}: с {p['need_level']} ур. игрока",
-                              f"ug:locked:{i}", ButtonStyle.DANGER)])
+            mines.append(_btn(f"🔒 {p['name']}", f"ug:locked:{i}", ButtonStyle.DANGER))
         else:
-            rows.append([_btn(f"{p['icon']} {p['name']}: {_status(user, ug, i)}",
-                              f"ug:m:{i}", ButtonStyle.PRIMARY)])
-    if pending_total(ug):
-        rows.append([_btn(f"📦 Забрать добычу ({pending_total(ug)})", "ug:collect")])
-    rows.append([_sell_btn(ug, "")])
-    rows.append(_back("mine:open"))
-    return InlineKeyboardMarkup(inline_keyboard=rows)
+            on = run is not None and run["pick"] == i
+            mines.append(_btn(f"{p['icon']} {p['name']}", f"ug:m:{i}",
+                              ButtonStyle.SUCCESS if on else ButtonStyle.PRIMARY))
+    return InlineKeyboardMarkup(inline_keyboard=[
+        mines,                              # три шахты в одном ряду
+        _action_row(ug, ""),
+        _back("mine:open"),
+    ])
 
 
 def mine_kb(i: int):
     def kb(user_id: int) -> InlineKeyboardMarkup:
         user, ug = load(user_id)
         run = ug["run"]
-        rows = []
-        if run is not None and run["pick"] == i:
-            rows.append([_btn("🔄 Обновить", f"ug:m:{i}", ButtonStyle.PRIMARY)])
-        elif run is None and runs_left(ug) > 0 and cooldown_left(ug) <= 0:
-            rows.append([_btn(f"Запустить на {RUN_MINUTES} мин", f"ug:start:{i}")])
+        refresh = _btn("🔄 Обновить", f"ug:m:{i}", ButtonStyle.PRIMARY)
+        if run is None and runs_left(ug) > 0 and cooldown_left(ug) <= 0:
+            first = [_btn(f"Запустить ({RUN_MINUTES} мин)", f"ug:start:{i}"), refresh]
         else:
-            rows.append([_btn("🔄 Обновить", f"ug:m:{i}", ButtonStyle.PRIMARY)])
-        if pending_total(ug):
-            rows.append([_btn(f"📦 Забрать добычу ({pending_total(ug)})", f"ug:collect:{i}")])
-        rows.append([_sell_btn(ug, f":{i}")])
-        rows.append(_back("ug:open"))
-        return InlineKeyboardMarkup(inline_keyboard=rows)
+            first = [refresh]
+        return InlineKeyboardMarkup(inline_keyboard=[
+            first,
+            _action_row(ug, f":{i}"),
+            _back("ug:open"),
+        ])
     return kb
 
 
