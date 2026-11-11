@@ -886,6 +886,7 @@ def mine_kb(user_id: int) -> InlineKeyboardMarkup:
         inline_keyboard=[
             [_btn("Кирки", "mine:picks", PICK_EMOJI[0]), _btn("👷 Шахтёры", "mine:miners")],
             [_btn("🎒 Артефакты", "mine:arts")],
+            [_btn("⛏ Подземная шахта", "ug:open", style=ButtonStyle.PRIMARY)],
             _back_row("menu:back"),
         ]
     )
