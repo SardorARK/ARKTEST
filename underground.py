@@ -221,7 +221,11 @@ LOCK_EMOJI_ID = "5296369303661067030"        # замок на кнопке за
 UG_EMOJI = ("5461047575379466857", "⛏")      # как у шахты; поменяй на свой id при желании
 DIG_EMOJI = ("5197371802136892976", "⛏")     # «Копаний» в характеристиках
 LOOT_EMOJI = ("5388569546992920481", "🤑")    # «Добыча» в характеристиках
-LOCK_EMOJI = (LOCK_EMOJI_ID, "🔒")           # замок в списке времени запуска
+LOCK_EMOJI = (LOCK_EMOJI_ID, "🔒")
+TIME_EMOJI = ("5891211339170326418", "⌛️")    # песочные часы: время запуска
+BOX_EMOJI_ID = "5854908544712707500"         # кнопка «Забрать»
+START_EMOJI_ID = "5906852613629941703"       # кнопка «Запустить»
+STOP_EMOJI_ID = "5907027122446145395"        # кнопка «Остановить»           # замок в списке времени запуска
 
 # Куда админ может добавить фото через /img
 IMG_TARGETS: dict[str, str] = {
@@ -282,9 +286,8 @@ def dur_open(ug: dict) -> int:
 
 
 def dur_selected(ug: dict) -> int:
-    """Номер выбранного времени запуска (только из открытых)."""
-    v = ug.get("dur_sel", 0)
-    return v if isinstance(v, int) and 0 <= v < dur_open(ug) else 0
+    """Запуск идёт на самом долгом из открытых времён."""
+    return dur_open(ug) - 1
 
 
 def cooldown_left(ug: dict) -> float:
@@ -529,7 +532,7 @@ def ug_html(user_id: int, with_image: bool = False) -> str:
         frac, pk, left, total = 0.0, PICKS[selected(ug)], "—", DURATIONS[dur_selected(ug)][3]
     state = [
         (f"{_ug()} Шахта", pk["name"]),
-        ("🕒 Время запуска", total),
+        (f"{D.custom_emoji(TIME_EMOJI)} Время запуска", total),
         ("⏳ Прогресс", _bar(frac)),
         ("⏱ До конца", left),
     ]
@@ -547,7 +550,7 @@ def ug_html(user_id: int, with_image: bool = False) -> str:
 
 def list_html(user_id: int, page: int = 0, with_image: bool = False) -> str:
     """Выбор шахты: текста почти нет, всё видно на кнопках и в карточке."""
-    return f"{_image(with_image)}<p><i>Выберите, где будем копать</i></p>"
+    return f"{_image(with_image)}<p>{D.custom_emoji(getattr(D, "DONE_EMOJI", None) or ("", "✅"))} <i>Выберите, где будем копать</i></p>"
 
 
 def _level_text(user: dict, i: int) -> str:
@@ -555,6 +558,7 @@ def _level_text(user: dict, i: int) -> str:
     return f"{D.custom_emoji(LEVEL_EMOJI)} <b>Необходимый уровень</b>: <code>{PICKS[i]['need_level']}</code>"
 
 
+STOP_AFTER = 60     # остановить запуск можно, когда с его начала прошла минута
 STAT_MIN = 15      # за сколько минут показываем статистику на карточке шахты
 
 
@@ -588,24 +592,25 @@ def mine_html(user_id: int, i: int, with_image: bool = False) -> str:
 def time_html(user_id: int, with_image: bool = False) -> str:
     """Время запуска: что открыто, что нет, цена следующего (как экспедиции)."""
     user, ug = load(user_id)
-    opened, chosen = dur_open(ug), dur_selected(ug)
+    opened = dur_open(ug)
     lock = D.custom_emoji(LOCK_EMOJI)
+    hourglass = D.custom_emoji(TIME_EMOJI)
     done = D.custom_emoji(getattr(D, "DONE_EMOJI", None) or ("", "✅"))
     rows = []
     for d, (minutes, price, bonus, label) in enumerate(DURATIONS):
         b = f"бонус +{bonus}%" if bonus else "без бонуса"
         if d < opened:
-            state = f"{done} {'выбрано' if d == chosen else 'открыто'}"
+            state = f"{done} открыто"
         elif d == opened:
             state = f"{fmt(price)} {_coin()}"
         else:
             state = f"{lock} закрыто"
-        rows.append((f"⏳ {label}", f"{b} · {state}"))
+        rows.append((f"{hourglass} {label}", f"{b} · {state}"))
     text = (
         f"{_image(with_image)}"
-        f"<p><b>{_ug()} Время запуска</b></p>"
+        f"<p><b>{hourglass} Время запуска</b></p>"
         "<blockquote><i>Открывай время по очереди: чем дольше запуск, тем больше бонус к добыче. "
-        "Сам запуск бесплатный.</i></blockquote>"
+        "Шахта запускается на самом долгом открытом времени. Сам запуск бесплатный.</i></blockquote>"
         + _tree(rows, mono=False)
         + _gap()
     )
@@ -670,7 +675,8 @@ def _back(data: str) -> list[InlineKeyboardButton]:
 
 def _collect_btn(ug: dict, suffix: str = "") -> InlineKeyboardButton:
     take = pending_total(ug)
-    return _btn(f"📦 Забрать ({short(take)})" if take else "📦 Забрать", f"ug:collect{suffix}")
+    return _btn(f"Забрать ({short(take)})" if take else "Забрать", f"ug:collect{suffix}",
+                emoji_id=BOX_EMOJI_ID)
 
 
 def ug_kb(user_id: int) -> InlineKeyboardMarkup:
@@ -678,10 +684,11 @@ def ug_kb(user_id: int) -> InlineKeyboardMarkup:
     sel = selected(ug)
     rows = [[_btn("⛏ Шахты", f"ug:list:{sel // PER_PAGE}", ButtonStyle.PRIMARY),
              _btn("🎒 Рюкзак", "ug:bag", ButtonStyle.PRIMARY)],
-            [_btn("🕒 Время запуска", "ug:time", ButtonStyle.PRIMARY)]]
+            [_btn("Время запуска", "ug:time", ButtonStyle.PRIMARY, TIME_EMOJI[0])]]
     if ug["run"] is None:       # если рано, бот скажет причину: отдых
-        rows.append([_btn(f"Запустить {PICKS[sel]['name']}", f"ug:start:{sel}")])
+        rows.append([_btn("Запустить", f"ug:start:{sel}", ButtonStyle.SUCCESS, START_EMOJI_ID)])
     else:
+        rows.append([_btn("Остановить", "ug:stop", ButtonStyle.DANGER, STOP_EMOJI_ID)])
         rows.append([_btn("🔄 Обновить", "ug:open", ButtonStyle.PRIMARY)])
     rows.append([_collect_btn(ug)])
     rows.append(_back("mine:open"))
@@ -738,19 +745,13 @@ def mine_kb(i: int):
 def time_kb(user_id: int) -> InlineKeyboardMarkup:
     user, ug = load(user_id)
     coins = int(user.get("coins", 0) or 0)
-    opened, chosen = dur_open(ug), dur_selected(ug)
+    opened = dur_open(ug)
     rows = []
     if opened < len(DURATIONS):
         nxt = DURATIONS[opened]
         rows.append([_btn(f"Открыть {nxt[3]} · {short(nxt[1])}", "ug:tbuy",
                           ButtonStyle.SUCCESS if coins >= nxt[1] else ButtonStyle.DANGER,
                           LOCK_EMOJI_ID)])
-    choose = []
-    for d in range(opened):
-        label = DURATIONS[d][3]
-        choose.append(_checked(label, f"ug:tsel:{d}") if d == chosen
-                      else _btn(label, f"ug:tsel:{d}", ButtonStyle.PRIMARY))
-    rows += [choose[n:n + 3] for n in range(0, len(choose), 3)]
     rows.append(_back("ug:open"))
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -964,28 +965,8 @@ async def on_time_buy(callback: CallbackQuery):
         return
     user["coins"] = coins - price
     ug["dur_open"] = opened + 1
-    ug["dur_sel"] = opened          # новое время сразу становится выбранным
     D.save_users()
     await callback.answer(f"Открыто: {label}. Списано: {fmt(price)}.")
-    await _show(callback, "ug_time")
-
-
-@router.callback_query(F.data.regexp(r"^ug:tsel:\d+$"))
-async def on_time_select(callback: CallbackQuery):
-    user = await _require_user(callback)
-    if user is None:
-        return
-    ug = get_ug(user)
-    d = _num(callback, 2, len(DURATIONS))
-    if d is None or d >= dur_open(ug):
-        await callback.answer()
-        return
-    if d == dur_selected(ug):
-        await callback.answer("Это время уже выбрано.")
-        return
-    ug["dur_sel"] = d
-    D.save_users()
-    await callback.answer(f"Выбрано: {DURATIONS[d][3]}.")
     await _show(callback, "ug_time")
 
 
@@ -1040,6 +1021,31 @@ async def on_start(callback: CallbackQuery):
     }
     D.save_users()
     await callback.answer(f"{p['name']} запущена на {label}!")
+    await _show(callback, "ug")
+
+
+@router.callback_query(F.data == "ug:stop")
+async def on_stop(callback: CallbackQuery):
+    """Останавливает запуск (не раньше чем через минуту). Уже открытая добыча остаётся."""
+    user = await _require_user(callback)
+    if user is None:
+        return
+    ug = get_ug(user)
+    settle(ug)
+    run = ug["run"]
+    if run is None:
+        await callback.answer("Шахта уже не работает.")
+        await _show(callback, "ug")
+        return
+    now = time.time()
+    wait = run["start"] + STOP_AFTER - now
+    if wait > 0:
+        await callback.answer(f"Остановить можно через {math.ceil(wait)} сек.", show_alert=True)
+        return
+    ug["last_end"] = now
+    ug["run"] = None
+    D.save_users()
+    await callback.answer("Шахта остановлена. Добытое можно забрать.")
     await _show(callback, "ug")
 
 
