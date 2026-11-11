@@ -1615,6 +1615,7 @@ underground.setup(
     player_level=player_level,                 # уровни кирок открываются по уровню игрока
     MINERALS_FIELD=MINERALS_FIELD,
     MINERAL_EMOJI=MINERAL_EMOJI,
+    DONE_EMOJI=DONE_EMOJI,                     # галочка на кнопке выбранной шахты
 )
 dp.include_router(underground.router)
 
