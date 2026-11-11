@@ -627,6 +627,18 @@ def _btn(text: str, data: str, style: ButtonStyle | None = ButtonStyle.SUCCESS,
                                 icon_custom_emoji_id=emoji_id)
 
 
+def _done_id() -> str | None:
+    """id кастомной галочки (DONE_EMOJI из main.py); если не передан, будет обычная ✅ в тексте."""
+    e = getattr(D, "DONE_EMOJI", None)
+    return e[0] if e else None
+
+
+def _checked(text: str, data: str) -> InlineKeyboardButton:
+    """Зелёная кнопка выбранной шахты с галочкой слева."""
+    eid = _done_id()
+    return _btn(text if eid else f"✅ {text}", data, ButtonStyle.SUCCESS, eid)
+
+
 def _back(data: str) -> list[InlineKeyboardButton]:
     return [_btn("Назад", data, ButtonStyle.PRIMARY, D.BACK_EMOJI_ID)]
 
@@ -667,14 +679,14 @@ def list_kb(user_id: int, page: int = 0) -> InlineKeyboardMarkup:
             if not pick_unlocked(user, i):
                 buttons.append(_btn(f"LVL{p['lvl']}", f"ug:m:{i}", ButtonStyle.DANGER))
             elif i == sel:
-                buttons.append(_btn(f"✅ LVL{p['lvl']}", f"ug:m:{i}", ButtonStyle.SUCCESS))
+                buttons.append(_checked(f"LVL{p['lvl']}", f"ug:m:{i}"))
             else:
                 buttons.append(_btn(f"LVL{p['lvl']}", f"ug:m:{i}", ButtonStyle.SUCCESS))
         rows.append(buttons)
     nav = [
-        _btn("◀", f"ug:list:{page - 1}" if page > 0 else "ug:noop", ButtonStyle.PRIMARY),
-        _btn(f"{page + 1}/{PAGES}", "ug:noop", None),
-        _btn("▶", f"ug:list:{page + 1}" if page < PAGES - 1 else "ug:noop", ButtonStyle.PRIMARY),
+        _btn("‹", f"ug:list:{page - 1}" if page > 0 else "ug:noop", ButtonStyle.PRIMARY),
+        _btn(f"{page + 1}/{PAGES}", "ug:noop", ButtonStyle.PRIMARY),
+        _btn("›", f"ug:list:{page + 1}" if page < PAGES - 1 else "ug:noop", ButtonStyle.PRIMARY),
     ]
     rows.append(nav)
     rows.append(_back("ug:open"))
@@ -689,7 +701,7 @@ def mine_kb(i: int):
             main = _btn(f"🔒 Откроется на {p['need_level']} уровне игрока", f"ug:locked:{i}",
                         ButtonStyle.DANGER)
         elif i == selected(ug):
-            main = _btn("✅ Используется", f"ug:use:{i}", ButtonStyle.SUCCESS)
+            main = _checked("Используется", f"ug:use:{i}")
         else:
             main = _btn("Использовать", f"ug:use:{i}", ButtonStyle.SUCCESS)
         return InlineKeyboardMarkup(inline_keyboard=[[main], _back(f"ug:list:{i // PER_PAGE}")])
