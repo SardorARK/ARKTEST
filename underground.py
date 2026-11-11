@@ -1,11 +1,11 @@
-"""Раздел «Подземная шахта»: активная добыча руды и минералов кирками WOOD-LVL1..3.
+"""Раздел «Подземная шахта»: активная добыча руды и минералов шахтами WOOD-LVL1..3 и ROCK-LVL1..3.
 
 Модуль самостоятельный и не трогает данные простой шахты (mine.py): свои данные игрока
 user["ug"], свои кнопки (callback_data начинается с «ug:»). Единственная связь с mine.py:
 кнопка «Подземная шахта» (ug:open) и кнопка «Назад» (mine:open).
 
 Как это работает:
-  * Кнопка «Подземная шахта» ведёт на выбор из трёх шахт (WOOD-LVL1..3). Игрок открывает одну
+  * Кнопка «Подземная шахта» ведёт на выбор из шести шахт (WOOD-LVL1..3 и ROCK-LVL1..3). Игрок открывает одну
     и запускает её. Одновременно работает только одна шахта. Один запуск длится RUN_MINUTES минут.
   * В момент запуска результат всего запуска бросается заранее (план копаний), а на экране
     открывается постепенно по времени. Перезаход в бот или нажатие кнопок результат не меняет.
@@ -63,16 +63,35 @@ ORES: dict[str, dict] = {
     "copper": {"name": "Медь", "icon": "🍁", "price": 8, "weight": 30},
 }
 
-# Кирки. digs: сколько копаний за запуск, drops: сколько из них дадут добычу (от и до),
-# need_level: нужный уровень игрока. WOOD-LVL1 задан по условию (50 копаний, 30-50 добычи);
-# LVL2 и LVL3 это рост примерно на четверть за ступень, цифры можно менять свободно.
+# Шахты. digs: копаний за запуск; drops: сколько из них дадут добычу (от и до);
+# need_level: нужный уровень игрока. WOOD-LVL1 задан по условию (50 копаний, 30-50 добычи).
+#
+# Баланс: добыча растёт ступенями примерно на 15-25%, а уровни открытия поставлены по цене
+# уровней игрока (формула в main.py: 25 * L**1.35 минералов, 35 * L**1.5 монет):
+#   до 3 ур. нужно 89 минералов, до 5 ур. 361, до 8 ур. 1208, до 11 ур. 2667, до 15 ур. 5699.
+# Одна шахта даёт в среднем 0.35 минерала и 3.2 монеты на каждую добычу (см. ORES),
+# а запусков в сутки не больше DAILY_RUNS, поэтому следующая ступень открывается не быстрее,
+# чем за несколько дней игры на предыдущей.
+#   шахта      копаний  добыча   в среднем за запуск (монет / минералов)   уровень игрока
+#   WOOD-LVL1     50    30-50      128 / 14                                  1
+#   WOOD-LVL2     60    38-60      157 / 17                                  3
+#   WOOD-LVL3     70    46-70      185 / 20                                  5
+#   ROCK-LVL1     80    55-80      216 / 24                                  8
+#   ROCK-LVL2     90    62-90      243 / 27                                  11
+#   ROCK-LVL3    100    70-100     272 / 30                                  15
 PICKS = [
-    {"name": "WOOD-LVL1", "icon": "🪵", "digs": 50, "drops": (30, 50), "need_level": 1,
+    {"name": "WOOD-LVL1", "digs": 50, "drops": (30, 50), "need_level": 1,
      "desc": "Неглубокий штрек. Порода мягкая, кирка справляется без труда."},
-    {"name": "WOOD-LVL2", "icon": "🪵", "digs": 60, "drops": (38, 60), "need_level": 3,
+    {"name": "WOOD-LVL2", "digs": 60, "drops": (38, 60), "need_level": 3,
      "desc": "Глубже и богаче. Здесь уже нужна опытная рука."},
-    {"name": "WOOD-LVL3", "icon": "🪵", "digs": 70, "drops": (46, 70), "need_level": 5,
-     "desc": "Самый глубокий штрек. Добычи больше всего, а порода крепче."},
+    {"name": "WOOD-LVL3", "digs": 70, "drops": (46, 70), "need_level": 5,
+     "desc": "Самый глубокий штрек в деревянных шахтах. Добычи много, а порода крепче."},
+    {"name": "ROCK-LVL1", "digs": 80, "drops": (55, 80), "need_level": 8,
+     "desc": "Каменные шахты: плотная порода и жилы побогаче. Здесь работают всерьёз."},
+    {"name": "ROCK-LVL2", "digs": 90, "drops": (62, 90), "need_level": 11,
+     "desc": "Глубокие каменные залежи. Копать тяжело, зато добыча щедрая."},
+    {"name": "ROCK-LVL3", "digs": 100, "drops": (70, 100), "need_level": 15,
+     "desc": "Самая глубокая шахта. Крепчайшая порода и самая богатая добыча."},
 ]
 
 # Кастомные эмодзи заголовков (можно заменить на свои id)
@@ -299,7 +318,7 @@ def ug_html(user_id: int, with_image: bool = False) -> str:
     else:
         frac, pk, left = 0.0, PICKS[selected(ug)], "—"
     state = [
-        (f"{_ug()} Шахта", f"{pk['icon']} {pk['name']}"),
+        (f"{_ug()} Шахта", pk["name"]),
         ("⏳ Прогресс", _bar(frac)),
         ("⏱ До конца", left),
     ]
@@ -337,7 +356,7 @@ def mine_html(user_id: int, i: int, with_image: bool = False) -> str:
     ]
     return (
         f"{_image(with_image)}"
-        f"<p><b>{p['icon']} {p['name']}</b></p>"
+        f"<p><b>{p['name']}</b></p>"
         f"<blockquote><i>{p['desc']}</i></blockquote>"
         + _tree(stats, "Характеристики")
         + f"<p>{_level_text(user, i)}</p>"
@@ -405,12 +424,13 @@ def list_kb(user_id: int) -> InlineKeyboardMarkup:
     mines = []
     for i, p in enumerate(PICKS):
         if not pick_unlocked(user, i):
-            mines.append(_btn(f"🔒 {p['name']}", f"ug:m:{i}", ButtonStyle.DANGER))
+            mines.append(_btn(p["name"], f"ug:m:{i}", ButtonStyle.DANGER))
         elif i == sel:
             mines.append(_btn(f"✅ {p['name']}", f"ug:m:{i}", ButtonStyle.SUCCESS))
         else:
-            mines.append(_btn(f"{p['icon']} {p['name']}", f"ug:m:{i}", ButtonStyle.SUCCESS))
-    return InlineKeyboardMarkup(inline_keyboard=[mines, _back("ug:open")])
+            mines.append(_btn(p["name"], f"ug:m:{i}", ButtonStyle.SUCCESS))
+    rows = [mines[n:n + 3] for n in range(0, len(mines), 3)]      # по три шахты в ряд
+    return InlineKeyboardMarkup(inline_keyboard=rows + [_back("ug:open")])
 
 
 def mine_kb(i: int):
