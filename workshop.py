@@ -209,29 +209,44 @@ def _back(data: str) -> list[InlineKeyboardButton]:
                                  icon_custom_emoji_id=D.BACK_EMOJI_ID)]
 
 
-def _item_line(item: dict, dur: int | None = None) -> str:
-    d = item["durability"]
-    dur_txt = f"{d}" if dur is None else f"{dur}/{d}"
-    return (f"{item['emoji']} <b>{escape(item['name'])}</b> · {escape(item['rarity'])} · "
-            f"прочность {dur_txt} · добыча ×{item['mult']:g}")
+def _owned_line(item: dict, dur: int) -> str:
+    """Предмет в инвентаре: здесь прочность показываем (при крафте её не видно)."""
+    return (f"{item['emoji']} <b>{escape(item['name'])}</b><br>"
+            f"Редкость: <b>{escape(item['rarity'])}</b><br>"
+            f"Прочность: <code>{dur}/{item['durability']}</code><br>"
+            f"Добыча: <code>×{item['mult']:g}</code>")
+
+
+def _recipe_line(item: dict) -> str:
+    """Рецепт в списке: коротко, без прочности."""
+    return (f"{item['emoji']} <b>{escape(item['name'])}</b><br>"
+            f"Редкость: <b>{escape(item['rarity'])}</b> · Время: <b>{fmt_time(item['seconds'])}</b>")
 
 
 def _craft_status(user: dict) -> str:
     job = user.get("ws_craft")
     if not isinstance(job, dict) or job.get("item") not in ITEMS:
         return ""
+    item = ITEMS[job["item"]]
     left = float(job.get("end", 0)) - time.time()
-    return (f"<p>{CRAFT_EMOJI[1]} Идёт крафт: <b>{escape(ITEMS[job['item']]['name'])}</b>, "
-            f"осталось {fmt_time(left)}</p>")
+    return (f"<p><b>{CRAFT_EMOJI[1]} Сейчас в работе</b><br>"
+            f"{item['emoji']} {escape(item['name'])}<br>"
+            f"Осталось: <b>{fmt_time(left)}</b></p>")
+
+
+def _done_note(done: str | None) -> str:
+    if not done:
+        return ""
+    return (f"<p><b>✅ Крафт завершён</b><br>{escape(done)} уже лежит в твоём инвентаре. "
+            f"Загляни в раздел «Предметы».</p>")
 
 
 def root_html(user: dict, with_image: bool, done: str | None = None) -> str:
     text = _img(with_image) + _head(
         "МАСТЕРСКАЯ", BUTTON_EMOJI,
-        "Здесь создаются новые вещи. Выбери раздел или нажми «Крафт», чтобы создать предмет.")
-    if done:
-        text += f"<p>✅ Готово: <b>{escape(done)}</b>. Предмет в инвентаре.</p>"
-    return text + _craft_status(user)
+        "Создавай инструменты, снаряжение и боезапас из добытых материалов. "
+        "Выбери раздел или сразу переходи к крафту.")
+    return text + _done_note(done) + _craft_status(user)
 
 
 def root_kb() -> InlineKeyboardMarkup:
@@ -248,24 +263,34 @@ def category_html(user: dict, key: str, with_image: bool) -> str:
     title, emoji, desc = CATEGORIES[key]
     text = _img(with_image) + _head(title.upper(), emoji, desc)
     if key == "res":
-        lines = [f"{e} {escape(n)}: <b>{_n(have(user, k))}</b>" for k, (n, e) in RESOURCES.items()]
-        return text + "<p>" + "<br>".join(lines) + "</p>"
-    owned = [it for it in items_of(user) if ITEMS.get(it["key"], {}).get("category") == key]
+        # показываем только то, что у игрока есть прямо сейчас; значение моно, по нажатию копируется
+        owned = [(k, n, e, have(user, k)) for k, (n, e) in RESOURCES.items() if have(user, k) > 0]
+        if not owned:
+            return text + ("<p><b>Запасы пусты</b><br>Пока у тебя нет ни одного материала. "
+                           "Добывай их, и они появятся здесь.</p>")
+        lines = [f"{e} <b>{escape(n)}</b> — <code>{_n(c)}</code>" for _, n, e, c in owned]
+        return (text + "<p><b>Твои запасы</b><br><br>" + "<br>".join(lines) + "</p>"
+                + f"<p>Видов материалов: <b>{len(owned)}</b></p>")
+    mine = [it for it in items_of(user) if ITEMS.get(it["key"], {}).get("category") == key]
     recipes = [i for i in ITEMS.values() if i["category"] == key]
-    if owned:
-        text += "<p><b>В инвентаре:</b><br>" + "<br>".join(
-            _item_line(ITEMS[it["key"]], _int(it["dur"])) for it in owned) + "</p>"
+    if mine:
+        text += ("<p><b>В инвентаре</b><br><br>"
+                 + "<br><br>".join(_owned_line(ITEMS[it["key"]], _int(it["dur"])) for it in mine) + "</p>")
     if recipes:
-        text += "<p><b>Рецепты:</b><br>" + "<br>".join(_item_line(i) for i in recipes) + "</p>"
-    elif not owned:
-        text += "<p>Рецептов пока нет. Скоро здесь появятся новые.</p>"
+        text += ("<p><b>Доступные рецепты</b><br><br>"
+                 + "<br><br>".join(_recipe_line(i) for i in recipes)
+                 + "</p><p>Чтобы создать предмет, открой «Крафт».</p>")
+    elif not mine:
+        text += "<p><b>Пока пусто</b><br>Рецептов в этом разделе ещё нет. Скоро здесь появятся новые.</p>"
     return text
 
 
 def craft_html(user: dict, with_image: bool, note: str = "") -> str:
-    text = _img(with_image) + _head("КРАФТ", CRAFT_EMOJI, "Выбери предмет, который хочешь создать.")
-    if note:
-        text += f"<p>{note}</p>"
+    text = _img(with_image) + _head(
+        "КРАФТ", CRAFT_EMOJI, "Выбери предмет, чтобы посмотреть рецепт и запустить создание.")
+    text += note
+    text += "<p><b>Что можно создать</b><br><br>" + "<br><br>".join(
+        _recipe_line(i) for i in ITEMS.values()) + "</p>"
     return text + _craft_status(user)
 
 
@@ -277,17 +302,27 @@ def craft_kb() -> InlineKeyboardMarkup:
 
 def recipe_html(user: dict, key: str, with_image: bool, note: str = "") -> str:
     item = ITEMS[key]
-    text = _img(with_image) + _head(item["name"].upper(), item["emoji"], f"Редкость: {item['rarity']}")
-    text += (f"<p>Прочность: <b>{item['durability']}</b><br>Множитель добычи: <b>×{item['mult']:g}</b><br>"
+    text = _img(with_image) + _head(item["name"].upper(), item["emoji"], "Рецепт создания предмета.")
+    text += note
+    text += (f"<p><b>Характеристики</b><br><br>"
+             f"Редкость: <b>{escape(item['rarity'])}</b><br>"
+             f"Множитель добычи: <code>×{item['mult']:g}</code><br>"
              f"Время крафта: <b>{fmt_time(item['seconds'])}</b></p>")
-    lines = []
+    lines, lack = [], 0
     for k, n in item["cost"].items():
         name, em = RESOURCES[k]
         got = have(user, k)
-        lines.append(f"{'✅' if got >= n else '❌'} {em} {escape(name)}: {_n(got)}/{_n(n)}")
-    text += "<p><b>Нужно:</b><br>" + "<br>".join(lines) + "</p>"
-    if note:
-        text += f"<p>{note}</p>"
+        lack += got < n
+        lines.append(f"{'✅' if got >= n else '❌'} {em} <b>{escape(name)}</b> — "
+                     f"<code>{_n(got)}</code> / <code>{_n(n)}</code>")
+    text += "<p><b>Необходимые ресурсы</b><br><br>" + "<br>".join(lines) + "</p>"
+    if not note:
+        if isinstance(user.get("ws_craft"), dict):
+            text += "<p>Мастерская сейчас занята. Новый крафт можно начать после завершения текущего.</p>"
+        elif lack:
+            text += "<p>Не хватает ресурсов. Собери недостающие материалы и возвращайся.</p>"
+        else:
+            text += "<p>Всё готово. Нажми «Создать», чтобы начать.</p>"
     return text + _craft_status(user)
 
 
@@ -359,7 +394,7 @@ async def on_craft(callback: CallbackQuery):
     done = settle(user)
     if done:
         D.save_users()
-    note = f"✅ Готово: <b>{escape(done)}</b>. Предмет в инвентаре." if done else ""
+    note = _done_note(done)
     await D.show_rich_card(callback, "workshop", lambda wi: craft_html(user, wi, note), craft_kb())
 
 
@@ -395,5 +430,6 @@ async def on_make(callback: CallbackQuery):
         return
     D.save_users()
     await callback.answer("Крафт запущен.")
-    note = f"🔨 Крафт запущен: будет готово через {fmt_time(ITEMS[key]['seconds'])}."
+    note = (f"<p><b>🔨 Крафт запущен</b><br>Предмет будет готов через "
+            f"<b>{fmt_time(ITEMS[key]['seconds'])}</b>. Можешь заниматься своими делами.</p>")
     await D.show_rich_card(callback, "workshop", lambda wi: recipe_html(user, key, wi, note), recipe_kb(key))
