@@ -51,6 +51,8 @@ TIME_EMOJI = ("5850317551090800862", "⏰")    # время ковки
 BOOST_EMOJI = ("5938437708635443119", "⏫")   # бонус к добыче
 MAKE_EMOJI = ("6048599681292832729", "⚒️")   # кнопка «Создать»
 REPAIR_EMOJI = ("", "🔧")                      # кнопка «Восстановить» (впиши id кастомного)
+UPGRADE_EMOJI = ("", "⬆️")                     # кнопка «Улучшить» (впиши id кастомного)
+REFRESH_EMOJI = ("", "🔄")                     # кнопка «Обновить»
 SLOT_TITLE_EMOJI = ("5350434966163443737", "🔥")   # заголовок «СЛОТ N» внутри слота
 
 # ключ -> (название, эмодзи)
@@ -102,6 +104,7 @@ ITEMS = {
         "cost": {"wood": 10, "feather": 4, "vine": 5},
         "seconds": 5 * 60,
         "durability": 100,
+        "upgradable": True,
         "bonus": ("Добыча", 1.05),
     },
     "rope": {
@@ -113,6 +116,7 @@ ITEMS = {
         "cost": {"thread": 15, "vine": 5, "clay": 4},
         "seconds": 5 * 60,
         "durability": 100,
+        "upgradable": True,
         "bonus": ("Шанс найти золото", 1.15),   # было 1%, станет 1.15%
     },
     "medkit": {
@@ -141,6 +145,11 @@ ITEMS = {
         "bonus": ("Награды экспедиции", 1.10),
     },
 }
+
+# Уровни предметов (только где стоит "upgradable": True - кирка и верёвка)
+MAX_LEVEL = 10          # максимальный уровень
+LEVEL_BONUS_MULT = 5    # на 10 уровне бонус в 5 раз больше стартового (+5% -> +25%), растёт равномерно
+UPGRADE_TOTAL_MULT = 3.5  # все 10 улучшений вместе стоят ~3.5 цены предмета; каждый следующий уровень дороже
 
 MAX_SLOTS = 4          # слотов в кузнице; сначала открыт только первый
 # Цена открытия слота (монеты). Слоты открываются строго по порядку: 2, потом 3, потом 4.
@@ -211,6 +220,52 @@ def repair_cost(item: dict, dur: int) -> dict:
     return {k: n for k, n in cost.items() if n > 0}
 
 
+def can_upgrade(item: dict) -> bool:
+    return bool(item.get("upgradable"))
+
+
+def level_of(it: dict) -> int:
+    return min(MAX_LEVEL, _int(it.get("lvl")))
+
+
+def bonus_pct(item: dict, lvl: int = 0) -> float:
+    """Бонус предмета в процентах на уровне lvl: 0 уровень - стартовый, 10 уровень - стартовый x5."""
+    base = (item["bonus"][1] - 1) * 100
+    k = 1 + (LEVEL_BONUS_MULT - 1) * (lvl / MAX_LEVEL) if can_upgrade(item) else 1
+    return round(base * k, 2)
+
+
+def _pct(v: float) -> str:
+    return f"+{v:g}%"
+
+
+def upgrade_cost(item: dict, to_level: int) -> dict:
+    """Цена улучшения до уровня to_level (1..10). Сумма всех уровней = ~UPGRADE_TOTAL_MULT цен предмета."""
+    weight = to_level / (MAX_LEVEL * (MAX_LEVEL + 1) / 2)
+    return {k: max(1, round(n * UPGRADE_TOTAL_MULT * weight)) for k, n in item["cost"].items()}
+
+
+def upgrade_item(user: dict, idx: int) -> str | None:
+    """Поднимает уровень предмета за ресурсы. None при успехе или текст причины отказа."""
+    found = inv_item(user, idx)
+    if found is None:
+        return "Предмет не найден."
+    it, item = found
+    if not can_upgrade(item):
+        return "Этот предмет нельзя улучшить."
+    lvl = level_of(it)
+    if lvl >= MAX_LEVEL:
+        return "Максимальный уровень уже достигнут."
+    cost = upgrade_cost(item, lvl + 1)
+    if any(have(user, k) < n for k, n in cost.items()):
+        return "Не хватает ресурсов для улучшения."
+    r = res_of(user)
+    for k, n in cost.items():
+        r[k] = have(user, k) - n
+    it["lvl"] = lvl + 1
+    return None
+
+
 def inv_item(user: dict, idx: int):
     """(запись инвентаря, описание предмета) по номеру или None."""
     lst = items_of(user)
@@ -230,7 +285,7 @@ def repair_item(user: dict, idx: int) -> str | None:
         return "Этот предмет нельзя восстановить."
     dur = min(_int(it.get("dur")), max_dur(item))
     if dur >= max_dur(item):
-        return "Прочность уже полная."
+        return "Прочность на 100%."
     cost = repair_cost(item, dur)
     if any(have(user, k) < n for k, n in cost.items()):
         return "Не хватает ресурсов для восстановления."
@@ -376,7 +431,15 @@ def _img(with_image: bool) -> str:
 
 def _em(emoji: "str | tuple[str, str]") -> str:
     """Эмодзи предмета для HTML-текста: пара (id, запасной) даёт кастомный, строка остаётся как есть."""
-    return D.custom_emoji(emoji) if isinstance(emoji, tuple) else emoji
+    if isinstance(emoji, tuple):
+        return D.custom_emoji(emoji) if emoji[0] else emoji[1]
+    return emoji
+
+
+def _legend(*pairs) -> str:
+    """Подсказка к кнопкам-значкам: «эмодзи - Действие»."""
+    lines = [f"{_em(e)} - {escape(t)}" for e, t in pairs]
+    return "<p>⠀<br><b>▸ Кнопки</b><br>" + "<br>".join(lines) + "</p>"
 
 
 def _head(title: str, emoji: tuple[str, str] | str, quote: str) -> str:
@@ -467,7 +530,7 @@ def category_html(user: dict, key: str, with_image: bool) -> str:
     if mine:
         shown = min(len(mine), MAX_ITEM_BUTTONS)
         text += (f"<p>⠀<br><b>В инвентаре: {len(mine)}</b><br>"
-                 "Нажми на предмет, чтобы увидеть его прочность и восстановить.</p>")
+                 "Нажми на предмет: состояние, улучшение и восстановление.</p>")
         if shown < len(mine):
             text += f"<p><i>Показаны первые {shown}.</i></p>"
     elif any(i["category"] == key for i in ITEMS.values()):
@@ -498,32 +561,8 @@ def _bar(cur: int, mx: int, width: int = 12) -> str:
     return "▰" * filled + "▱" * (width - filled)
 
 
-def item_html(user: dict, idx: int, with_image: bool) -> str:
-    """Карточка предмета из инвентаря: прочность или остаток использований, цена восстановления."""
-    it, item = inv_item(user, idx)
-    mx = max_dur(item)
-    dur = min(_int(it.get("dur")), mx)
-    text = _img(with_image) + _head(item["name"].upper(), item["emoji"], item.get("desc") or "Предмет из инвентаря.")
-    ok, no, boost = D.custom_emoji(OK_EMOJI), D.custom_emoji(NO_EMOJI), D.custom_emoji(BOOST_EMOJI)
-    bonus_name, bonus_mult = item["bonus"]
-    bonus = f"+{(bonus_mult - 1) * 100:.0f}%"
-    gap = "⠀<br>"
-    if can_repair(item):
-        state = f"Прочность: {dur}/{mx} ({dur * 100 // mx}%)"
-    else:
-        state = f"Осталось использований: {dur}/{mx}"
-    text += (f"<p>{gap}<b>▸ Характеристики</b><br>"
-             f"<b>Редкость: {escape(item['rarity'])}</b><br>"
-             f"<b>{boost} {escape(bonus_name)}: {bonus}</b>"
-             + (f"<br><b>{escape(item['note'])}</b>" if item.get("note") else "") + "</p>"
-             f"<p>{gap}<b>▸ Состояние</b><br>"
-             f"<b>{escape(state)}</b><br>{_bar(dur, mx)}</p>")
-    if not can_repair(item):
-        return text + f"<p>{gap}<i>Этот предмет нельзя восстановить.</i></p>"
-    if dur >= mx:
-        return text + f"<p>{gap}<i>Прочность полная, восстановление не нужно.</i></p>"
-    cost = repair_cost(item, dur)
-    miss_pct = (mx - dur) * 100 // mx
+def _cost_lines(user: dict, cost: dict) -> tuple[list[str], list[str]]:
+    ok, no = D.custom_emoji(OK_EMOJI), D.custom_emoji(NO_EMOJI)
     lines, lack = [], []
     for k, n in cost.items():
         name, em = RESOURCES[k]
@@ -532,16 +571,68 @@ def item_html(user: dict, idx: int, with_image: bool) -> str:
             lack.append(f"{em} {escape(name)} ×{_n(n - got)}")
         lines.append(f"{ok if got >= n else no} | {em} <b>{escape(name)}</b> — "
                      f"<code>{_n(got)}</code> / <code>{_n(n)}</code>")
-    note = ("<i>Не хватает " + ", ".join(lack) + ".</i>") if lack else "<i>Всё готово. Нажми «Восстановить».</i>"
-    return text + (f"<p>{gap}<b>▸ Восстановление ({miss_pct}% рецепта)</b><br>"
-                   + "<br>".join(lines) + f"<br>{note}</p>")
+    return lines, lack
+
+
+def item_html(user: dict, idx: int, with_image: bool) -> str:
+    """Карточка предмета из инвентаря: уровень, бонус, прочность, улучшение и восстановление."""
+    it, item = inv_item(user, idx)
+    mx = max_dur(item)
+    dur = min(_int(it.get("dur")), mx)
+    lvl = level_of(it)
+    text = _img(with_image) + _head(item["name"].upper(), item["emoji"], item.get("desc") or "Предмет из инвентаря.")
+    boost = D.custom_emoji(BOOST_EMOJI)
+    bonus_name = item["bonus"][0]
+    gap = "⠀<br>"
+    if can_repair(item):
+        state = f"Прочность: {dur}/{mx} ({dur * 100 // mx}%)"
+    else:
+        state = f"Осталось использований: {dur}/{mx}"
+    stats = f"<b>Редкость: {escape(item['rarity'])}</b><br>"
+    if can_upgrade(item):
+        stats += f"<b>Уровень: {lvl}/{MAX_LEVEL}</b><br>"
+    stats += f"<b>{boost} {escape(bonus_name)}: {_pct(bonus_pct(item, lvl))}</b>"
+    if can_upgrade(item) and lvl < MAX_LEVEL:
+        stats += f" → {_pct(bonus_pct(item, lvl + 1))}"
+    if item.get("note"):
+        stats += f"<br><b>{escape(item['note'])}</b>"
+    text += (f"<p>{gap}<b>▸ Характеристики</b><br>{stats}</p>"
+             f"<p>{gap}<b>▸ Состояние</b><br>"
+             f"<b>{escape(state)}</b><br>{_bar(dur, mx)}</p>")
+    legend = []
+    if can_upgrade(item):
+        if lvl >= MAX_LEVEL:
+            text += f"<p>{gap}<b>▸ Улучшение</b><br><i>Максимальный уровень {MAX_LEVEL}/{MAX_LEVEL}.</i></p>"
+        else:
+            lines, lack = _cost_lines(user, upgrade_cost(item, lvl + 1))
+            note = ("<i>Не хватает " + ", ".join(lack) + ".</i>") if lack else "<i>Всё готово, можно улучшать.</i>"
+            text += (f"<p>{gap}<b>▸ Улучшение до {lvl + 1} уровня</b><br>"
+                     + "<br>".join(lines) + f"<br>{note}</p>")
+        legend.append((UPGRADE_EMOJI, "Улучшить"))
+    if can_repair(item):
+        if dur >= mx:
+            text += f"<p>{gap}<b>▸ Восстановление</b><br><i>Прочность на 100%.</i></p>"
+        else:
+            miss_pct = (mx - dur) * 100 // mx
+            lines, lack = _cost_lines(user, repair_cost(item, dur))
+            note = ("<i>Не хватает " + ", ".join(lack) + ".</i>") if lack else "<i>Всё готово, можно восстанавливать.</i>"
+            text += (f"<p>{gap}<b>▸ Восстановление ({miss_pct}% рецепта)</b><br>"
+                     + "<br>".join(lines) + f"<br>{note}</p>")
+        legend.append((REPAIR_EMOJI, "Восстановить"))
+    else:
+        text += f"<p>{gap}<i>Этот предмет нельзя восстановить.</i></p>"
+    return text + (_legend(*legend) if legend else "")
 
 
 def item_kb(user: dict, idx: int) -> InlineKeyboardMarkup:
+    """Кнопки-значки показываются всегда; если действие недоступно, ответ придёт при нажатии."""
     it, item = inv_item(user, idx)
-    rows = []
-    if can_repair(item) and _int(it.get("dur")) < max_dur(item):
-        rows.append([_btn("Восстановить", f"ws:fix:{idx}", REPAIR_EMOJI, ButtonStyle.SUCCESS)])
+    acts = []
+    if can_upgrade(item):
+        acts.append(_ebtn(f"ws:up:{idx}", UPGRADE_EMOJI, ButtonStyle.SUCCESS))
+    if can_repair(item):
+        acts.append(_ebtn(f"ws:fix:{idx}", REPAIR_EMOJI, ButtonStyle.SUCCESS))
+    rows = [acts] if acts else []
     rows.append(_back(f"ws:cat:{item['category']}"))
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -590,12 +681,13 @@ def slot_busy_html(job: dict, slot: int, with_image: bool) -> str:
     return text + (f"<p><b>{_em(item['emoji'])} {escape(item['name'])}</b><br><br>"
                    f"Готово: <b>{percent(job, now)}%</b><br>"
                    f"Осталось: <b>{fmt_time(job['end'] - now)}</b></p>"
-                   "<p>Готовый предмет сам попадёт в инвентарь, когда время выйдет.</p>")
+                   "<p>Готовый предмет сам попадёт в инвентарь, когда время выйдет.</p>"
+                   + _legend((REFRESH_EMOJI, "Обновить")))
 
 
 def slot_busy_kb(slot: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
-        [_btn("Обновить", f"ws:slot:{slot}", "🔄", ButtonStyle.SUCCESS)],
+        [_ebtn(f"ws:slot:{slot}", REFRESH_EMOJI, ButtonStyle.SUCCESS)],
         _back("ws:forge"),
     ])
 
@@ -604,12 +696,13 @@ def slot_buy_html(user: dict, slot: int, with_image: bool) -> str:
     price = SLOT_PRICES[slot]
     text = _img(with_image) + _head(f"СЛОТ {slot}", SLOT_LOCK_EMOJI, "Этот слот пока закрыт. Открой его, чтобы ковать больше.")
     return text + (f"<p><b>Стоимость</b><br>Цена: <code>{_n(price)}</code> монет<br>"
-                   f"У тебя: <code>{_n(_int(user.get('coins')))}</code> монет</p>")
+                   f"У тебя: <code>{_n(_int(user.get('coins')))}</code> монет</p>"
+                   + _legend((SLOT_OPEN_EMOJI, f"Открыть за {short_num(price)}")))
 
 
 def slot_buy_kb(slot: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
-        [_btn(f"Открыть за {short_num(SLOT_PRICES[slot])}", f"ws:buy:{slot}", SLOT_OPEN_EMOJI, ButtonStyle.SUCCESS)],
+        [_ebtn(f"ws:buy:{slot}", SLOT_OPEN_EMOJI, ButtonStyle.SUCCESS)],
         _back("ws:forge"),
     ])
 
@@ -618,8 +711,8 @@ def recipe_html(user: dict, key: str, slot: int, with_image: bool) -> str:
     item = ITEMS[key]
     desc = item.get("desc") or f"Рецепт для слота {slot}."
     text = _img(with_image) + _head(item["name"].upper(), item["emoji"], desc)
-    bonus_name, bonus_mult = item["bonus"]
-    bonus = f"+{(bonus_mult - 1) * 100:.0f}%"
+    bonus_name = item["bonus"][0]
+    bonus = _pct(bonus_pct(item, 0))
     ok, no, clock = D.custom_emoji(OK_EMOJI), D.custom_emoji(NO_EMOJI), D.custom_emoji(TIME_EMOJI)
     boost = D.custom_emoji(BOOST_EMOJI)
     lines, lack = [], []
@@ -634,18 +727,18 @@ def recipe_html(user: dict, key: str, slot: int, with_image: bool) -> str:
     if lack:
         note = "<i>Не хватает " + ", ".join(lack) + ".</i>"
     else:
-        note = "<i>Всё готово. Нажми «Создать», чтобы начать.</i>"
+        note = "<i>Всё готово, можно создавать.</i>"
     text += (f"<p>{gap}<b>▸ Характеристики</b><br>"
              f"<b>Редкость: {escape(item['rarity'])} · {clock} {fmt_time(item['seconds'])}</b><br>"
              f"<b>{boost} {escape(bonus_name)}: {bonus}</b>"
              + (f"<br><b>{escape(item['note'])}</b>" if item.get("note") else "") + "</p>"
              f"<p>{gap}<b>▸ Нужно</b><br>" + "<br>".join(lines) + f"<br>{note}</p>")
-    return text
+    return text + _legend((MAKE_EMOJI, "Создать"))
 
 
 def recipe_kb(key: str, slot: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
-        [_btn("Создать", f"ws:make:{slot}:{key}", MAKE_EMOJI, ButtonStyle.SUCCESS)],
+        [_ebtn(f"ws:make:{slot}:{key}", MAKE_EMOJI, ButtonStyle.SUCCESS)],
         _back(f"ws:slot:{slot}"),
     ])
 
@@ -845,4 +938,22 @@ async def on_repair(callback: CallbackQuery):
         return
     D.save_users()
     await callback.answer("Предмет восстановлен.")
+    await D.show_rich_card(callback, "workshop", lambda wi: item_html(user, idx, wi), item_kb(user, idx))
+
+
+@router.callback_query(F.data.startswith("ws:up:"))
+async def on_upgrade(callback: CallbackQuery):
+    user = await _user_or_alert(callback)
+    if user is None:
+        return
+    idx = _idx_arg(callback.data)
+    if idx is None:
+        await callback.answer()
+        return
+    err = upgrade_item(user, idx)
+    if err:
+        await callback.answer(err, show_alert=True)
+        return
+    D.save_users()
+    await callback.answer(f"Уровень повышен: {level_of(inv_item(user, idx)[0])}/{MAX_LEVEL}.")
     await D.show_rich_card(callback, "workshop", lambda wi: item_html(user, idx, wi), item_kb(user, idx))
