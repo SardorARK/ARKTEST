@@ -52,7 +52,7 @@ import arena
 import exrn
 import settings
 import mine
-import underground       # «Шахта» (underground.py): кнопка в нижнем меню
+import underground       # «Шахта» (underground.py): открывается из «Заработать»
 import quick_cmds
 import friends
 import gift              # передача ресурсов игроку: «дать @ник» (gift.py)
@@ -758,9 +758,9 @@ def main_menu() -> ReplyKeyboardMarkup:
                     icon_custom_emoji_id=friends.BUTTON_EMOJI_ID,
                 ),
                 KeyboardButton(
-                    text="Шахта",
-                    style=ButtonStyle.PRIMARY,
-                    icon_custom_emoji_id=underground.UG_EMOJI[0],
+                    text="Заработать",
+                    style=ButtonStyle.SUCCESS,
+                    icon_custom_emoji_id=EARN_EMOJI[0],
                 ),
             ],
         ],
@@ -1108,6 +1108,8 @@ def player_level_html(user_id: int, with_image: bool = False) -> str:
 
 
 TREASURY_EMOJI = ("6192975148681793540", "💰")  # кнопка «Сокровищница»
+EARN_EMOJI = ("5260270009048906733", "💸")      # кнопка «Заработать» (нижнее меню)
+EARN_MINE_EMOJI = ("5465589000783812364", "🪨")  # кнопка «Шахта» в разделе «Заработать»
 STOCK_BTN_EMOJI = ("5854908544712707500", "📦")  # кнопка «Запасы»
 
 
@@ -1122,10 +1124,7 @@ def menu_kb() -> InlineKeyboardMarkup:
             # Главная кнопка на всю ширину, зелёная
             [btn("Мой питомец", "menu:pet", ButtonStyle.SUCCESS, PET_BTN_EMOJI[0])],
             [btn("Профиль", "menu:player", ButtonStyle.PRIMARY, settings.EM_USER[0])],
-            [
-                btn("Запасы", "menu:stock", ButtonStyle.PRIMARY, STOCK_BTN_EMOJI[0]),
-                btn("Банк", "menu:mine", ButtonStyle.PRIMARY, mine.MINE_EMOJI[0]),
-            ],
+            [btn("Запасы", "menu:stock", ButtonStyle.PRIMARY, STOCK_BTN_EMOJI[0])],
             # Исследование на всю ширину, зелёная
             [btn("Исследование", "menu:exrn", ButtonStyle.SUCCESS, exrn.EXPLORE_EMOJI[0])],
             [
@@ -1287,6 +1286,32 @@ def menu_html(user_id: int | None = None, with_image: bool = False) -> str:
         f"<p><b>{custom_emoji(MENU_EMOJI)} ГЛАВНОЕ МЕНЮ</b>{_menu_greeting(user_id)}</p>"
         "<blockquote><i>Здесь начинается твой путь. Навести питомца, "
         "проверь запасы и отправляйся навстречу новым победам.</i></blockquote>"
+    )
+
+
+def earn_html(user_id: int | None = None, with_image: bool = False) -> str:
+    """Раздел «Заработать»: отсюда открываются «Шахта» и «Банк»."""
+    image = '<img src="tg://photo?id=pet"/>' if with_image else ""
+    return (
+        f"{image}"
+        f"<p><b>{custom_emoji(EARN_EMOJI)} ЗАРАБОТАТЬ</b></p>"
+        "<blockquote><i>Копай руду и минералы в шахте или запускай банк: "
+        "сотрудники приносят монеты, даже пока тебя нет рядом.</i></blockquote>"
+    )
+
+
+def earn_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[[
+            InlineKeyboardButton(
+                text="Шахта", callback_data="ug:open", style=ButtonStyle.SUCCESS,
+                icon_custom_emoji_id=EARN_MINE_EMOJI[0],
+            ),
+            InlineKeyboardButton(
+                text="Банк", callback_data="menu:mine", style=ButtonStyle.SUCCESS,
+                icon_custom_emoji_id=mine.MINE_EMOJI[0],
+            ),
+        ]]
     )
 
 
@@ -1624,7 +1649,7 @@ dp.message.outer_middleware(achives.AchMiddleware())
 dp.callback_query.outer_middleware(achives.AchMiddleware())
 dp.errors.register(on_error)
 gift.install(dp)         # запоминает ники игроков для «дать @ник»
-# Нижняя кнопка «Шахта» (underground.py). Ловим её ДО quick_cmds: быстрая команда «шахта» открывала «Банк»
+# Текст «Шахта» (быстрая команда «шахта») открывает раздел шахты. Ловим его ДО остальных обработчиков
 dp.message.outer_middleware(underground.MenuButtonMiddleware())
 quick_cmds.install(dp)   # быстрые команды: «шахта», «/босс», «арена» и т.д. (quick_cmds.py)
 
@@ -2066,6 +2091,30 @@ async def on_pet_pick(callback: CallbackQuery):
 @dp.message(F.text == "Меню")
 async def open_menu(message: Message):
     await send_menu(message.bot, message.chat.id, message.from_user.id)
+
+
+@dp.message(F.text == "Заработать")
+async def open_earn(message: Message):
+    """Нижняя кнопка «Заработать»: выбор между «Шахтой» и «Банком»."""
+    uid = message.from_user.id
+    if get_user(uid) is None:
+        await message.answer("Сначала выбери питомца: /start")
+        return
+    await send_rich_card(
+        message.bot, message.chat.id, "earn", lambda with_image: earn_html(uid, with_image), earn_kb()
+    )
+
+
+@dp.callback_query(F.data == "earn:open")
+async def on_earn_open(callback: CallbackQuery):
+    """«Назад» из «Банка» и «Шахты»."""
+    if get_user(callback.from_user.id) is None:
+        await callback.answer("Сначала выбери питомца: /start", show_alert=True)
+        return
+    await callback.answer()
+    await show_rich_card(
+        callback, "earn", lambda with_image: earn_html(callback.from_user.id, with_image), earn_kb()
+    )
 
 
 @dp.callback_query(F.data == "menu:pet")
