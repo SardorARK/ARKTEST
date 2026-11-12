@@ -1437,6 +1437,32 @@ async def show_rich_card(
     return await send_rich_card(bot, chat_id, pet_key, build_html, reply_markup)
 
 
+async def refresh_rich_card(
+    bot: Bot,
+    chat_id: int,
+    message_id: int,
+    pet_key: str,
+    build_html,
+    reply_markup: InlineKeyboardMarkup | None = None,
+) -> bool:
+    """Обновляет rich-сообщение ТОЛЬКО правкой на месте и никогда не шлёт новое.
+    True: обновлено (или без изменений). False: так обновить нельзя (сообщение удалено, другое
+    фото, лимиты Telegram), вызывающий должен остановить само-обновление."""
+    cur = _MSG_STATE.get((chat_id, message_id))
+    if cur is None or cur[0] != "rich" or cur[1] != pet_images.get(pet_key):
+        return False
+    try:
+        rich, _ = _rich_input(pet_key, build_html)
+        await bot.edit_message_text(
+            chat_id=chat_id, message_id=message_id, rich_message=rich, reply_markup=reply_markup
+        )
+    except TelegramBadRequest as e:
+        return "not modified" in str(e)
+    except TelegramAPIError:
+        return False
+    return True
+
+
 async def send_pet_card(
     bot: Bot, chat_id: int, pet_key: str, preview: bool = False
 ) -> None:
@@ -1624,6 +1650,7 @@ underground.setup(
     get_user=get_user,
     save_users=save_users,
     send_rich_card=send_rich_card,
+    refresh_rich_card=refresh_rich_card,              # само-обновление экрана шахты только правкой
     show_rich_card=show_rich_card,
     custom_emoji=custom_emoji,
     COIN_EMOJI=COIN_EMOJI,
@@ -1635,6 +1662,7 @@ underground.setup(
     DONE_EMOJI=DONE_EMOJI,                     # галочка на кнопке выбранной шахты
 )
 dp.callback_query.outer_middleware(underground.LiveStopMiddleware())   # стоп само-обновления шахты
+dp.message.outer_middleware(underground.LiveStopMiddleware())
 dp.include_router(underground.router)
 
 def drop_any_artifact(user: dict, tier: str):
