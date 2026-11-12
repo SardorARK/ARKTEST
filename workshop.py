@@ -87,6 +87,8 @@ CATEGORIES = {
 #   cost     - сколько ресурсов нужно
 #   seconds  - время крафта
 #   durability - прочность (сколько раз можно использовать)
+#   note     - (необязательно) строка с особым правилом, показывается в карточке рецепта
+#   cancel_cost - (необязательно) сколько прочности тратится при отмене действия предмета
 #   bonus    - (подпись бонуса, множитель): множитель умножает базовое значение, 1.15 = +15%
 ITEMS = {
     "pickaxe": {
@@ -110,6 +112,19 @@ ITEMS = {
         "seconds": 5 * 60,
         "durability": 100,
         "bonus": ("Шанс найти золото", 1.15),   # было 1%, станет 1.15%
+    },
+    "medkit": {
+        "name": "Аптечка",
+        "emoji": "🩹",
+        "category": "items",
+        "rarity": "Редкий",
+        "desc": "Набор для срочного ремонта. Шахта работает дольше.",
+        "cost": {"thread": 35, "resin": 15, "fiber": 40, "feather": 25},
+        "seconds": 30 * 60,   # время крафта не было указано: поставил 30 мин, поменяй при необходимости
+        "durability": 3,      # сработает 3 раза
+        "cancel_cost": 1,     # при отмене тоже тратится 1 использование
+        "note": "Сработает 3 раза, отмена тоже тратит 1",
+        "bonus": ("Время работы шахты", 1.10),
     },
 }
 
@@ -484,7 +499,8 @@ def recipe_html(user: dict, key: str, slot: int, with_image: bool) -> str:
         note = "<i>Всё готово. Нажми «Создать», чтобы начать.</i>"
     text += (f"<p>{gap}<b>▸ Характеристики</b><br>"
              f"<b>Редкость: {escape(item['rarity'])} · {clock} {fmt_time(item['seconds'])}</b><br>"
-             f"<b>{boost} {escape(bonus_name)}: {bonus}</b></p>"
+             f"<b>{boost} {escape(bonus_name)}: {bonus}</b>"
+             + (f"<br><b>{escape(item['note'])}</b>" if item.get("note") else "") + "</p>"
              f"<p>{gap}<b>▸ Нужно</b><br>" + "<br>".join(lines) + f"<br>{note}</p>")
     return text
 
