@@ -88,6 +88,7 @@ ITEMS = {
         "emoji": "⛏️",
         "category": "items",
         "rarity": "Базовый",
+        "desc": "Простой инструмент для добычи. Основа любого старателя.",
         "cost": {"wood": 10, "feather": 4, "vine": 5},
         "seconds": 5 * 60,
         "durability": 100,
@@ -445,25 +446,31 @@ def slot_buy_kb(slot: int) -> InlineKeyboardMarkup:
     ])
 
 
+DOTS = "• • • • • • • • • • • •"   # разделитель в карточке рецепта
+
+
 def recipe_html(user: dict, key: str, slot: int, with_image: bool) -> str:
     item = ITEMS[key]
-    text = _img(with_image) + _head(item["name"].upper(), item["emoji"], f"Рецепт для слота {slot}.")
-    text += (f"<p><b>Характеристики</b><br><br>"
-             f"Редкость: <b>{escape(item['rarity'])}</b><br>"
-             f"Множитель добычи: <code>×{item['mult']:g}</code><br>"
-             f"Время ковки: <b>{fmt_time(item['seconds'])}</b></p>")
-    lines, lack = [], 0
+    desc = item.get("desc") or f"Рецепт для слота {slot}."
+    text = _img(with_image) + _head(item["name"].upper(), item["emoji"], desc)
+    bonus = f"+{(item['mult'] - 1) * 100:.0f}%"
+    lines, lack = [], []
     for k, n in item["cost"].items():
         name, em = RESOURCES[k]
         got = have(user, k)
-        lack += got < n
+        if got < n:
+            lack.append(f"{em} {escape(name)} ×{_n(n - got)}")
         lines.append(f"{'✅' if got >= n else '❌'} {em} <b>{escape(name)}</b> — "
                      f"<code>{_n(got)}</code> / <code>{_n(n)}</code>")
-    text += "<p><b>Необходимые ресурсы</b><br><br>" + "<br>".join(lines) + "</p>"
+    text += (f"<p>{DOTS}<br>"
+             f"Редкость: <b>{escape(item['rarity'])}</b> · ⏱ <b>{fmt_time(item['seconds'])}</b><br>"
+             f"Добыча: <b>{bonus}</b><br>"
+             f"{DOTS}<br>"
+             f"<b>Нужно:</b><br>" + "<br>".join(lines) + f"<br>{DOTS}</p>")
     if lack:
-        text += "<p>Не хватает ресурсов. Собери недостающие материалы и возвращайся.</p>"
+        text += "<p><i>Не хватает " + ", ".join(lack) + ".</i></p>"
     else:
-        text += "<p>Всё готово. Нажми «Создать», чтобы начать.</p>"
+        text += "<p><i>Всё готово. Нажми «Создать», чтобы начать.</i></p>"
     return text
 
 
