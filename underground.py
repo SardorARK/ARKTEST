@@ -497,7 +497,40 @@ def load(user_id: int) -> tuple[dict, dict]:
     ug = get_ug(user)
     if settle(ug):
         D.save_users()
+    if ug["run"] is not None:
+        _active.add(user_id)                     # фоновый цикл начнёт его вести
     return user, ug
+
+
+# ---------- Фоновое начисление ----------
+# Каждые TICK_SEC секунд цикл дописывает в «Добыто» всё, что накопилось у игроков с идущим запуском,
+# и сохраняет. Так данные меняются сами, а «Обновить» и открытие экрана лишь показывают их.
+# Игрок попадает в список, когда запускает шахту или открывает экран (после перезапуска бота).
+# Если бота перезапустили, ничего не теряется: выдача считается по времени.
+_active: set[int] = set()
+
+
+async def background_loop() -> None:
+    """Запускается один раз из main.py: asyncio.create_task(underground.background_loop())."""
+    while True:
+        await asyncio.sleep(TICK_SEC)
+        changed = False
+        for uid in list(_active):
+            try:
+                user = D.get_user(uid)
+                if user is None:
+                    _active.discard(uid)
+                    continue
+                ug = get_ug(user)
+                if ug["run"] is None:
+                    _active.discard(uid)
+                    continue
+                if settle(ug):
+                    changed = True
+            except Exception:
+                logging.exception("Подземная шахта: ошибка фонового начисления у %s", uid)
+        if changed:
+            D.save_users()
 
 
 # ---------- Оформление ----------
@@ -747,7 +780,7 @@ def ug_kb(user_id: int) -> InlineKeyboardMarkup:
         [_btn("Шахты", f"ug:list:{sel // PER_PAGE}", ButtonStyle.PRIMARY, MINES_EMOJI_ID),
          _btn("🎒 Рюкзак", "ug:bag", ButtonStyle.PRIMARY)],
         [_collect_btn(ug)],
-        [action, _btn("Обновить", "ug:open", ButtonStyle.PRIMARY, REFRESH_EMOJI_ID)],
+        [action, _btn("Обновить", "ug:refresh", ButtonStyle.PRIMARY, REFRESH_EMOJI_ID)],
         [_btn("Время запуска", "ug:time", ButtonStyle.PRIMARY, TIME_EMOJI[0])],
         _back("mine:open"),
     ]
@@ -957,6 +990,29 @@ async def on_open(callback: CallbackQuery):
     await _show(callback, "ug")
 
 
+@router.callback_query(F.data == "ug:refresh")
+async def on_refresh(callback: CallbackQuery):
+    """Кнопка «Обновить»: правит это же сообщение. Новое показываем, только если правка невозможна."""
+    user = await _require_user(callback)
+    if user is None:
+        return
+    await callback.answer()
+    uid = callback.from_user.id
+    msg = callback.message
+    if hasattr(msg, "message_id"):
+        html, kb = SCREENS["ug"]
+        try:
+            ok = await D.refresh_rich_card(callback.bot, msg.chat.id, msg.message_id, img_key("ug"),
+                                           lambda wi: html(uid, wi), kb(uid), require_state=False)
+        except Exception:
+            ok = False
+        if ok:
+            if AUTO_REFRESH_MIN > 0 and get_ug(user)["run"] is not None:
+                _start_live(callback.bot, msg.chat.id, msg.message_id, uid)
+            return
+    await _show(callback, "ug")
+
+
 @router.callback_query(F.data == "ug:noop")
 async def on_noop(callback: CallbackQuery):
     """Мёртвая кнопка-заголовок: ничего не делает, только гасит «часики»."""
@@ -1130,6 +1186,7 @@ async def on_start(callback: CallbackQuery):
         "got": {},
     }
     D.save_users()
+    _active.add(callback.from_user.id)
     await callback.answer(f"{p['name']} запущена на {label}!")
     await _show(callback, "ug")
 
