@@ -4,7 +4,7 @@
 
 Данные игрока:
     user["res"]      = {ключ_ресурса: количество}
-    user["ws_craft"] = {"item": ключ, "end": время_окончания} или None   (одна очередь крафта)
+    user["ws_craft"] = [{"item": ключ, "end": время_окончания}, ...]   (до MAX_SLOTS крафтов одновременно)
     user["ws_items"] = [{"key": ключ_предмета, "dur": текущая_прочность}, ...]
 
 Крафт идёт по времени и не требует, чтобы игрок ждал в боте: готовый предмет сам попадает
@@ -91,6 +91,7 @@ ITEMS = {
     },
 }
 
+MAX_SLOTS = 3          # сколько предметов можно крафтить одновременно
 INVENTORY_CAP = 200   # сколько предметов максимум в инвентаре мастерской
 
 
@@ -136,21 +137,31 @@ def can_afford(user: dict, item_key: str) -> bool:
     return all(have(user, k) >= n for k, n in ITEMS[item_key]["cost"].items())
 
 
-def settle(user: dict, now: float | None = None) -> str | None:
-    """Если крафт закончился, кладёт предмет в инвентарь. Возвращает название готового предмета."""
-    job = user.get("ws_craft")
-    if not isinstance(job, dict):
-        return None
+def jobs_of(user: dict) -> list:
+    """Список текущих крафтов. Старый формат (один словарь) превращается в список."""
+    jobs = user.get("ws_craft")
+    if isinstance(jobs, dict):
+        jobs = [jobs]
+    if not isinstance(jobs, list):
+        jobs = []
+    jobs = [j for j in jobs if isinstance(j, dict) and j.get("item") in ITEMS]
+    user["ws_craft"] = jobs
+    return jobs
+
+
+def settle(user: dict, now: float | None = None) -> list[str]:
+    """Кладёт в инвентарь все закончившиеся крафты. Возвращает названия готовых предметов."""
     now = time.time() if now is None else now
-    item = ITEMS.get(job.get("item"))
-    if item is None:                       # предмет убрали из игры: очередь просто сбрасываем
-        user["ws_craft"] = None
-        return None
-    if now < float(job.get("end", 0)):
-        return None
-    items_of(user).append({"key": job["item"], "dur": item["durability"]})
-    user["ws_craft"] = None
-    return item["name"]
+    jobs, left, done = jobs_of(user), [], []
+    for job in jobs:
+        item = ITEMS[job["item"]]
+        if now < float(job.get("end", 0)):
+            left.append(job)
+            continue
+        items_of(user).append({"key": job["item"], "dur": item["durability"]})
+        done.append(item["name"])
+    user["ws_craft"] = left
+    return done
 
 
 def start_craft(user: dict, item_key: str, now: float | None = None) -> str | None:
@@ -158,8 +169,8 @@ def start_craft(user: dict, item_key: str, now: float | None = None) -> str | No
     item = ITEMS.get(item_key)
     if item is None:
         return "Такого рецепта нет."
-    if isinstance(user.get("ws_craft"), dict):
-        return "Мастерская занята: дождись окончания текущего крафта."
+    if len(jobs_of(user)) >= MAX_SLOTS:
+        return f"Все {MAX_SLOTS} слота заняты: дождись окончания любого крафта."
     if len(items_of(user)) >= INVENTORY_CAP:
         return "Инвентарь мастерской переполнен."
     if not can_afford(user, item_key):
@@ -168,7 +179,7 @@ def start_craft(user: dict, item_key: str, now: float | None = None) -> str | No
     for k, n in item["cost"].items():
         r[k] = have(user, k) - n
     now = time.time() if now is None else now
-    user["ws_craft"] = {"item": item_key, "end": now + item["seconds"]}
+    jobs_of(user).append({"item": item_key, "end": now + item["seconds"]})
     return None
 
 
@@ -184,7 +195,11 @@ def fmt_time(sec: float) -> str:
 
 
 def _n(v: int) -> str:
-    """Количество с одним знаком после точки: 50 -> 50.0 (без пробелов, чтобы число копировалось целиком)."""
+    return f"{v:,}".replace(",", " ")
+
+
+def _f(v: int) -> str:
+    """Количество в разделе «Ресурсы»: 50 -> 50.0 (без пробелов, чтобы число копировалось целиком)."""
     return f"{float(v):.1f}"
 
 
@@ -225,24 +240,26 @@ def _recipe_line(item: dict) -> str:
 
 
 def _craft_status(user: dict) -> str:
-    job = user.get("ws_craft")
-    if not isinstance(job, dict) or job.get("item") not in ITEMS:
+    jobs = jobs_of(user)
+    if not jobs:
         return ""
-    item = ITEMS[job["item"]]
-    left = float(job.get("end", 0)) - time.time()
-    return (f"<p><b>{CRAFT_EMOJI[1]} Сейчас в работе</b><br>"
-            f"{item['emoji']} {escape(item['name'])}<br>"
-            f"Осталось: <b>{fmt_time(left)}</b></p>")
+    now = time.time()
+    lines = [f"{ITEMS[j['item']]['emoji']} {escape(ITEMS[j['item']]['name'])} — "
+             f"осталось <b>{fmt_time(float(j.get('end', 0)) - now)}</b>" for j in jobs]
+    return (f"<p><b>{CRAFT_EMOJI[1]} Сейчас в работе</b> · слоты {len(jobs)}/{MAX_SLOTS}<br><br>"
+            + "<br>".join(lines) + "</p>")
 
 
-def _done_note(done: str | None) -> str:
+def _done_note(done: list[str] | None) -> str:
     if not done:
         return ""
-    return (f"<p><b>✅ Крафт завершён</b><br>{escape(done)} уже лежит в твоём инвентаре. "
+    names = ", ".join(escape(d) for d in done)
+    title = "Крафт завершён" if len(done) == 1 else "Крафты завершены"
+    return (f"<p><b>✅ {title}</b><br>{names} уже в твоём инвентаре. "
             f"Загляни в раздел «Предметы».</p>")
 
 
-def root_html(user: dict, with_image: bool, done: str | None = None) -> str:
+def root_html(user: dict, with_image: bool, done: list[str] | None = None) -> str:
     text = _img(with_image) + _head(
         "МАСТЕРСКАЯ", BUTTON_EMOJI,
         "Создавай инструменты, снаряжение и боезапас из добытых материалов. "
@@ -269,8 +286,8 @@ def category_html(user: dict, key: str, with_image: bool) -> str:
         if not owned:
             return text + ("<p><b>Запасы пусты</b><br>Пока у тебя нет ни одного материала. "
                            "Добывай их, и они появятся здесь.</p>")
-        lines = [f"{e} <b>{escape(n)}</b> — <code>{_n(c)}</code>" for _, n, e, c in owned]
-        return text + "<p>" + "<br>".join(lines) + "</p>"
+        lines = [f"{e} <b>{escape(n)}</b> — <code>{_f(c)}</code>" for _, n, e, c in owned]
+        return text + "<p>&nbsp;<br>" + "<br>".join(lines) + "</p>"
     mine = [it for it in items_of(user) if ITEMS.get(it["key"], {}).get("category") == key]
     recipes = [i for i in ITEMS.values() if i["category"] == key]
     if mine:
@@ -317,8 +334,9 @@ def recipe_html(user: dict, key: str, with_image: bool, note: str = "") -> str:
                      f"<code>{_n(got)}</code> / <code>{_n(n)}</code>")
     text += "<p><b>Необходимые ресурсы</b><br><br>" + "<br>".join(lines) + "</p>"
     if not note:
-        if isinstance(user.get("ws_craft"), dict):
-            text += "<p>Мастерская сейчас занята. Новый крафт можно начать после завершения текущего.</p>"
+        if len(jobs_of(user)) >= MAX_SLOTS:
+            text += (f"<p>Все {MAX_SLOTS} слота мастерской заняты. "
+                     "Новый крафт можно начать, когда освободится любой из них.</p>")
         elif lack:
             text += "<p>Не хватает ресурсов. Собери недостающие материалы и возвращайся.</p>"
         else:
