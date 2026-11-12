@@ -87,6 +87,7 @@ import exrn
 import friends
 import mine
 import settings
+import workshop   # ресурсы мастерской (workshop.py)
 from storage import atomic_write_json, ledger, read_json_safe
 
 log = logging.getLogger("admin")
@@ -1201,11 +1202,17 @@ GIVE_RESOURCES: dict[str, tuple[str, str]] = {
     "meat": ("Мясо", "meat"),
     "crystals": ("Кристаллы", donate.BALANCE_FIELD),
 }
+# Ресурсы мастерской: ключ в выдаче = "w_" + ключ ресурса (хранятся в user["res"]).
+WS_PREFIX = "w_"
+for _k, (_name, _emoji) in workshop.RESOURCES.items():
+    GIVE_RESOURCES[WS_PREFIX + _k] = (_name, "res:" + _k)
 MODES = {"give": "Выдать", "take": "Снять", "set": "Установить"}
 MODE_VERB = {"give": "Выдача", "take": "Снятие", "set": "Установка значения"}
 
 
 def give_icon(res: str) -> str:
+    if res.startswith(WS_PREFIX):
+        return workshop.RESOURCES[res[len(WS_PREFIX):]][1]
     return {
         "fragments": cases.FRAG,
         "coins": D.custom_emoji(D.COIN_EMOJI),
@@ -1219,6 +1226,8 @@ def give_icon(res: str) -> str:
 def give_balance(user: dict, res: str) -> int:
     if res == "fragments":
         return cases.fragments_of(user)
+    if res.startswith(WS_PREFIX):
+        return workshop.have(user, res[len(WS_PREFIX):])
     return _int(user.get(GIVE_RESOURCES[res][1], 0))
 
 
@@ -1233,7 +1242,10 @@ def apply_resource(user: dict, res: str, mode: str, amount: int,
         after = max(0, before - amount)
     else:
         after = amount
-    user[field] = after
+    if res.startswith(WS_PREFIX):
+        workshop.res_of(user)[res[len(WS_PREFIX):]] = after
+    else:
+        user[field] = after
     ledger(f"admin_{mode}", admin=admin_id, uid=uid, res=res, amount=amount,
            before=before, after=after)
     D.store.flush()
@@ -1256,8 +1268,16 @@ def _res_kb(prefix: str, back: str, suffix: str = "") -> InlineKeyboardMarkup:
          _b(f"{D.MEAT_EMOJI} Мясо", f"{prefix}meat{suffix}", S)],
         [_b("Кристаллы", f"{prefix}crystals{suffix}", S, donate.EM_CRYSTAL[0]),
          _b(f"{D.MINERAL_EMOJI} Минералы", f"{prefix}minerals{suffix}", S)],
+        [_b(f"{workshop.CATEGORIES['res'][1]} Ресурсы", f"{prefix}wlist{suffix}", ButtonStyle.PRIMARY)],
         _back(back),
     )
+
+
+def _wres_kb(prefix: str, back: str, suffix: str = "") -> InlineKeyboardMarkup:
+    """Список ресурсов мастерской: callback_data = prefix + "w_" + ключ + suffix."""
+    btns = [_b(f"{e} {n}", f"{prefix}{WS_PREFIX}{k}{suffix}", ButtonStyle.SUCCESS)
+            for k, (n, e) in workshop.RESOURCES.items()]
+    return _kb(*_pairs(btns), _back(back))
 
 
 def _amount_prompt(mode: str, res: str, uid: str, user: dict) -> str:
@@ -1294,6 +1314,32 @@ async def adm_give_mode(cb: CallbackQuery, state: FSMContext):
     await state.clear()
     await _show(cb, f"<b>{MODE_VERB[mode]}</b>\n\n<i>Какой ресурс?</i>",
                 _res_kb(f"adm:gr:{mode}:", "adm:give"))
+    await cb.answer()
+
+
+@router.callback_query(F.data.regexp(r"^adm:gr:(give|take|set):wlist$"))
+async def adm_give_wlist(cb: CallbackQuery, state: FSMContext):
+    """Выдача -> режим -> «Ресурсы» -> список ресурсов мастерской."""
+    mode = cb.data.split(":")[2]
+    await state.clear()
+    await _show(cb, f"<b>{MODE_VERB[mode]}: Ресурсы</b>\n\n<i>Какой ресурс мастерской?</i>",
+                _wres_kb(f"adm:gr:{mode}:", f"adm:gm:{mode}"))
+    await cb.answer()
+
+
+@router.callback_query(F.data.regexp(r"^adm:ur:(give|take|set):wlist:\d+$"))
+async def adm_user_wlist(cb: CallbackQuery, state: FSMContext):
+    """Из карточки игрока: «Ресурсы» -> список ресурсов мастерской."""
+    _, _, mode, _, uid = cb.data.split(":")
+    user = await _need_user(cb, uid)
+    if user is None:
+        return
+    await state.clear()
+    await _show(
+        cb, f"<b>{MODE_VERB[mode]}: Ресурсы</b>\n\nИгрок: {player_label(uid, user)}\n\n"
+            "<i>Какой ресурс мастерской?</i>",
+        _wres_kb(f"adm:ur:{mode}:", f"adm:pm:{mode}:{uid}", f":{uid}"),
+    )
     await cb.answer()
 
 
