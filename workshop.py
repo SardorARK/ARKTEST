@@ -318,7 +318,7 @@ def _craft_status(user: dict) -> str:
     now = time.time()
     lines = [f"<i>{ITEMS[j['item']]['emoji']} {escape(ITEMS[j['item']]['name'])} — {percent(j, now)}% · {fmt_time(j['end'] - now)}</i>"
              for j in jobs]
-    return "<p>" + "<br>".join(lines) + "</p>"
+    return "<p>&nbsp;<br>" + "<br>".join(lines) + "</p>"
 
 
 def _done_note(done: list[str] | None) -> str:
