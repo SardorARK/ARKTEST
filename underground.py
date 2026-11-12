@@ -20,7 +20,7 @@ user["ug"], свои кнопки (callback_data начинается с «ug:»
   * Руду продают кнопкой «Продать руду» по фиксированным ценам (ORES).
 
 Подключение в main.py: underground.setup(...), underground.router и обработчик нижней кнопки
-(dp.message.register(underground.open_from_menu, F.text == "Шахта")).
+(dp.message.outer_middleware(underground.MenuButtonMiddleware()) до quick_cmds).
 """
 
 import asyncio
@@ -986,7 +986,7 @@ def _index(callback: CallbackQuery, pos: int = 2) -> int | None:
 
 async def open_from_menu(message: Message) -> None:
     """Кнопка «Шахта» в нижнем (reply) меню: присылает главный экран шахты новым сообщением.
-    Подключается в main.py: dp.message.register(underground.open_from_menu, F.text == "Шахта")."""
+    Вызывается из MenuButtonMiddleware (подключается в main.py до quick_cmds)."""
     uid = message.from_user.id
     if D.get_user(uid) is None:
         await message.answer("Сначала выбери питомца: /start")
@@ -1000,6 +1000,18 @@ async def open_from_menu(message: Message) -> None:
         user = D.get_user(uid)
         if user is not None and get_ug(user)["run"] is not None:
             _start_live(message.bot, msg.chat.id, msg.message_id, uid)
+
+
+class MenuButtonMiddleware(BaseMiddleware):
+    """Нижняя кнопка «Шахта». Подключается в main.py ДО quick_cmds: быстрая команда «шахта»
+    открывала «Банк», поэтому кнопку ловим раньше неё и дальше сообщение не пускаем."""
+
+    async def __call__(self, handler, event, data):
+        text = getattr(event, "text", None)
+        if isinstance(event, Message) and text and text.strip() == "Шахта":
+            await open_from_menu(event)
+            return None
+        return await handler(event, data)
 
 
 @router.callback_query(F.data == "ug:open")
