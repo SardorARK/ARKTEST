@@ -1624,8 +1624,8 @@ dp.message.outer_middleware(achives.AchMiddleware())
 dp.callback_query.outer_middleware(achives.AchMiddleware())
 dp.errors.register(on_error)
 gift.install(dp)         # запоминает ники игроков для «дать @ник»
-# Нижняя кнопка «Шахта» (underground.py). Регистрируем ДО quick_cmds, чтобы быстрая команда «шахта» её не перехватила
-dp.message.register(underground.open_from_menu, F.text == "Шахта")
+# Нижняя кнопка «Шахта» (underground.py). Ловим её ДО quick_cmds: быстрая команда «шахта» открывала «Банк»
+dp.message.outer_middleware(underground.MenuButtonMiddleware())
 quick_cmds.install(dp)   # быстрые команды: «шахта», «/босс», «арена» и т.д. (quick_cmds.py)
 
 dp.include_router(admin.router)
