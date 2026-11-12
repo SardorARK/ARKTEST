@@ -764,6 +764,11 @@ def main_menu() -> ReplyKeyboardMarkup:
                     style=ButtonStyle.PRIMARY,
                     icon_custom_emoji_id=friends.BUTTON_EMOJI_ID,
                 ),
+                KeyboardButton(
+                    text="Мастерская",
+                    style=ButtonStyle.PRIMARY,
+                    icon_custom_emoji_id=WORKSHOP_EMOJI[0] or None,
+                ),
             ],
         ],
         resize_keyboard=True,
@@ -1288,6 +1293,89 @@ def menu_html(user_id: int | None = None, with_image: bool = False) -> str:
         f"<p><b>{custom_emoji(MENU_EMOJI)} ГЛАВНОЕ МЕНЮ</b>{_menu_greeting(user_id)}</p>"
         "<blockquote><i>Здесь начинается твой путь. Навести питомца, "
         "проверь запасы и отправляйся навстречу новым победам.</i></blockquote>"
+    )
+
+
+# ---------- Мастерская (крафт) ----------
+# Эмодзи: пустой id = обычный эмодзи; впиши id кастомного, когда он будет.
+WORKSHOP_EMOJI = ("", "🛠")                  # кнопка «Мастерская» (нижнее меню)
+WORKSHOP_CRAFT_EMOJI = ("", "🔨")            # кнопка «Крафт»
+# ключ -> (название, эмодзи, описание)
+WORKSHOP_CATEGORIES = {
+    "res": ("Ресурсы", ("", "🪨"), "Материалы для создания вещей: руда, детали и заготовки."),
+    "items": ("Предметы", ("", "🎒"), "Полезные предметы, которые можно создать и пустить в дело."),
+    "ammo": ("Боезапас", ("", "🎯"), "Снаряды и заряды для боёв и охоты на боссов."),
+    "gear": ("Снаряжение", ("", "🛡"), "Оружие и броня для питомца."),
+    "extra": ("Дополнительно", ("", "✨"), "Особые рецепты, которым не нашлось места в других разделах."),
+}
+# Рецепты по категориям. Формат: "ключ": {"name": ..., "cost": {...}, "result": ...}
+# Пока пусто: когда добавим рецепты, они появятся в своих разделах.
+WORKSHOP_RECIPES: dict[str, dict[str, dict]] = {k: {} for k in WORKSHOP_CATEGORIES}
+
+
+def _ws_btn(text: str, data: str, pair: tuple[str, str], style: ButtonStyle) -> InlineKeyboardButton:
+    kwargs = {"icon_custom_emoji_id": pair[0]} if pair[0] else {}
+    label = text if pair[0] else f"{pair[1]} {text}"
+    return InlineKeyboardButton(text=label, callback_data=data, style=style, **kwargs)
+
+
+def workshop_html(user_id: int | None = None, with_image: bool = False) -> str:
+    image = '<img src="tg://photo?id=pet"/>' if with_image else ""
+    return (
+        f"{image}"
+        f"<p><b>{custom_emoji(WORKSHOP_EMOJI)} МАСТЕРСКАЯ</b></p>"
+        "<blockquote><i>Здесь создаются новые вещи. Выбери раздел, чтобы посмотреть "
+        "рецепты, или нажми «Крафт», чтобы создать предмет.</i></blockquote>"
+    )
+
+
+def workshop_kb() -> InlineKeyboardMarkup:
+    c = WORKSHOP_CATEGORIES
+    b = lambda k: _ws_btn(c[k][0], f"ws:cat:{k}", c[k][1], ButtonStyle.PRIMARY)
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [b("res"), b("items")],
+            [b("ammo"), b("gear")],
+            [b("extra")],
+            [_ws_btn("Крафт", "ws:craft", WORKSHOP_CRAFT_EMOJI, ButtonStyle.SUCCESS)],
+        ]
+    )
+
+
+def workshop_back_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[[
+            InlineKeyboardButton(
+                text="Назад", callback_data="ws:open", style=ButtonStyle.PRIMARY,
+                icon_custom_emoji_id=BACK_EMOJI_ID,
+            )
+        ]]
+    )
+
+
+def workshop_cat_html(key: str, with_image: bool = False) -> str:
+    title, emoji, desc = WORKSHOP_CATEGORIES[key]
+    image = '<img src="tg://photo?id=pet"/>' if with_image else ""
+    recipes = WORKSHOP_RECIPES.get(key) or {}
+    body = (
+        "<br>".join(f"• {escape(str(r.get('name', k)))}" for k, r in recipes.items())
+        if recipes else "Рецептов пока нет. Скоро здесь появятся новые."
+    )
+    return (
+        f"{image}"
+        f"<p><b>{custom_emoji(emoji)} {escape(title.upper())}</b></p>"
+        f"<blockquote><i>{escape(desc)}</i></blockquote>"
+        f"<p>{body}</p>"
+    )
+
+
+def workshop_craft_html(with_image: bool = False) -> str:
+    image = '<img src="tg://photo?id=pet"/>' if with_image else ""
+    return (
+        f"{image}"
+        f"<p><b>{custom_emoji(WORKSHOP_CRAFT_EMOJI)} КРАФТ</b></p>"
+        "<blockquote><i>Здесь ты будешь собирать вещи из ресурсов по рецептам.</i></blockquote>"
+        "<p>Рецептов для создания пока нет. Скоро они появятся.</p>"
     )
 
 
@@ -2109,6 +2197,51 @@ async def open_earn(message: Message):
     await send_rich_card(
         message.bot, message.chat.id, "earn", lambda with_image: earn_html(uid, with_image), earn_kb()
     )
+
+
+@dp.message(F.text == "Мастерская")
+async def open_workshop(message: Message):
+    """Нижняя кнопка «Мастерская»: разделы Ресурсы, Предметы, Боезапас, Снаряжение, Дополнительно и Крафт."""
+    uid = message.from_user.id
+    if get_user(uid) is None:
+        await message.answer("Сначала выбери питомца: /start")
+        return
+    await send_rich_card(
+        message.bot, message.chat.id, "workshop", lambda wi: workshop_html(uid, wi), workshop_kb()
+    )
+
+
+@dp.callback_query(F.data == "ws:open")
+async def on_ws_open(callback: CallbackQuery):
+    if get_user(callback.from_user.id) is None:
+        await callback.answer("Сначала выбери питомца: /start", show_alert=True)
+        return
+    await callback.answer()
+    await show_rich_card(
+        callback, "workshop", lambda wi: workshop_html(callback.from_user.id, wi), workshop_kb()
+    )
+
+
+@dp.callback_query(F.data.startswith("ws:cat:"))
+async def on_ws_category(callback: CallbackQuery):
+    if get_user(callback.from_user.id) is None:
+        await callback.answer("Сначала выбери питомца: /start", show_alert=True)
+        return
+    key = callback.data.split(":", 2)[2]
+    if key not in WORKSHOP_CATEGORIES:
+        await callback.answer()
+        return
+    await callback.answer()
+    await show_rich_card(callback, "workshop", lambda wi: workshop_cat_html(key, wi), workshop_back_kb())
+
+
+@dp.callback_query(F.data == "ws:craft")
+async def on_ws_craft(callback: CallbackQuery):
+    if get_user(callback.from_user.id) is None:
+        await callback.answer("Сначала выбери питомца: /start", show_alert=True)
+        return
+    await callback.answer()
+    await show_rich_card(callback, "workshop", workshop_craft_html, workshop_back_kb())
 
 
 @dp.callback_query(F.data == "earn:open")
