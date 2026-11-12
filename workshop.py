@@ -45,6 +45,9 @@ CRAFT_EMOJI = ("", "⚒️")         # кнопка «Кузница»
 SLOT_FREE_EMOJI = ("5424972470023104089", "🔥")   # свободный слот
 SLOT_OPEN_EMOJI = ("6037496202990194718", "🔓")   # слот можно открыть
 SLOT_LOCK_EMOJI = ("5778570255555105942", "🔒")   # слот недоступен
+OK_EMOJI = ("5390846416530716134", "✅")      # ресурса хватает
+NO_EMOJI = ("5328093774650293878", "❌")      # ресурса не хватает
+TIME_EMOJI = ("5850317551090800862", "⏰")    # время ковки
 
 # ключ -> (название, эмодзи)
 RESOURCES = {
@@ -446,31 +449,28 @@ def slot_buy_kb(slot: int) -> InlineKeyboardMarkup:
     ])
 
 
-DOTS = "• • • • • • • • • • • •"   # разделитель в карточке рецепта
-
-
 def recipe_html(user: dict, key: str, slot: int, with_image: bool) -> str:
     item = ITEMS[key]
     desc = item.get("desc") or f"Рецепт для слота {slot}."
     text = _img(with_image) + _head(item["name"].upper(), item["emoji"], desc)
     bonus = f"+{(item['mult'] - 1) * 100:.0f}%"
+    ok, no, clock = D.custom_emoji(OK_EMOJI), D.custom_emoji(NO_EMOJI), D.custom_emoji(TIME_EMOJI)
     lines, lack = [], []
     for k, n in item["cost"].items():
         name, em = RESOURCES[k]
         got = have(user, k)
         if got < n:
             lack.append(f"{em} {escape(name)} ×{_n(n - got)}")
-        lines.append(f"{'✅' if got >= n else '❌'} {em} <b>{escape(name)}</b> — "
+        lines.append(f"{ok if got >= n else no} | {em} <b>{escape(name)}</b> — "
                      f"<code>{_n(got)}</code> / <code>{_n(n)}</code>")
-    text += (f"<p>{DOTS}<br>"
-             f"Редкость: <b>{escape(item['rarity'])}</b> · ⏱ <b>{fmt_time(item['seconds'])}</b><br>"
-             f"Добыча: <b>{bonus}</b><br>"
-             f"{DOTS}<br>"
-             f"<b>Нужно:</b><br>" + "<br>".join(lines) + f"<br>{DOTS}</p>")
+    text += (f"<p>▸ <b>Характеристики</b><br>"
+             f"Редкость: <b>{escape(item['rarity'])}</b> · {clock} <b>{fmt_time(item['seconds'])}</b><br>"
+             f"Добыча: <b>{bonus}</b></p>"
+             f"<p>▸ <b>Нужно</b><br>" + "<br>".join(lines) + "</p>")
     if lack:
-        text += "<p><i>Не хватает " + ", ".join(lack) + ".</i></p>"
+        text += "<p>▸ <i>Не хватает " + ", ".join(lack) + ".</i></p>"
     else:
-        text += "<p><i>Всё готово. Нажми «Создать», чтобы начать.</i></p>"
+        text += "<p>▸ <i>Всё готово. Нажми «Создать», чтобы начать.</i></p>"
     return text
 
 
