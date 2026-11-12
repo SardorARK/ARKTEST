@@ -21,13 +21,14 @@ user["ug"], свои кнопки (callback_data начинается с «ug:»
 Подключение в main.py не меняется (underground.setup(...) и underground.router).
 """
 
+import asyncio
 import logging
 import math
 import random
 import time
 from types import SimpleNamespace
 
-from aiogram import F, Router
+from aiogram import BaseMiddleware, F, Router
 from aiogram.enums import ButtonStyle
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup
 
@@ -51,14 +52,22 @@ def setup(**deps) -> None:
 # ======================= БАЛАНС (всё меняется только здесь) =======================
 
 COOLDOWN_MIN = 10        # пауза после окончания запуска до следующего
+TICK_SEC = 5             # раз в сколько секунд добыча попадает в «Добыто»
+AUTO_REFRESH_MIN = 10    # сколько минут открытый экран шахты сам обновляется (0 = не обновлять сам)
 MINERAL_CHANCE = 35      # шанс (%), что добыча окажется минералом; всё остальное руда
 
-# Руда: цена за штуку и вес при выборе.
+# Руда: цена за штуку и вес (шанс при выборе руды, всего 100). Порядок = порядок в рюкзаке.
+# Новые руды (железо, золото) добавлены так, чтобы средняя цена руды осталась прежней (4,92 монеты):
+# доход шахт не изменился, просто часть добычи теперь дороже, а часть дешевле.
 ORES: dict[str, dict] = {
-    "stone": {"name": "Камень", "icon": "🪨", "price": 3, "weight": 50},
-    "coal": {"name": "Уголь", "icon": "💎", "price": 5, "weight": 40,
+    "stone": {"name": "Камень", "icon": "🪨", "price": 3, "weight": 54},     # 54%
+    "coal": {"name": "Уголь", "icon": "💎", "price": 5, "weight": 30,        # 30%
              "emoji": ("5773638078321135255", "💎")},     # кастомный эмодзи угля
-    "copper": {"name": "Медь", "icon": "🍁", "price": 8, "weight": 30},
+    "copper": {"name": "Медь", "icon": "🍁", "price": 8, "weight": 10},      # 10%
+    "iron": {"name": "Железо", "icon": "🔩", "price": 12, "weight": 5,       # 5%
+             "emoji": ("5774088727764668613", "💎")},
+    "gold": {"name": "Золото", "icon": "🥇", "price": 40, "weight": 1,       # 1%
+             "emoji": ("6278282858561803026", "🥇")},
 }
 
 # ---------- Время запуска (улучшение, как экспедиции) ----------
@@ -264,20 +273,22 @@ IMG_TARGETS: dict[str, str] = {
 
 # ---------- Данные игрока ----------
 # user["ug"] = {
-#   "ores": {"stone": int, "coal": int, "copper": int},   рюкзак
-#   "pending": {"stone": int, "coal": int, "copper": int, "mineral": int},   добыто, но не забрано
-#   "run": {"start", "end", "pick", "dur", "segs": [[s, c, p, x], ...], "given": int, "q", "mq"} | None
+#   "ores": {"stone": int, "coal": int, "copper": int, "iron": int, "gold": int},   рюкзак
+#   "pending": {"stone": int, "coal": int, "copper": int, "iron": int, "gold": int, "mineral": int},   добыто, но не забрано
+#   "run": {"start", "end", "pick", "dur", "tot": {руда: штук за весь запуск, "mineral": ...}, "got": {сколько уже выдано}} | None
+#          (старые запуски с "segs" и "plan" тоже дочитываются)
 #   "last_end": float,
 #   "sel": номер выбранной шахты,
 #   "dur_open": сколько времён запуска открыто (по порядку DURATIONS, минимум 1),
 #   "dur_sel": номер выбранного времени запуска,
 # }
-# segs: добыча запуска, нарезанная на сегменты по времени: камень, уголь, медь, минералы (штук добычи).
+# segs: добыча запуска, нарезанная на сегменты по времени: камень, уголь, медь, минералы, железо, золото
+# (штук добычи). Старые сегменты из 4 чисел (без железа и золота) тоже читаются.
 # q и mq: множители руды и минералов на одну добычу (берутся с шахты при запуске).
 # Старый формат run с полем "plan" (строка по символу на копание) тоже поддерживается.
 
 PLAN_CODE = {"s": "stone", "c": "coal", "p": "copper"}
-SEG_KEYS = ("stone", "coal", "copper", "mineral")
+SEG_KEYS = ("stone", "coal", "copper", "mineral", "iron", "gold")
 
 
 def get_ug(user: dict) -> dict:
@@ -404,24 +415,20 @@ def minerals_range(p: dict, minutes: int) -> tuple[int, int]:
     return v, v
 
 
-def roll_run(pick: dict, minutes: int, bonus: int = 0) -> list[list[int]]:
-    """Бросает весь запуск заранее и режет на сегменты по времени.
-    Сегмент: [камень, уголь, медь, минералы] (штук добычи, без множителей).
-    Руда: случайное число из диапазона шахты. Минералы: СТАБИЛЬНО, всегда одинаково и ровно
-    по сегментам (см. mineral_drops). bonus: бонус времени запуска в %."""
-    segs_n = max(1, min(144, minutes))
+def roll_totals(pick: dict, minutes: int, bonus: int = 0) -> dict[str, int]:
+    """Весь запуск целиком: сколько штук каждой добычи он даст (уже с множителем шахты).
+    Руда: случайное число из диапазона шахты и случайный состав по шансам ORES.
+    Минералы: СТАБИЛЬНО, всегда одинаково (см. mineral_drops). bonus: бонус времени запуска в %.
+    Дальше добыча выдаётся ровно по времени: раз в TICK_SEC секунд (см. settle)."""
     lo, hi = drops_range(pick, minutes)
     n_ore = round(random.randint(lo, hi) * (100 - MINERAL_CHANCE) / 100 * (100 + bonus) / 100)
-    n_min = mineral_drops(pick, minutes, bonus)
-    segs = [[0, 0, 0, 0] for _ in range(segs_n)]
-    for i in range(segs_n):                       # минералы ровно по времени
-        segs[i][3] = n_min * (i + 1) // segs_n - n_min * i // segs_n
-    ore_w = [ORES[k]["weight"] for k in ("stone", "coal", "copper")]
-    types = random.choices([0, 1, 2], ore_w, k=n_ore)
-    places = random.choices(range(segs_n), k=n_ore)
-    for seg, t in zip(places, types):
-        segs[seg][t] += 1
-    return segs
+    tot = {k: 0 for k in ORES}
+    keys = list(ORES)
+    for k in random.choices(keys, [ORES[k]["weight"] for k in keys], k=n_ore):
+        tot[k] += 1
+    tot = {k: v * pick["qty"] for k, v in tot.items()}
+    tot["mineral"] = mineral_drops(pick, minutes, bonus)
+    return tot
 
 
 def settle(ug: dict) -> bool:
@@ -445,7 +452,18 @@ def settle(ug: dict) -> bool:
                     ug["pending"][PLAN_CODE[ch]] += 1
             run["given"] = done
             changed = True
-    else:
+    elif "tot" in run:                        # текущий формат: итоги запуска, выдача каждые TICK_SEC секунд
+        steps = max(1, math.ceil(span / TICK_SEC))
+        done = steps if now >= run["end"] else min(steps, int((now - run["start"]) // TICK_SEC))
+        got = run.setdefault("got", {})
+        for key, total_units in run["tot"].items():
+            target = int(total_units) * done // steps
+            diff = target - int(got.get(key, 0))
+            if diff > 0:
+                ug["pending"][key] = int(ug["pending"].get(key, 0)) + diff
+                got[key] = target
+                changed = True
+    else:                                     # старый формат: сегменты по минутам
         segs = run["segs"]
         total = len(segs)
         done = total if now >= run["end"] else min(total, int(total * (now - run["start"]) / span))
@@ -453,7 +471,7 @@ def settle(ug: dict) -> bool:
             q, mq = int(run.get("q", 1)), int(run.get("mq", 1))
             for seg in segs[run["given"]:done]:
                 for idx, key in enumerate(SEG_KEYS):
-                    if seg[idx]:
+                    if idx < len(seg) and seg[idx]:
                         ug["pending"][key] += seg[idx] * (mq if key == "mineral" else q)
             run["given"] = done
             changed = True
@@ -852,10 +870,63 @@ async def _require_user(callback: CallbackQuery) -> dict | None:
     return user
 
 
+# ---------- Само-обновление экрана шахты ----------
+# Пока игрок смотрит главный экран шахты, карточка сама обновляется раз в TICK_SEC секунд,
+# чтобы «Добыто» росло на глазах. Любое нажатие любой кнопки этим игроком (в том числе в других
+# разделах) останавливает обновление: для этого в main.py подключён LiveStopMiddleware.
+_live: dict[int, int] = {}          # user_id -> номер текущего обновления
+_live_tasks: set = set()
+
+
+class LiveStopMiddleware(BaseMiddleware):
+    """Подключается в main.py: останавливает само-обновление при любом нажатии кнопки."""
+
+    async def __call__(self, handler, event, data):
+        uid = getattr(getattr(event, "from_user", None), "id", None)
+        if uid is not None:
+            _live.pop(uid, None)
+        return await handler(event, data)
+
+
+async def _live_loop(callback: CallbackQuery, uid: int, token: int) -> None:
+    deadline = time.time() + AUTO_REFRESH_MIN * 60
+    fails = 0
+    while _live.get(uid) == token and time.time() < deadline:
+        await asyncio.sleep(TICK_SEC)
+        if _live.get(uid) != token:
+            return
+        try:
+            html, kb = SCREENS["ug"]
+            await D.show_rich_card(callback, img_key("ug"), lambda wi: html(uid, wi), kb(uid))
+            fails = 0
+        except Exception:                       # сообщение удалено, не изменилось, лимиты Telegram
+            fails += 1
+            if fails >= 5:
+                return
+            continue
+        user = D.get_user(uid)
+        if user is None or get_ug(user)["run"] is None:
+            return                              # запуск закончился: последнее обновление уже показано
+
+
+def _start_live(callback: CallbackQuery) -> None:
+    uid = callback.from_user.id
+    token = _live.get(uid, 0) + 1
+    _live[uid] = token
+    task = asyncio.create_task(_live_loop(callback, uid, token))
+    _live_tasks.add(task)
+    task.add_done_callback(_live_tasks.discard)
+
+
 async def _show(callback: CallbackQuery, key: str) -> None:
     uid = callback.from_user.id
     html, kb = SCREENS[key]
+    _live.pop(uid, None)                        # старое само-обновление больше не нужно
     await D.show_rich_card(callback, img_key(key), lambda wi: html(uid, wi), kb(uid))
+    if key == "ug" and AUTO_REFRESH_MIN > 0:
+        user = D.get_user(uid)
+        if user is not None and get_ug(user)["run"] is not None:
+            _start_live(callback)
 
 
 def _num(callback: CallbackQuery, pos: int, limit: int) -> int | None:
@@ -1054,10 +1125,8 @@ async def on_start(callback: CallbackQuery):
         "end": now + minutes * 60,
         "pick": i,
         "dur": minutes,
-        "segs": roll_run(p, minutes, bonus),
-        "given": 0,
-        "q": p["qty"],
-        "mq": p["mqty"],
+        "tot": roll_totals(p, minutes, bonus),
+        "got": {},
     }
     D.save_users()
     await callback.answer(f"{p['name']} запущена на {label}!")
