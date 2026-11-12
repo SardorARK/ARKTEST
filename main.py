@@ -338,7 +338,8 @@ def _coin_mult(level: int) -> float:
         early = 1.0
     late = 1.25 ** min(40, max(0, level - 60))           # ×1.25 за каждый уровень с 60 до 100
     beyond = (max(level, 100) / 100) ** 3                # после 100 дальше растёт
-    return early * late * beyond
+    endgame = 1.01169 ** max(0, level - 225)             # после 225 уровня ещё тяжелее (до 225 не меняется)
+    return early * late * beyond * endgame
 
 
 def player_upgrade_cost(level: int) -> tuple[int, int]:
@@ -1058,7 +1059,7 @@ def player_level_html(user_id: int, with_image: bool = False) -> str:
 
     head = (
         f"{image}"
-        f"<p><b>{settings.name_html(user)}</b><br>&nbsp;<br></p>"
+        f"<p><b>{settings.name_html(user)}</b></p>"
     )
 
     if level >= PLAYER_MAX_LEVEL:
@@ -1073,9 +1074,9 @@ def player_level_html(user_id: int, with_image: bool = False) -> str:
         (f"{MINERAL_EMOJI} Минералы", player_minerals(user), need_min),
         (f"{custom_emoji(COIN_EMOJI)} Монеты", user["coins"], need_coins),
     )
-    rows = "<br>&nbsp;<br>".join(
-        f"{custom_emoji(DONE_EMOJI) if have >= need else custom_emoji(LACK_EMOJI)} | "
-        f"<b>{label}:</b> {_fmt(have)} / {_fmt(need)}<br>{_simple_bar(have, need)}"
+    rows = GAP.join(
+        f"<p>{custom_emoji(DONE_EMOJI) if have >= need else custom_emoji(LACK_EMOJI)} | "
+        f"<b>{label}:</b> {_fmt(have)} / {_fmt(need)}<br>{_simple_bar(have, need)}</p>"
         for label, have, need in needs
     )
     lack = player_lack(user)
@@ -1089,8 +1090,11 @@ def player_level_html(user_id: int, with_image: bool = False) -> str:
         head
         + "<blockquote><i>Качай уровень игрока: собирай минералы в шахтах, "
         "копи монеты и поднимайся к 500-му уровню.</i></blockquote>"
-        f"<p>{rows}</p>"
-        f"<p>{status}<br>&nbsp;<br></p>"
+        f"{GAP}"
+        f"{rows}"
+        f"{GAP}"
+        f"<p>{status}</p>"
+        f"{GAP}"
         "<tg-button-row>"
         '<tg-button type="callback_data" data="plv:do" '
         f'style="{"danger" if lack else "success"}">'
