@@ -327,12 +327,27 @@ def player_minerals(user: dict) -> int:
         return 0
 
 
+def _coin_mult(level: int) -> float:
+    """Множитель цены уровня в монетах: дёшево в начале, в районе 60-100 уровней резко растёт.
+    Нужен, чтобы к 80-100 уровню требовались большие деньги (монеты уходят из экономики)."""
+    if level <= 20:
+        early = 0.5
+    elif level < 60:
+        early = 0.5 + 0.5 * (level - 20) / 40            # 0.5 -> 1.0 к 60 уровню
+    else:
+        early = 1.0
+    late = 1.25 ** min(40, max(0, level - 60))           # ×1.25 за каждый уровень с 60 до 100
+    beyond = (max(level, 100) / 100) ** 3                # после 100 дальше растёт
+    return early * late * beyond
+
+
 def player_upgrade_cost(level: int) -> tuple[int, int]:
     """Сколько (минералов, монет) нужно, чтобы поднять уровень игрока с level на level + 1.
-    1 -> 2 это ровно 25 и 35, дальше цена плавно растёт (к 499 -> 500 около 110 тыс. и 390 тыс.)."""
+    Минералы: 25 * L^1.35 (на эту формулу рассчитаны шахты в underground.py, не менять без неё).
+    Монеты: 35 * L^1.5 * _coin_mult(L): мало в начале, около 2 млн на 80 уровне и около 260 млн на 100."""
     level = max(1, level)
     return (round(PLAYER_L1_MINERALS * level ** 1.35),
-            round(PLAYER_L1_COINS * level ** 1.5))
+            round(PLAYER_L1_COINS * level ** 1.5 * _coin_mult(level)))
 
 
 def player_lack(user: dict) -> list[str]:
