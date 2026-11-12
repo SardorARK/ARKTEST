@@ -466,14 +466,14 @@ def recipe_html(user: dict, key: str, slot: int, with_image: bool) -> str:
         lines.append(f"{ok if got >= n else no} | {em} <b>{escape(name)}</b> — "
                      f"<code>{_n(got)}</code> / <code>{_n(n)}</code>")
     gap = "⠀<br>"   # невидимый символ: пустая строка видна и на ПК (как в _craft_status)
+    if lack:
+        note = "<i>Не хватает " + ", ".join(lack) + ".</i>"
+    else:
+        note = "<i>Всё готово. Нажми «Создать», чтобы начать.</i>"
     text += (f"<p>{gap}<b>▸ Характеристики</b><br>"
              f"<b>Редкость: {escape(item['rarity'])} · {clock} {fmt_time(item['seconds'])}</b><br>"
              f"<b>{boost} Добыча: {bonus}</b></p>"
-             f"<p>{gap}<b>▸ Нужно</b><br>" + "<br>".join(lines) + "</p>")
-    if lack:
-        text += f"<p>{gap}<i>Не хватает " + ", ".join(lack) + ".</i></p>"
-    else:
-        text += f"<p>{gap}<i>Всё готово. Нажми «Создать», чтобы начать.</i></p>"
+             f"<p>{gap}<b>▸ Нужно</b><br>" + "<br>".join(lines) + f"<br>{note}</p>")
     return text
 
 
