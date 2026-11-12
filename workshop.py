@@ -42,6 +42,9 @@ def setup(**deps) -> None:
 # Эмодзи: пустой id = обычный эмодзи; впиши id кастомного, когда он будет.
 BUTTON_EMOJI = ("", "🛠")        # кнопка «Мастерская» (нижнее меню)
 CRAFT_EMOJI = ("", "⚒️")         # кнопка «Кузница»
+SLOT_FREE_EMOJI = ("5906852613629941703", "🟢")   # свободный слот
+SLOT_OPEN_EMOJI = ("6037496202990194718", "🔓")   # слот можно открыть
+SLOT_LOCK_EMOJI = ("5778570255555105942", "🔒")   # слот недоступен
 
 # ключ -> (название, эмодзи)
 RESOURCES = {
@@ -278,7 +281,14 @@ def _head(title: str, emoji: tuple[str, str] | str, quote: str) -> str:
     return f"<p><b>{em} {escape(title)}</b></p><blockquote><i>{escape(quote)}</i></blockquote>"
 
 
-def _btn(text: str, data: str, emoji: str, style: ButtonStyle = ButtonStyle.PRIMARY) -> InlineKeyboardButton:
+def _btn(text: str, data: str, emoji: "str | tuple[str, str]",
+         style: ButtonStyle = ButtonStyle.PRIMARY) -> InlineKeyboardButton:
+    """Кнопка с эмодзи. Пара (id, запасной эмодзи): с id будет кастомный значок, без id обычный."""
+    if isinstance(emoji, tuple):
+        cid, fallback = emoji
+        if cid:
+            return InlineKeyboardButton(text=text, callback_data=data, style=style, icon_custom_emoji_id=cid)
+        emoji = fallback
     return InlineKeyboardButton(text=f"{emoji} {text}" if emoji else text, callback_data=data, style=style)
 
 
@@ -306,9 +316,9 @@ def _craft_status(user: dict) -> str:
     if not jobs:
         return ""
     now = time.time()
-    lines = [f"{ITEMS[j['item']]['emoji']} {escape(ITEMS[j['item']]['name'])} — "
-             f"<b>{percent(j, now)}%</b> · осталось <b>{fmt_time(j['end'] - now)}</b>" for j in jobs]
-    return f"<p><b>{CRAFT_EMOJI[1]} Сейчас в работе</b><br><br>" + "<br>".join(lines) + "</p>"
+    lines = [f"<i>{ITEMS[j['item']]['emoji']} {escape(ITEMS[j['item']]['name'])} — {percent(j, now)}%</i>"
+             for j in jobs]
+    return "<p>" + "<br>".join(lines) + "</p>"
 
 
 def _done_note(done: list[str] | None) -> str:
@@ -370,8 +380,8 @@ def forge_html(user: dict, with_image: bool, note: str = "") -> str:
     text += note
     opened = open_slots(user)
     if opened < MAX_SLOTS:
-        text += (f"<p><b>Следующий слот</b><br>Слот {opened + 1}: открытие за "
-                 f"<code>{_n(SLOT_PRICES[opened + 1])}</code> монет.</p>")
+        text += (f"<p><b>Следующий слот</b><br><i>Слот {opened + 1}: открытие за "
+                 f"{_n(SLOT_PRICES[opened + 1])} монет.</i></p>")
     return text + _craft_status(user)
 
 
@@ -386,11 +396,11 @@ def forge_kb(user: dict) -> InlineKeyboardMarkup:
                 text=f"{ITEMS[job['item']]['emoji']} • {percent(job, now)}%",
                 callback_data=f"ws:slot:{n}", style=ButtonStyle.PRIMARY))
         elif st == "free":
-            btns.append(_btn("Свободно", f"ws:slot:{n}", CRAFT_EMOJI[1], ButtonStyle.SUCCESS))
+            btns.append(_btn("Свободно", f"ws:slot:{n}", SLOT_FREE_EMOJI, ButtonStyle.SUCCESS))
         elif st == "buy":
-            btns.append(_btn(f"Открыть • {short_num(SLOT_PRICES[n])}", f"ws:slot:{n}", "🔒", ButtonStyle.PRIMARY))
+            btns.append(_btn(f"Открыть • {short_num(SLOT_PRICES[n])}", f"ws:slot:{n}", SLOT_OPEN_EMOJI, ButtonStyle.PRIMARY))
         else:
-            btns.append(_btn("Недоступно", f"ws:slot:{n}", "🔒", ButtonStyle.DANGER))
+            btns.append(_btn("Недоступно", f"ws:slot:{n}", SLOT_LOCK_EMOJI, ButtonStyle.DANGER))
     rows = [btns[i:i + 2] for i in range(0, len(btns), 2)]
     rows.append(_back("ws:open"))
     return InlineKeyboardMarkup(inline_keyboard=rows)
@@ -427,14 +437,14 @@ def slot_busy_kb(slot: int) -> InlineKeyboardMarkup:
 
 def slot_buy_html(user: dict, slot: int, with_image: bool) -> str:
     price = SLOT_PRICES[slot]
-    text = _img(with_image) + _head(f"СЛОТ {slot}", "🔒", "Этот слот пока закрыт. Открой его, чтобы ковать больше.")
+    text = _img(with_image) + _head(f"СЛОТ {slot}", SLOT_LOCK_EMOJI, "Этот слот пока закрыт. Открой его, чтобы ковать больше.")
     return text + (f"<p><b>Стоимость</b><br>Цена: <code>{_n(price)}</code> монет<br>"
                    f"У тебя: <code>{_n(_int(user.get('coins')))}</code> монет</p>")
 
 
 def slot_buy_kb(slot: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
-        [_btn(f"Открыть за {short_num(SLOT_PRICES[slot])}", f"ws:buy:{slot}", "🔓", ButtonStyle.SUCCESS)],
+        [_btn(f"Открыть за {short_num(SLOT_PRICES[slot])}", f"ws:buy:{slot}", SLOT_OPEN_EMOJI, ButtonStyle.SUCCESS)],
         _back("ws:forge"),
     ])
 
@@ -585,7 +595,7 @@ async def on_buy(callback: CallbackQuery):
         return
     D.save_users()
     await callback.answer("Слот открыт.")
-    await _show_forge(callback, user, f"<p><b>🔓 Слот {slot} открыт</b><br>Теперь в кузнице доступно больше места.</p>")
+    await _show_forge(callback, user, f"<p><b><i>🔓 Слот {slot} открыт</i></b><br><i>Теперь в кузнице доступно больше места.</i></p>")
 
 
 @router.callback_query(F.data.startswith("ws:r:"))
@@ -623,6 +633,6 @@ async def on_make(callback: CallbackQuery):
         return
     D.save_users()
     await callback.answer("Ковка запущена.")
-    note = (f"<p><b>⚒️ Ковка запущена</b><br>Слот {slot}: {escape(ITEMS[key]['name'])} "
-            f"будет готов через <b>{fmt_time(ITEMS[key]['seconds'])}</b>.</p>")
+    note = (f"<p><b><i>⚒️ Ковка запущена</i></b><br><i>Слот {slot}: {escape(ITEMS[key]['name'])} "
+            f"будет готов через {fmt_time(ITEMS[key]['seconds'])}.</i></p>")
     await _show_forge(callback, user, note)
