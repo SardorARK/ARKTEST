@@ -1,22 +1,27 @@
-"""Раздел «Шахты»: шахтёры, кирки-предметы и ручной запуск добычи.
+"""Раздел «Банк»: сотрудники, кирки-предметы и ручной запуск работы банка.
 
 Модуль самостоятельный и не импортирует main.py (чтобы не было циклического
 импорта). Нужные функции бот передаёт один раз через mine.setup(...).
 Необязательно: mine_hours(user) и take_mine_boost(user) («Эликсир шахтёра» из раздела «Донат»).
 
+Внутренние имена (mine.py, callback_data «mine:*», user["mine"], menu:mine) остались прежними,
+чтобы не сломать сохранения игроков, «Достижения» и «Сокровищницу». Поменялись только тексты.
+«Шахта» (бывшая «Подземная шахта») теперь отдельный раздел в underground.py и открывается
+кнопкой в нижнем (reply) меню.
+
 Как это работает:
-  * Шахту нужно запускать вручную. Один запуск длится RUN_HOURS часов,
-    добыча идёт только пока шахта работает (в том числе когда игрока нет в боте).
-  * Остановить шахту можно только когда с момента запуска прошло больше
-    MIN_STOP_MINUTES минут. Всё, что успели добыть, остаётся на складе.
-  * Шахтёры бывают 10 уровней: у каждого свой доход, цена и лимит.
-  * Кирки это предметы. Их можно покупать сколько угодно и выдавать шахтёрам.
-    У кирки одна характеристика, множитель дохода: шахтёр с киркой приносит
-    в столько раз больше. Шахтёр без кирки добывает с множителем ×1.
-  * У каждого типа шахтёров и у каждой кирки есть своя карточка.
-  * Артефактов шахты 25, по 5 в каждой из 5 редкостей (ARTIFACTS). Надеть можно
+  * Банк нужно запускать вручную. Один запуск длится RUN_HOURS часов,
+    доход идёт только пока банк работает (в том числе когда игрока нет в боте).
+  * Остановить банк можно только когда с момента запуска прошло больше
+    MIN_STOP_MINUTES минут. Всё, что успели заработать, остаётся на складе.
+  * Сотрудники бывают 10 уровней: у каждого свой доход, цена и лимит.
+  * Кирки это предметы. Их можно покупать сколько угодно и выдавать сотрудникам.
+    У кирки одна характеристика, множитель дохода: сотрудник с киркой приносит
+    в столько раз больше. Сотрудник без кирки работает с множителем ×1.
+  * У каждого типа сотрудников и у каждой кирки есть своя карточка.
+  * Артефактов банка 25, по 5 в каждой из 5 редкостей (ARTIFACTS). Надеть можно
     до MINE_SLOTS штук. Они выпадают из сундуков и дают бонус: к доходу, к силе кирок,
-    скидку на найм шахтёров и на кирки, более долгий запуск шахты.
+    скидку на найм сотрудников и на кирки, более долгий запуск банка.
 """
 
 import logging
@@ -47,10 +52,10 @@ def setup(**deps) -> None:
 
 # ---------- Баланс шахт ----------
 
-RUN_HOURS = 8          # сколько длится один запуск шахты
-MIN_STOP_MINUTES = 5   # раньше этого срока остановить шахту нельзя
+RUN_HOURS = 8          # сколько длится один запуск банка
+MIN_STOP_MINUTES = 5   # раньше этого срока остановить банк нельзя
 
-# Кирки: множитель дохода шахтёра и цена одной штуки.
+# Кирки: множитель дохода сотрудника и цена одной штуки.
 PICKAXES = [
     {"name": "Дубовый черенок", "mult": 1.25, "price": 150, "icon": "🪵",
      "desc": "Простая кирка для начала. Лучше, чем голые руки."},
@@ -59,7 +64,7 @@ PICKAXES = [
     {"name": "Кованый коготь", "mult": 2.5, "price": 2_500, "icon": "⚙️",
      "desc": "Кованая сталь, острая кромка."},
     {"name": "Золотая жила", "mult": 4.0, "price": 10_000, "icon": "🥇",
-     "desc": "Мягкая, но очень дорогая. Зато шахтёры работают как заведённые."},
+     "desc": "Мягкая, но очень дорогая. Зато сотрудники работают как заведённые."},
     {"name": "Алмазный шип", "mult": 7.0, "price": 40_000, "icon": "💎",
      "desc": "Режет любую породу."},
     {"name": "Лунный мифрил", "mult": 12.0, "price": 150_000, "icon": "✨",
@@ -74,36 +79,36 @@ PICKAXES = [
      "desc": "Упала с неба вместе с метеоритом. Жилы сами тянутся к ней."},
 ]
 
-# Типы шахтёров: доход в час без кирки, цена первого найма, лимит этого типа.
+# Типы сотрудников: доход в час без кирки, цена первого найма, лимит этого типа.
 MINERS = [
-    {"name": "Miner-lvl1", "income": 10, "price": 100, "max": 10,
-     "desc": "Только вчера впервые взял в руки кирку. Старается, но медленно."},
-    {"name": "Miner-lvl2", "income": 25, "price": 400, "max": 8,
-     "desc": "Знает, где копать. Основа любой шахты."},
-    {"name": "Miner-lvl3", "income": 60, "price": 1_500, "max": 6,
-     "desc": "Не любит лишних вопросов и тишину. Зато порода сыплется сама."},
-    {"name": "Miner-lvl4", "income": 150, "price": 6_000, "max": 5,
-     "desc": "Видит жилы там, где другие видят камни."},
-    {"name": "Miner-lvl5", "income": 400, "price": 25_000, "max": 4,
-     "desc": "Копает с рождения. Борода длиннее, чем штрек."},
-    {"name": "Miner-lvl6", "income": 1_000, "price": 100_000, "max": 3,
-     "desc": "Командует всей сменой, и смена работает в полную силу."},
-    {"name": "Miner-lvl7", "income": 2_500, "price": 400_000, "max": 3,
-     "desc": "Собирает собственные механизмы прямо в забое."},
-    {"name": "Miner-lvl8", "income": 6_000, "price": 1_500_000, "max": 2,
-     "desc": "Бурит так быстро, что порода не успевает осыпаться."},
-    {"name": "Miner-lvl9", "income": 15_000, "price": 6_000_000, "max": 2,
-     "desc": "Говорят, он договорился с драконом, который охраняет жилы."},
-    {"name": "Miner-lvl10", "income": 40_000, "price": 25_000_000, "max": 1,
-     "desc": "Легенда шахт. Один такой стоит целой смены."},
+    {"name": "Сотрудник lvl1", "income": 10, "price": 100, "max": 10,
+     "desc": "Только вчера устроился в банк. Старается, но путает бланки."},
+    {"name": "Сотрудник lvl2", "income": 25, "price": 400, "max": 8,
+     "desc": "Знает, где лежат нужные документы. Основа любого отделения."},
+    {"name": "Сотрудник lvl3", "income": 60, "price": 1_500, "max": 6,
+     "desc": "Не любит очередей и лишних вопросов. Зато проценты капают сами."},
+    {"name": "Сотрудник lvl4", "income": 150, "price": 6_000, "max": 5,
+     "desc": "Видит выгодный вклад там, где другие видят мелочь."},
+    {"name": "Сотрудник lvl5", "income": 400, "price": 25_000, "max": 4,
+     "desc": "В банке с самого детства. Курсы валют помнит наизусть."},
+    {"name": "Сотрудник lvl6", "income": 1_000, "price": 100_000, "max": 3,
+     "desc": "Командует всем отделением, и отделение работает в полную силу."},
+    {"name": "Сотрудник lvl7", "income": 2_500, "price": 400_000, "max": 3,
+     "desc": "Придумывает собственные финансовые схемы прямо за стойкой."},
+    {"name": "Сотрудник lvl8", "income": 6_000, "price": 1_500_000, "max": 2,
+     "desc": "Закрывает сделки так быстро, что конкуренты не успевают моргнуть."},
+    {"name": "Сотрудник lvl9", "income": 15_000, "price": 6_000_000, "max": 2,
+     "desc": "Говорят, он договорился с самим Центробанком."},
+    {"name": "Сотрудник lvl10", "income": 40_000, "price": 25_000_000, "max": 1,
+     "desc": "Легенда банка. Один такой стоит целого отдела."},
 ]
 
-MINER_PRICE_GROWTH = 1.35  # каждый следующий шахтёр одного типа дороже в столько раз
-START_MINER = 0            # тип шахтёра, который выдаётся бесплатно
+MINER_PRICE_GROWTH = 1.35  # каждый следующий сотрудник одного типа дороже в столько раз
+START_MINER = 0            # тип сотрудника, который выдаётся бесплатно
 
 
 # Кастомные эмодзи: (id, запасной обычный эмодзи)
-MINE_EMOJI = ("5461047575379466857", "⛏")     # шахта
+MINE_EMOJI = ("5461047575379466857", "🏦")     # банк (замени id на кастомный эмодзи банка)
 PICK_EMOJI = ("5197371802136892976", "⛏")     # кирка
 INCOME_EMOJI = ("5202018746297767789", "🪙")  # доход
 STORAGE_EMOJI = ("5854908544712707500", "📦")  # склад
@@ -136,7 +141,7 @@ TIERS: dict[str, tuple[tuple[str, str], str]] = {
 
 # Виды бонусов: ключ -> (название, знак, эмодзи (id, запасной значок)).
 ART_KINDS: dict[str, tuple[str, str, tuple[str, str]]] = {
-    "income": ("Доход шахты", "+", INCOME_EMOJI),
+    "income": ("Доход банка", "+", INCOME_EMOJI),
     "pick": ("Сила кирок", "+", PICK_EMOJI),
     "hire": ("Цена найма", "−", HIRE_EMOJI),
     "shop": ("Цена кирок", "−", BOUGHT_EMOJI),
@@ -150,15 +155,15 @@ ART_KINDS: dict[str, tuple[str, str, tuple[str, str]]] = {
 # показывается вместо icon.
 ARTIFACTS = [
     # Обычные
-    {"key": "m_lamp", "name": "Шахтёрская лампа", "icon": "🔦", "tier": "Обычный",
+    {"key": "m_lamp", "name": "Настольная лампа", "icon": "🔦", "tier": "Обычный",
      "bonus": {"income": 3},
-     "desc": "Светит тускло, зато добыча идёт веселее."},
+     "desc": "Светит тускло, зато работа идёт веселее."},
     {"key": "m_oil", "name": "Масло для кирок", "icon": "🛢️", "tier": "Обычный",
      "bonus": {"pick": 5},
      "desc": "Смазанная кирка входит в породу заметно легче."},
     {"key": "m_poster", "name": "Вербовочный плакат", "icon": "📜", "tier": "Обычный",
      "bonus": {"hire": 5},
-     "desc": "Висит у входа. Шахтёры идут наниматься охотнее."},
+     "desc": "Висит у входа. Сотрудники идут наниматься охотнее."},
     {"key": "m_coupon", "name": "Купон кузнеца", "icon": "🎟️", "tier": "Обычный",
      "bonus": {"shop": 5},
      "desc": "Кузнец обещал скидку. Кажется, даже не соврал."},
@@ -174,13 +179,13 @@ ARTIFACTS = [
      "desc": "Не гнётся и не трескается, как ни бей."},
     {"key": "m_ale", "name": "Кружка эля", "icon": "🍺", "tier": "Редкий",
      "bonus": {"hire": 10},
-     "desc": "После неё любой шахтёр соглашается на меньшую плату."},
+     "desc": "После неё любой сотрудник соглашается на меньшую плату."},
     {"key": "m_scales", "name": "Весы торговца", "icon": "⚖️", "tier": "Редкий",
      "bonus": {"shop": 10},
      "desc": "Взвешивает честно, а цену сбивает ещё честнее."},
-    {"key": "m_alarm", "name": "Будильник шахтёра", "icon": "⏰", "tier": "Редкий",
+    {"key": "m_alarm", "name": "Будильник сотрудника", "icon": "⏰", "tier": "Редкий",
      "bonus": {"run": 10},
-     "desc": "Заведён с запасом: шахта работает дольше."},
+     "desc": "Заведён с запасом: банк работает дольше."},
     # Эпические
     {"key": "m_crystal", "name": "Жильный кристалл", "icon": "🔷", "tier": "Эпический",
      "bonus": {"income": 10},
@@ -190,13 +195,13 @@ ARTIFACTS = [
      "desc": "Светится на лезвии. Порода трескается ещё до удара."},
     {"key": "m_letter", "name": "Рекомендательное письмо", "icon": "✉️", "tier": "Эпический",
      "bonus": {"hire": 15},
-     "desc": "Шахтёры охотно идут в смену, если в письме правильная подпись."},
+     "desc": "Сотрудники охотно идут в смену, если в письме правильная подпись."},
     {"key": "m_price", "name": "Гномий прейскурант", "icon": "📋", "tier": "Эпический",
      "bonus": {"shop": 15},
      "desc": "Цены в нём устарели лет на сто. Продавцы стесняются спорить."},
     {"key": "m_lantern", "name": "Вечный фонарь", "icon": "🏮", "tier": "Эпический",
      "bonus": {"run": 15},
-     "desc": "Не гаснет, пока в шахте есть кому работать."},
+     "desc": "Не гаснет, пока в банке есть кому работать."},
     # Мифические
     {"key": "m_mountain", "name": "Сердце горы", "icon": "🏔️", "tier": "Мифический",
      "bonus": {"income": 15},
@@ -206,7 +211,7 @@ ARTIFACTS = [
      "desc": "Кирки, выкованные на ней, режут камень как хлеб."},
     {"key": "m_badge", "name": "Гильдейский знак", "icon": "🏅", "tier": "Мифический",
      "bonus": {"hire": 20},
-     "desc": "Шахтёры уважают гильдию и работают за меньшие деньги."},
+     "desc": "Сотрудники уважают гильдию и работают за меньшие деньги."},
     {"key": "m_purse", "name": "Бездонный кошелёк", "icon": "👛", "tier": "Мифический",
      "bonus": {"shop": 20},
      "desc": "Сколько ни трать, а в нём всегда что-то остаётся."},
@@ -222,7 +227,7 @@ ARTIFACTS = [
      "desc": "Кирки, закалённые в нём, не знают преград."},
     {"key": "m_seal", "name": "Печать главы гильдии", "icon": "🎖️", "tier": "Легендарный",
      "bonus": {"hire": 25},
-     "desc": "Шахтёры работают за идею. Почти."},
+     "desc": "Сотрудники работают за идею. Почти."},
     {"key": "m_dragon", "name": "Договор с драконом", "icon": "🐲", "tier": "Легендарный",
      "bonus": {"shop": 25},
      "desc": "Дракон обещал разумные цены на кирки. Спорить с ним никто не решается."},
@@ -236,13 +241,13 @@ BY_KEY = {a["key"]: a for a in ARTIFACTS}
 
 # Куда админ может добавить фото через /img
 IMG_TARGETS: dict[str, str] = {
-    "mine": "Шахты",
-    "mine_picks": "Шахты: раздел «Кирки»",
-    "mine_pick_item": "Шахты: карточка кирки (общее фото)",
-    "mine_miners": "Шахты: все шахтёры (общее фото)",
-    "mine_arts": "Шахты: артефакты",
-    "mine_arts_list": "Шахты: мои артефакты",
-    "mine_art_item": "Шахты: карточка артефакта (общее фото)",
+    "mine": "Банк",
+    "mine_picks": "Банк: раздел «Кирки»",
+    "mine_pick_item": "Банк: карточка кирки (общее фото)",
+    "mine_miners": "Банк: все сотрудники (общее фото)",
+    "mine_arts": "Банк: артефакты",
+    "mine_arts_list": "Банк: мои артефакты",
+    "mine_art_item": "Банк: карточка артефакта (общее фото)",
 }
 
 
@@ -315,7 +320,7 @@ def total_miners(m: dict) -> int:
 
 
 def eq_of(m: dict, i: int) -> dict[int, int]:
-    """Какие кирки носят шахтёры типа i: {номер кирки: сколько штук}."""
+    """Какие кирки носят сотрудники типа i: {номер кирки: сколько штук}."""
     return {int(p): int(c) for p, c in m["equip"].get(str(i), {}).items() if c > 0}
 
 
@@ -324,7 +329,7 @@ def equipped_on(m: dict, i: int) -> int:
 
 
 def bare(m: dict, i: int) -> int:
-    """Сколько шахтёров типа i без кирки."""
+    """Сколько сотрудников типа i без кирки."""
     return owned(m, i) - equipped_on(m, i)
 
 
@@ -341,7 +346,7 @@ def picks_free(m: dict, p: int) -> int:
 
 
 def art_keys(m: dict) -> set[str]:
-    """Ключи артефактов шахты, которые есть у игрока (надетые считаем своими)."""
+    """Ключи артефактов банка, которые есть у игрока (надетые считаем своими)."""
     return set(m.get("arts", [])) | set(m.get("worn", []))
 
 
@@ -367,7 +372,7 @@ def art_bonus(m: dict, kind: str) -> int:
 
 
 def run_hours(m: dict, user: dict | None = None) -> float:
-    """Сколько часов длится запуск шахты с учётом артефактов и «Эликсира шахтёра»
+    """Сколько часов длится запуск банка с учётом артефактов и «Эликсира шахтёра»
     (он заменяет базовые RUN_HOURS на 12-48 часов; артефакты прибавляются сверху)."""
     base = RUN_HOURS
     fn = getattr(D, "mine_hours", None)
@@ -384,7 +389,7 @@ def fmt_hours(h: float) -> str:
 
 
 def drop_artifact(user: dict, tier: str) -> tuple[dict, bool]:
-    """Выдаёт игроку случайный артефакт шахты указанной редкости.
+    """Выдаёт игроку случайный артефакт банка указанной редкости.
     Возвращает (артефакт, новый ли он): False, если такой уже был (дубликат)."""
     m = get_mine(user)
     pool = [a for a in ARTIFACTS if a["tier"] == tier] or ARTIFACTS
@@ -396,7 +401,7 @@ def drop_artifact(user: dict, tier: str) -> tuple[dict, bool]:
 
 
 def miner_income(m: dict, i: int) -> float:
-    """Доход всех шахтёров типа i в час: кирки и артефакты уже учтены."""
+    """Доход всех сотрудников типа i в час: кирки и артефакты уже учтены."""
     pick_k = 1 + art_bonus(m, "pick") / 100   # артефакты усиливают прибавку от кирок
     mult_sum = bare(m, i) + sum(
         c * (1 + (PICKAXES[p]["mult"] - 1) * pick_k) for p, c in eq_of(m, i).items()
@@ -413,7 +418,7 @@ def is_running(m: dict) -> bool:
 
 
 def settle(m: dict) -> None:
-    """Зачислить на склад добычу за время, пока шахта работала."""
+    """Зачислить на склад доход за время, пока банк работал."""
     now = time.time()
     if is_running(m):
         upto = min(now, m["run_end"])
@@ -454,7 +459,7 @@ def fmt_dur(seconds: float) -> str:
 
 
 def stop_wait_left(m: dict) -> float:
-    """Сколько секунд ещё нельзя останавливать шахту (0, если уже можно)."""
+    """Сколько секунд ещё нельзя останавливать банк (0, если уже можно)."""
     if not is_running(m):
         return 0
     return max(0.0, m["run_start"] + MIN_STOP_MINUTES * 60 - time.time())
@@ -561,7 +566,7 @@ def mine_html(user_id: int, with_image: bool = False) -> str:
         left = max(0.0, m["run_end"] - now)
         done = (now - m["run_start"]) / max(1.0, m["run_end"] - m["run_start"])
         state_rows = [
-            (f"{_mine()} Шахта", f"Работает {D.custom_emoji(START_EMOJI)}"),
+            (f"{_mine()} Банк", f"Работает {D.custom_emoji(START_EMOJI)}"),
             (f"{D.custom_emoji(PROGRESS_EMOJI)} Прогресс", _bar(done)),
             (f"{D.custom_emoji(TIMER_EMOJI)} До конца", fmt_dur(left)),
         ]
@@ -570,16 +575,16 @@ def mine_html(user_id: int, with_image: bool = False) -> str:
             state_rows.append((f"{D.custom_emoji(STOP_EMOJI)} Остановка", f"через {fmt_dur(wait)}"))
         else:
             state_rows.append((f"{D.custom_emoji(STOP_EMOJI)} Остановка", "доступна"))
-        action = _button("mine:stop", "Остановить шахту", D.custom_emoji(STOP_EMOJI), "danger")
+        action = _button("mine:stop", "Остановить банк", D.custom_emoji(STOP_EMOJI), "danger")
     else:
         state_rows = [
-            (f"{_mine()} Шахта", f"Стоит {D.custom_emoji(STOP_EMOJI)}"),
+            (f"{_mine()} Банк", f"Стоит {D.custom_emoji(STOP_EMOJI)}"),
             (f"{D.custom_emoji(HOURGLASS_EMOJI)} Длительность запуска", f"{fmt_hours(run_hours(m, user))} ч"),
         ]
         action = _button("mine:start", f"Запустить на {fmt_hours(run_hours(m, user))} ч", D.custom_emoji(START_EMOJI))
 
     farm_rows = [
-        ("👷 Шахтёры", str(total_miners(m))),
+        ("👔 Сотрудники", str(total_miners(m))),
         (f"{_pick()} Кирки", f"надето {on_miners} из {total_picks}"),
         ("🎒 Артефакты", f"надето {len(worn_arts(m))} из {MINE_SLOTS}"),
         (f"{_income()} Доход", f"{fmt(income_per_hour(m))} в час"),
@@ -588,8 +593,8 @@ def mine_html(user_id: int, with_image: bool = False) -> str:
 
     return (
         f"{_image(with_image)}"
-        f"<p><b>{_mine()} ШАХТЫ</b></p>"
-        "<blockquote><i>Запусти шахту, и шахтёры будут добывать монеты, "
+        f"<p><b>{_mine()} БАНК</b></p>"
+        "<blockquote><i>Запусти банк, и сотрудники будут приносить монеты, "
         "даже пока тебя нет рядом.</i></blockquote>"
         + _tree(state_rows, "Состояние")
         + _gap()
@@ -604,8 +609,8 @@ def picks_html(user_id: int, with_image: bool = False) -> str:
     return (
         f"{_image(with_image)}"
         f"<p><b>{_pick()} КИРКИ</b></p>"
-        "<blockquote><i>Кирки покупаются сколько угодно и выдаются шахтёрам "
-        "в их карточках. Шахтёр с киркой добывает больше.</i></blockquote>"
+        "<blockquote><i>Кирки покупаются сколько угодно и выдаются сотрудникам "
+        "в их карточках. Сотрудник с киркой приносит больше.</i></blockquote>"
     )
 
 
@@ -618,7 +623,7 @@ def pick_card_html(user_id: int, i: int, with_image: bool = False) -> str:
     ]
     have = [
         (f"{D.custom_emoji(BOUGHT_EMOJI)} Куплено", str(picks_owned(m, i))),
-        (f"{D.custom_emoji(EQUIPPED_EMOJI)} Надето на шахтёрах", str(picks_equipped(m, i))),
+        (f"{D.custom_emoji(EQUIPPED_EMOJI)} Надето на сотрудниках", str(picks_equipped(m, i))),
         (f"{_storage()} Свободно", str(picks_free(m, i))),
     ]
     return (
@@ -636,13 +641,13 @@ def pick_card_html(user_id: int, i: int, with_image: bool = False) -> str:
 def miners_html(user_id: int, with_image: bool = False) -> str:
     user, m = load(user_id)
     summary = [
-        ("👷 Всего шахтёров", str(total_miners(m))),
-        (f"{_income()} Доход шахты", f"{fmt(income_per_hour(m))} в час"),
+        ("👔 Всего сотрудников", str(total_miners(m))),
+        (f"{_income()} Доход банка", f"{fmt(income_per_hour(m))} в час"),
     ]
     return (
         f"{_image(with_image)}"
-        f"<p><b>👷 ШАХТЁРЫ</b></p>"
-        "<blockquote><i>У каждого уровня шахтёров свой доход, цена и лимит.</i></blockquote>"
+        f"<p><b>👔 СОТРУДНИКИ</b></p>"
+        "<blockquote><i>У каждого уровня сотрудников свой доход, цена и лимит.</i></blockquote>"
         + _tree(summary, "Итого")
     )
 
@@ -682,7 +687,7 @@ def miner_card_html(user_id: int, i: int, with_image: bool = False) -> str:
 
     return (
         f"{_image(with_image)}"
-        f"<p><b>👷 {t['name'].upper()}</b></p>"
+        f"<p><b>👔 {t['name'].upper()}</b></p>"
         f"<blockquote><i>{t['desc']}</i></blockquote>"
         + blocks
         + tail
@@ -697,14 +702,14 @@ def give_html(user_id: int, i: int, with_image: bool = False) -> str:
 
     if bare(m, i) <= 0:
         info = (
-            "У всех шахтёров этого уровня уже есть кирки. "
+            "У всех сотрудников этого уровня уже есть кирки. "
             "Сними одну, чтобы выдать другую."
-            if owned(m, i) else "Сначала найми шахтёра этого уровня."
+            if owned(m, i) else "Сначала найми сотрудника этого уровня."
         )
     elif not free:
         info = "Свободных кирок нет. Купи их в разделе «Кирки»."
     else:
-        info = f"Без кирки: {bare(m, i)}. Выбери кирку внизу, она достанется одному шахтёру."
+        info = f"Без кирки: {bare(m, i)}. Выбери кирку внизу, она достанется одному сотруднику."
 
     tree = (
         _tree(
@@ -736,7 +741,7 @@ def take_html(user_id: int, i: int, with_image: bool = False) -> str:
     )
     info = (
         "Выбери кирку внизу, она вернётся на склад кирок."
-        if eq else "У шахтёров этого уровня нет кирок."
+        if eq else "У сотрудников этого уровня нет кирок."
     )
     return (
         f"{_image(with_image)}"
@@ -784,9 +789,9 @@ def arts_html(user_id: int, with_image: bool = False) -> str:
     )
     return (
         f"{_image(with_image)}"
-        f"<p><b>🎒 АРТЕФАКТЫ ШАХТЫ</b><br>&nbsp;<br>"
+        f"<p><b>🎒 АРТЕФАКТЫ БАНКА</b><br>&nbsp;<br>"
         f"<b>занято {len(worn)}/{MINE_SLOTS}</b></p>"
-        "<blockquote><i>Артефакты усиливают шахту. Надень до трёх, "
+        "<blockquote><i>Артефакты усиливают банк. Надень до трёх, "
         "и их бонусы сложатся.</i></blockquote>"
         + _tree(slots, "Слоты")
         + _gap()
@@ -800,13 +805,13 @@ def arts_list_html(user_id: int, with_image: bool = False) -> str:
     mine = owned_arts(m)
     head = (
         f"{_image(with_image)}"
-        "<p><b>🎒 МОИ АРТЕФАКТЫ ШАХТЫ</b><br>&nbsp;<br>"
+        "<p><b>🎒 МОИ АРТЕФАКТЫ БАНКА</b><br>&nbsp;<br>"
         f"<b>Всего: {len(mine)} из {len(ARTIFACTS)}</b></p>"
     )
     if not mine:
         return (
             head
-            + "<blockquote><i>У тебя пока нет артефактов шахты. Открывай сундуки: "
+            + "<blockquote><i>У тебя пока нет артефактов банка. Открывай сундуки: "
             "артефакты выпадают оттуда.</i></blockquote>"
         )
     blocks = []
@@ -838,7 +843,7 @@ def art_card_html(user_id: int, i: int, with_image: bool = False) -> str:
     return (
         f"{_image(with_image)}"
         f"<p><b>{_aicon(a)} {a['name'].upper()}</b><br>&nbsp;<br>"
-        f"<b>{_tier_icon(a['tier'])} {a['tier']} артефакт шахты</b></p>"
+        f"<b>{_tier_icon(a['tier'])} {a['tier']} артефакт банка</b></p>"
         f"<blockquote><i>{a['desc']}</i></blockquote>"
         + _tree(_art_rows(a["bonus"]), "Бонус")
         + _gap()
@@ -851,7 +856,7 @@ def result_block(a: dict) -> str:
     «Сокровищница» показывает это на экране выпадения."""
     rows = [
         ("Предмет", f"{_aicon(a)} {a['name']}"),
-        ("Тип", "артефакт шахты"),
+        ("Тип", "артефакт банка"),
         ("Редкость", f"{_tier_icon(a['tier'])} {a['tier']}"),
     ]
     return (
@@ -884,9 +889,8 @@ def _back_row(data: str) -> list[InlineKeyboardButton]:
 def mine_kb(user_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [_btn("Кирки", "mine:picks", PICK_EMOJI[0]), _btn("👷 Шахтёры", "mine:miners")],
+            [_btn("Кирки", "mine:picks", PICK_EMOJI[0]), _btn("👔 Сотрудники", "mine:miners")],
             [_btn("🎒 Артефакты", "mine:arts")],
-            [_btn("⛏ Подземные шахты", "ug:open", style=ButtonStyle.PRIMARY)],
             _back_row("menu:back"),
         ]
     )
@@ -1170,10 +1174,10 @@ async def on_start(callback: CallbackQuery):
     settle(m)
 
     if is_running(m):
-        await callback.answer("Шахта уже работает.", show_alert=True)
+        await callback.answer("Банк уже работает.", show_alert=True)
         return
     if total_miners(m) < 1:
-        await callback.answer("В шахте нет ни одного шахтёра.", show_alert=True)
+        await callback.answer("В банке нет ни одного сотрудника.", show_alert=True)
         return
 
     now = time.time()
@@ -1187,7 +1191,7 @@ async def on_start(callback: CallbackQuery):
     if achives:
         achives.on_mine_start(user)
     D.save_users()
-    await callback.answer(f"Шахта запущена на {fmt_hours(hours)} ч!")
+    await callback.answer(f"Банк запущен на {fmt_hours(hours)} ч!")
     await _show(callback, "mine")
 
 
@@ -1200,14 +1204,14 @@ async def on_stop(callback: CallbackQuery):
     settle(m)
 
     if not is_running(m):
-        await callback.answer("Шахта уже остановлена.", show_alert=True)
+        await callback.answer("Банк уже остановлен.", show_alert=True)
         await _show(callback, "mine")
         return
 
     wait = stop_wait_left(m)
     if wait > 0:
         await callback.answer(
-            f"Рано. Шахту можно остановить только через {fmt_dur(wait)} "
+            f"Рано. Банк можно остановить только через {fmt_dur(wait)} "
             f"(минимум {MIN_STOP_MINUTES} мин после запуска).",
             show_alert=True,
         )
@@ -1216,7 +1220,7 @@ async def on_stop(callback: CallbackQuery):
     m["run_start"] = None
     m["run_end"] = None
     D.save_users()
-    await callback.answer("Шахта остановлена. Добыча осталась на складе.")
+    await callback.answer("Банк остановлен. Доход остался на складе.")
     await _show(callback, "mine")
 
 
@@ -1285,7 +1289,7 @@ async def on_buy_miner(callback: CallbackQuery):
     t = MINERS[i]
 
     if owned(m, i) >= t["max"]:
-        await callback.answer("Лимит шахтёров этого уровня достигнут.", show_alert=True)
+        await callback.answer("Лимит сотрудников этого уровня достигнут.", show_alert=True)
         return
 
     price = miner_price(m, i)
@@ -1340,7 +1344,7 @@ async def on_give(callback: CallbackQuery):
 
     if bare(m, i) <= 0:
         await callback.answer(
-            "У всех шахтёров этого уровня уже есть кирки. Сними одну.", show_alert=True
+            "У всех сотрудников этого уровня уже есть кирки. Сними одну.", show_alert=True
         )
         return
     if picks_free(m, p) <= 0:
@@ -1370,7 +1374,7 @@ async def on_take(callback: CallbackQuery):
 
     slot = m["equip"].get(str(i), {})
     if int(slot.get(str(p), 0)) <= 0:
-        await callback.answer("Такой кирки у этих шахтёров нет.", show_alert=True)
+        await callback.answer("Такой кирки у этих сотрудников нет.", show_alert=True)
         return
 
     slot[str(p)] -= 1
@@ -1381,7 +1385,7 @@ async def on_take(callback: CallbackQuery):
     await _show(callback, f"mine_take_{i}")
 
 
-# --- Артефакты шахты ---
+# --- Артефакты банка ---
 
 @router.callback_query(F.data == "mine:arts")
 async def on_arts(callback: CallbackQuery):
