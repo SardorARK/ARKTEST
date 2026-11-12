@@ -748,6 +748,13 @@ def main_menu() -> ReplyKeyboardMarkup:
             ],
             [
                 KeyboardButton(
+                    text="Заработать",
+                    style=ButtonStyle.SUCCESS,
+                    icon_custom_emoji_id=EARN_EMOJI[0],
+                ),
+            ],
+            [
+                KeyboardButton(
                     text="Настройки",
                     style=ButtonStyle.PRIMARY,
                     icon_custom_emoji_id="5341715473882955310",
@@ -756,11 +763,6 @@ def main_menu() -> ReplyKeyboardMarkup:
                     text=friends.BUTTON_TEXT,
                     style=ButtonStyle.PRIMARY,
                     icon_custom_emoji_id=friends.BUTTON_EMOJI_ID,
-                ),
-                KeyboardButton(
-                    text="Заработать",
-                    style=ButtonStyle.SUCCESS,
-                    icon_custom_emoji_id=EARN_EMOJI[0],
                 ),
             ],
         ],
@@ -1874,8 +1876,12 @@ achives.setup(
     ACH_EMOJI=ACH_EMOJI,
     GIFT_EMOJI=GIFT_EMOJI,
     DONE_EMOJI=DONE_EMOJI,
+    MINERALS_FIELD=MINERALS_FIELD,
+    MINERAL_EMOJI=MINERAL_EMOJI,
+    CRYSTAL_EMOJI=donate.EM_CRYSTAL,
     SECTION_EMOJI=dict(                      # те же эмодзи, что на кнопках главного меню
         boss=boss.BOSS_EMOJI,
+        ug=underground.UG_EMOJI,
         mine=mine.MINE_EMOJI,
         exrn=exrn.EXPLORE_EMOJI,
         arena=WINS_EMOJI,                    # как у кнопки «Арена»
