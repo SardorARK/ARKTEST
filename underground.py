@@ -14,6 +14,8 @@ user["ug"], свои кнопки (callback_data начинается с «ug:»
     он открывается постепенно по времени. Перезаход в бот результат не меняет.
   * Добычу нужно забрать кнопкой «Забрать». Руда уходит в рюкзак, минералы сразу идут
     в общий счёт игрока (поле MINERALS_FIELD, то же, что использует уровень игрока).
+  * Минералы за запуск всегда одинаковые (не зависят от удачи) и рассчитаны
+    так, чтобы HOURS_PER_STEP часов добычи хватало на подъём до уровня следующей шахты.
   * Руду продают кнопкой «Продать руду» по фиксированным ценам (ORES).
 
 Подключение в main.py не меняется (underground.setup(...) и underground.router).
@@ -201,8 +203,8 @@ def _build_picks() -> list[dict]:
         p = picks[n - 1]
         step_cost = sum(round(PLAYER_L1_MINERALS * L ** PLAYER_MIN_EXP)
                         for L in range(p["need_level"], max(p["need_level"] + 1, picks[n]["need_level"])))
-        per_hour_x1 = p["digs_h"] * (1 + p["lo"]) / 2 * MINERAL_CHANCE / 100
-        p["mqty"] = max(1, round(step_cost / (HOURS_PER_STEP * per_hour_x1)))
+        p["mph"] = step_cost / HOURS_PER_STEP      # минералов в час: ровно столько, сколько нужно
+        p["mqty"] = 1                              # (поле оставлено для старых сохранений)
     out = []
     for p in picks[:total]:
         name = f"{p['tier']}-LVL{p['lvl']}"
@@ -366,26 +368,38 @@ def ore_range(p: dict, minutes: int) -> tuple[int, int]:
     return int(lo * k), int(hi * k)
 
 
+def mineral_drops(p: dict, minutes: int, bonus: int = 0) -> int:
+    """Сколько минералов даёт запуск. Всегда одно и то же число, без случайности: минералы в час
+    считаются от цены подъёма до уровня следующей шахты (HOURS_PER_STEP часов на шаг)."""
+    return max(1, round(p["mph"] * minutes / 60 * (100 + bonus) / 100))
+
+
+def minerals_total(p: dict, minutes: int, bonus: int = 0) -> int:
+    """Минералов за запуск (с множителем шахты). Стабильное число."""
+    return mineral_drops(p, minutes, bonus) * p["mqty"]
+
+
 def minerals_range(p: dict, minutes: int) -> tuple[int, int]:
-    lo, hi = drops_range(p, minutes)
-    k = MINERAL_CHANCE / 100 * p["mqty"]
-    return int(lo * k), int(hi * k)
+    """Для карточки шахты: стабильное число, края диапазона совпадают."""
+    v = minerals_total(p, minutes)
+    return v, v
 
 
 def roll_run(pick: dict, minutes: int, bonus: int = 0) -> list[list[int]]:
     """Бросает весь запуск заранее и режет на сегменты по времени.
     Сегмент: [камень, уголь, медь, минералы] (штук добычи, без множителей).
-    bonus: бонус времени запуска в % к числу добычи."""
+    Руда: случайное число из диапазона шахты. Минералы: СТАБИЛЬНО, всегда одинаково и ровно
+    по сегментам (см. mineral_drops). bonus: бонус времени запуска в %."""
     segs_n = max(1, min(144, minutes))
     lo, hi = drops_range(pick, minutes)
-    n = round(random.randint(lo, hi) * (100 + bonus) / 100)
+    n_ore = round(random.randint(lo, hi) * (100 - MINERAL_CHANCE) / 100 * (100 + bonus) / 100)
+    n_min = mineral_drops(pick, minutes, bonus)
     segs = [[0, 0, 0, 0] for _ in range(segs_n)]
-    codes = [0, 1, 2, 3]
+    for i in range(segs_n):                       # минералы ровно по времени
+        segs[i][3] = n_min * (i + 1) // segs_n - n_min * i // segs_n
     ore_w = [ORES[k]["weight"] for k in ("stone", "coal", "copper")]
-    wsum = sum(ore_w)
-    weights = [(100 - MINERAL_CHANCE) * w / wsum for w in ore_w] + [MINERAL_CHANCE]
-    types = random.choices(codes, weights, k=n)
-    places = random.choices(range(segs_n), k=n)
+    types = random.choices([0, 1, 2], ore_w, k=n_ore)
+    places = random.choices(range(segs_n), k=n_ore)
     for seg, t in zip(places, types):
         segs[seg][t] += 1
     return segs
@@ -684,21 +698,21 @@ def _collect_btn(ug: dict, suffix: str = "") -> InlineKeyboardButton:
 
 
 def ug_kb(user_id: int) -> InlineKeyboardMarkup:
-    """Компактно: 2 кнопки в ряд, чтобы клавиатура не уходила вниз."""
+    """Ряды: 1) Шахты, Рюкзак; 2) Забрать; 3) Запустить (или Остановить) и Обновить; 4) Время запуска."""
     _, ug = load(user_id)
     sel = selected(ug)
+    if ug["run"] is None:       # если рано, бот скажет причину: отдых
+        action = _btn("Запустить", f"ug:start:{sel}", ButtonStyle.SUCCESS, START_EMOJI_ID)
+    else:
+        action = _btn("Остановить", "ug:stop", ButtonStyle.DANGER, STOP_EMOJI_ID)
     rows = [
         [_btn("Шахты", f"ug:list:{sel // PER_PAGE}", ButtonStyle.PRIMARY, MINES_EMOJI_ID),
          _btn("🎒 Рюкзак", "ug:bag", ButtonStyle.PRIMARY)],
-        [_btn("Время запуска", "ug:time", ButtonStyle.PRIMARY, TIME_EMOJI[0]),
-         _collect_btn(ug)],
+        [_collect_btn(ug)],
+        [action, _btn("Обновить", "ug:open", ButtonStyle.PRIMARY, REFRESH_EMOJI_ID)],
+        [_btn("Время запуска", "ug:time", ButtonStyle.PRIMARY, TIME_EMOJI[0])],
+        _back("mine:open"),
     ]
-    if ug["run"] is None:       # если рано, бот скажет причину: отдых
-        rows.append([_btn("Запустить", f"ug:start:{sel}", ButtonStyle.SUCCESS, START_EMOJI_ID)])
-    else:
-        rows.append([_btn("Остановить", "ug:stop", ButtonStyle.DANGER, STOP_EMOJI_ID),
-                     _btn("Обновить", "ug:open", ButtonStyle.PRIMARY, REFRESH_EMOJI_ID)])
-    rows.append(_back("mine:open"))
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
