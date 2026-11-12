@@ -52,7 +52,7 @@ import arena
 import exrn
 import settings
 import mine
-import underground       # «Подземная шахта» (underground.py)
+import underground       # «Шахта» (underground.py): кнопка в нижнем меню
 import quick_cmds
 import friends
 import gift              # передача ресурсов игроку: «дать @ник» (gift.py)
@@ -757,6 +757,11 @@ def main_menu() -> ReplyKeyboardMarkup:
                     style=ButtonStyle.PRIMARY,
                     icon_custom_emoji_id=friends.BUTTON_EMOJI_ID,
                 ),
+                KeyboardButton(
+                    text="Шахта",
+                    style=ButtonStyle.PRIMARY,
+                    icon_custom_emoji_id=underground.UG_EMOJI[0],
+                ),
             ],
         ],
         resize_keyboard=True,
@@ -1119,7 +1124,7 @@ def menu_kb() -> InlineKeyboardMarkup:
             [btn("Профиль", "menu:player", ButtonStyle.PRIMARY, settings.EM_USER[0])],
             [
                 btn("Запасы", "menu:stock", ButtonStyle.PRIMARY, STOCK_BTN_EMOJI[0]),
-                btn("Шахты", "menu:mine", ButtonStyle.PRIMARY, mine.MINE_EMOJI[0]),
+                btn("Банк", "menu:mine", ButtonStyle.PRIMARY, mine.MINE_EMOJI[0]),
             ],
             # Исследование на всю ширину, зелёная
             [btn("Исследование", "menu:exrn", ButtonStyle.SUCCESS, exrn.EXPLORE_EMOJI[0])],
@@ -1619,6 +1624,8 @@ dp.message.outer_middleware(achives.AchMiddleware())
 dp.callback_query.outer_middleware(achives.AchMiddleware())
 dp.errors.register(on_error)
 gift.install(dp)         # запоминает ники игроков для «дать @ник»
+# Нижняя кнопка «Шахта» (underground.py). Регистрируем ДО quick_cmds, чтобы быстрая команда «шахта» её не перехватила
+dp.message.register(underground.open_from_menu, F.text == "Шахта")
 quick_cmds.install(dp)   # быстрые команды: «шахта», «/босс», «арена» и т.д. (quick_cmds.py)
 
 dp.include_router(admin.router)
@@ -1638,7 +1645,7 @@ donate.setup(
 )
 dp.include_router(donate.router)
 
-# Раздел «Шахты» живёт в mine.py; ему передаём нужные функции и эмодзи
+# Раздел «Банк» (бывшие «Шахты») живёт в mine.py; ему передаём нужные функции и эмодзи
 mine.setup(
     get_user=get_user,
     save_users=save_users,
@@ -1654,7 +1661,7 @@ mine.setup(
 )
 dp.include_router(mine.router)
 
-# «Подземная шахта» (underground.py): свои данные и кнопки ug:*, простую шахту не трогает
+# «Шахта» (underground.py): свои данные и кнопки ug:*, «Банк» (mine.py) не трогает
 underground.setup(
     get_user=get_user,
     save_users=save_users,
