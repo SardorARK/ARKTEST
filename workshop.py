@@ -87,7 +87,7 @@ CATEGORIES = {
 #   cost     - сколько ресурсов нужно
 #   seconds  - время крафта
 #   durability - прочность (сколько раз можно использовать)
-#   mult     - множитель добычи
+#   bonus    - (подпись бонуса, множитель): множитель умножает базовое значение, 1.15 = +15%
 ITEMS = {
     "pickaxe": {
         "name": "Обычная кирка",
@@ -98,7 +98,18 @@ ITEMS = {
         "cost": {"wood": 10, "feather": 4, "vine": 5},
         "seconds": 5 * 60,
         "durability": 100,
-        "mult": 1.05,
+        "bonus": ("Добыча", 1.05),
+    },
+    "rope": {
+        "name": "Верёвка",
+        "emoji": "🪢",
+        "category": "items",
+        "rarity": "Базовый",
+        "desc": "Крепкая плетёная верёвка. С ней проще добраться до золотых жил.",
+        "cost": {"thread": 15, "vine": 5, "clay": 4},
+        "seconds": 5 * 60,
+        "durability": 100,
+        "bonus": ("Шанс найти золото", 1.15),   # было 1%, станет 1.15%
     },
 }
 
@@ -309,7 +320,7 @@ def _owned_line(item: dict, dur: int) -> str:
     return (f"{item['emoji']} <b>{escape(item['name'])}</b><br>"
             f"Редкость: <b>{escape(item['rarity'])}</b><br>"
             f"Прочность: <code>{dur}/{item['durability']}</code><br>"
-            f"Добыча: <code>×{item['mult']:g}</code>")
+            f"{escape(item['bonus'][0])}: <code>×{item['bonus'][1]:g}</code>")
 
 
 def _recipe_line(item: dict) -> str:
@@ -454,7 +465,8 @@ def recipe_html(user: dict, key: str, slot: int, with_image: bool) -> str:
     item = ITEMS[key]
     desc = item.get("desc") or f"Рецепт для слота {slot}."
     text = _img(with_image) + _head(item["name"].upper(), item["emoji"], desc)
-    bonus = f"+{(item['mult'] - 1) * 100:.0f}%"
+    bonus_name, bonus_mult = item["bonus"]
+    bonus = f"+{(bonus_mult - 1) * 100:.0f}%"
     ok, no, clock = D.custom_emoji(OK_EMOJI), D.custom_emoji(NO_EMOJI), D.custom_emoji(TIME_EMOJI)
     boost = D.custom_emoji(BOOST_EMOJI)
     lines, lack = [], []
@@ -472,7 +484,7 @@ def recipe_html(user: dict, key: str, slot: int, with_image: bool) -> str:
         note = "<i>Всё готово. Нажми «Создать», чтобы начать.</i>"
     text += (f"<p>{gap}<b>▸ Характеристики</b><br>"
              f"<b>Редкость: {escape(item['rarity'])} · {clock} {fmt_time(item['seconds'])}</b><br>"
-             f"<b>{boost} Добыча: {bonus}</b></p>"
+             f"<b>{boost} {escape(bonus_name)}: {bonus}</b></p>"
              f"<p>{gap}<b>▸ Нужно</b><br>" + "<br>".join(lines) + f"<br>{note}</p>")
     return text
 
