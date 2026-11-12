@@ -629,6 +629,4 @@ async def on_make(callback: CallbackQuery):
         return
     D.save_users()
     await callback.answer("Ковка запущена.")
-    note = (f"<p><b><i>⚒️ Ковка запущена</i></b><br><i>Слот {slot}: {escape(ITEMS[key]['name'])} "
-            f"будет готов через {fmt_time(ITEMS[key]['seconds'])}.</i></p>")
-    await _show_forge(callback, user, note)
+    await _show_forge(callback, user)
