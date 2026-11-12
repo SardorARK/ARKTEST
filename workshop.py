@@ -318,7 +318,7 @@ def _craft_status(user: dict) -> str:
     now = time.time()
     lines = [f"<i>{ITEMS[j['item']]['emoji']} {escape(ITEMS[j['item']]['name'])} — {percent(j, now)}% · {fmt_time(j['end'] - now)}</i>"
              for j in jobs]
-    return "<p>&nbsp;<br>" + "<br>".join(lines) + "</p>"
+    return "<p>⠀<br>" + "<br>".join(lines) + "</p>"
 
 
 def _done_note(done: list[str] | None) -> str:
@@ -358,7 +358,7 @@ def category_html(user: dict, key: str, with_image: bool) -> str:
             return text + ("<p><b>Запасы пусты</b><br>Пока у тебя нет ни одного материала. "
                            "Добывай их, и они появятся здесь.</p>")
         lines = [f"{e} <b>{escape(n)}</b> — <code>{_f(c)}</code>" for _, n, e, c in owned]
-        return text + "<p>&nbsp;<br>" + "<br>".join(lines) + "</p>"
+        return text + "<p>⠀<br>" + "<br>".join(lines) + "</p>"
     mine = [it for it in items_of(user) if ITEMS.get(it["key"], {}).get("category") == key]
     recipes = [i for i in ITEMS.values() if i["category"] == key]
     if mine:
