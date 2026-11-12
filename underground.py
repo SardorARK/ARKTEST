@@ -1,11 +1,12 @@
-"""Раздел «Подземная шахта»: активная добыча руды и минералов. 90 шахт (30 пород × 3 уровня).
+"""Раздел «Шахта»: активная добыча руды и минералов. 90 шахт (30 пород × 3 уровня).
 
-Модуль самостоятельный и не трогает данные простой шахты (mine.py): свои данные игрока
-user["ug"], свои кнопки (callback_data начинается с «ug:»). Единственная связь с mine.py:
-кнопка «Подземная шахта» (ug:open) и кнопка «Назад» (mine:open).
+Модуль самостоятельный и не трогает данные «Банка» (mine.py): свои данные игрока
+user["ug"], свои кнопки (callback_data начинается с «ug:»). Раздел открывается кнопкой «Шахта»
+в нижнем (reply) меню: main.py вешает на неё underground.open_from_menu. Из mine.py берутся
+только функции оформления.
 
 Как это работает:
-  * Кнопка «Подземная шахта» ведёт на выбор из 90 шахт (по 15 на странице). Игрок выбирает шахту
+  * Кнопка «Шахта» ведёт на выбор из 90 шахт (по 15 на странице). Игрок выбирает шахту
     кнопкой «Использовать» и запускает её. Одновременно работает только одна шахта.
   * Время запуска (25 мин, 45 мин, 1, 2, 4, 8, 12, 24, 48 часов) открывается за монеты по очереди,
     как экспедиции: кнопка «Время запуска» (DURATIONS). Сам запуск бесплатный и идёт сразу
@@ -18,7 +19,8 @@ user["ug"], свои кнопки (callback_data начинается с «ug:»
     так, чтобы HOURS_PER_STEP часов добычи хватало на подъём до уровня следующей шахты.
   * Руду продают кнопкой «Продать руду» по фиксированным ценам (ORES).
 
-Подключение в main.py не меняется (underground.setup(...) и underground.router).
+Подключение в main.py: underground.setup(...), underground.router и обработчик нижней кнопки
+(dp.message.register(underground.open_from_menu, F.text == "Шахта")).
 """
 
 import asyncio
@@ -30,7 +32,7 @@ from types import SimpleNamespace
 
 from aiogram import BaseMiddleware, F, Router
 from aiogram.enums import ButtonStyle
-from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup
+from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 from mine import _bar, _gap, fmt, fmt_dur   # оформление как в «Шахтах»
 
@@ -264,11 +266,11 @@ REFRESH_EMOJI_ID = "4940489017889129308"     # кнопка «Обновить»
 
 # Куда админ может добавить фото через /img
 IMG_TARGETS: dict[str, str] = {
-    "ug": "Подземные шахты",
-    "ug_list": "Подземные шахты: выбор шахты",
-    "ug_mine": "Подземные шахты: карточка шахты (общее фото)",
-    "ug_time": "Подземные шахты: время запуска",
-    "ug_bag": "Подземные шахты: рюкзак",
+    "ug": "Шахта",
+    "ug_list": "Шахта: выбор шахты",
+    "ug_mine": "Шахта: карточка шахты (общее фото)",
+    "ug_time": "Шахта: время запуска",
+    "ug_bag": "Шахта: рюкзак",
 }
 
 
@@ -528,7 +530,7 @@ async def background_loop() -> None:
                 if settle(ug):
                     changed = True
             except Exception:
-                logging.exception("Подземная шахта: ошибка фонового начисления у %s", uid)
+                logging.exception("Шахта: ошибка фонового начисления у %s", uid)
         if changed:
             D.save_users()
 
@@ -769,7 +771,8 @@ def _collect_btn(ug: dict, suffix: str = "") -> InlineKeyboardButton:
 
 
 def ug_kb(user_id: int) -> InlineKeyboardMarkup:
-    """Ряды: 1) Шахты, Рюкзак; 2) Забрать; 3) Запустить (или Остановить) и Обновить; 4) Время запуска."""
+    """Ряды: 1) Шахты, Рюкзак; 2) Забрать; 3) Запустить (или Остановить) и Обновить; 4) Время запуска.
+    Кнопки «Назад» нет: раздел открывается из нижнего меню и сам является корнем."""
     _, ug = load(user_id)
     sel = selected(ug)
     if ug["run"] is None:       # если рано, бот скажет причину: отдых
@@ -782,7 +785,6 @@ def ug_kb(user_id: int) -> InlineKeyboardMarkup:
         [_collect_btn(ug)],
         [action, _btn("Обновить", "ug:refresh", ButtonStyle.PRIMARY, REFRESH_EMOJI_ID)],
         [_btn("Время запуска", "ug:time", ButtonStyle.PRIMARY, TIME_EMOJI[0])],
-        _back("mine:open"),
     ]
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -981,6 +983,24 @@ def _index(callback: CallbackQuery, pos: int = 2) -> int | None:
 
 
 # ---------- Хендлеры ----------
+
+async def open_from_menu(message: Message) -> None:
+    """Кнопка «Шахта» в нижнем (reply) меню: присылает главный экран шахты новым сообщением.
+    Подключается в main.py: dp.message.register(underground.open_from_menu, F.text == "Шахта")."""
+    uid = message.from_user.id
+    if D.get_user(uid) is None:
+        await message.answer("Сначала выбери питомца: /start")
+        return
+    _live.pop(uid, None)                        # старое само-обновление больше не нужно
+    html, kb = SCREENS["ug"]
+    msg = await D.send_rich_card(
+        message.bot, message.chat.id, img_key("ug"), lambda wi: html(uid, wi), kb(uid)
+    )
+    if AUTO_REFRESH_MIN > 0 and hasattr(msg, "message_id"):
+        user = D.get_user(uid)
+        if user is not None and get_ug(user)["run"] is not None:
+            _start_live(message.bot, msg.chat.id, msg.message_id, uid)
+
 
 @router.callback_query(F.data == "ug:open")
 async def on_open(callback: CallbackQuery):
