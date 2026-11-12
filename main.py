@@ -1634,6 +1634,7 @@ underground.setup(
     MINERAL_EMOJI=MINERAL_EMOJI,
     DONE_EMOJI=DONE_EMOJI,                     # галочка на кнопке выбранной шахты
 )
+dp.callback_query.outer_middleware(underground.LiveStopMiddleware())   # стоп само-обновления шахты
 dp.include_router(underground.router)
 
 def drop_any_artifact(user: dict, tier: str):
