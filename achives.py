@@ -1,4 +1,4 @@
-"""Раздел «Достижения»: 60 достижений, по 10 в шести разделах (Босс, Шахты, Исследование, Арена, Рынок, Донат).
+"""Раздел «Достижения»: 70 достижений, по 10 в семи разделах (Босс, Шахта, Банк, Исследование, Арена, Рынок, Донат).
 
 Как это работает
   * За каждое достижение игрок один раз получает награду: монеты, мясо и фрукты. Награда зачисляется сразу,
@@ -7,7 +7,8 @@
   * Почти весь прогресс считается по данным, которые другие разделы и так хранят в профиле игрока
     (user["arena"], user["exrn"], user["mine"], user["donate_stats"], boss.STATS). Поэтому у игроков,
     которые уже играли, прогресс виден сразу, и добавлять счётчики во все обработчики не нужно.
-  * Нет готового счётчика только у четырёх вещей, для них в других разделах стоят маленькие вызовы-хуки:
+  * Нет готового счётчика только у некоторых вещей, для них в других разделах стоят маленькие вызовы-хуки:
+        underground.py -> on_ug_start(user), on_ug_collect(user, ore, minerals), on_ug_sell(user, gain)
         mine.py   -> on_mine_start(user), on_mine_collect(user, gain)
         boss.py   -> on_boss_kill(user, вид_босса, доля_урона)
         store.py  -> on_market_deal(user, партнёр, цена, валюта, "buy" | "sell")
@@ -23,7 +24,9 @@
   * Рынок: сделки меньше MKT_MIN_DEAL не считаются, а у высоких уровней цели заданы в обороте (с рынка берётся
     комиссия 5%), поэтому «накрутить» достижения парой аккаунтов дороже, чем сама награда.
   * Босс: победа засчитывается, только если игрок нанёс не меньше BOSS_MIN_SHARE урона (нельзя «пристроиться»).
-  * Награда не содержит кристаллов (донатной валюты).
+  * Минералы дают все достижения (по уровню). Кристаллы (донатная валюта) только за самые сложные:
+    4-й уровень = 3, 5-й = 7, в разделе «Донат» кристаллов нет (иначе их можно «крутить по кругу»).
+    Всего кристаллов за все достижения: 60.
 
 Подключение: см. инструкцию, которую я дал вместе с файлом (setup, router, middleware, кнопка в меню).
 """
@@ -81,6 +84,11 @@ MKT_CRYSTAL_VALUE = 500        # для оборота рынка 1 криста
 MKT_PEERS_CAP = 50             # сколько разных партнёров по рынку запоминаем у одного игрока
 COUNTER_CAP = 10**12           # потолок любого счётчика (защита от переполнения)
 
+# Награда минералами и кристаллами зависит от уровня достижения (монеты, мясо и фрукты заданы в каждом).
+MINERALS_BY_TIER = {1: 15, 2: 60, 3: 250, 4: 800, 5: 2_000}
+CRYSTALS_BY_TIER = {1: 0, 2: 0, 3: 0, 4: 3, 5: 7}      # кристаллы только за сложные достижения
+NO_CRYSTAL_SECTIONS = {"donate"}                         # в этом разделе кристаллов нет
+
 # Уровни (тиры): название, значок, фраза в уведомлении. Совпадают с редкостями артефактов в игре.
 TIERS: dict[int, tuple[str, str, str]] = {
     1: ("Обычное", "⚪", "Хорошее начало!"),
@@ -93,6 +101,7 @@ TIERS: dict[int, tuple[str, str, str]] = {
 # Разделы: ключ, название, значок, подпись на экране раздела.
 SECTIONS: list[tuple[str, str, str, str]] = [
     ("boss", "Босс", "😈", "Бей чудовищ вместе со всеми и забирай свою долю добычи."),
+    ("ug", "Шахта", "⛏", "Копай руду и минералы: запускай шахты, открывай время и спускайся глубже."),
     ("mine", "Банк", "🏦", "Нанимай сотрудников, покупай карточки и качай доход."),
     ("exrn", "Исследование", "🗺", "Отправляй отряды в дальние края и возвращайся с добычей."),
     ("arena", "Арена", "⚔️", "Сражайся с другими питомцами и поднимайся по лигам."),
@@ -202,6 +211,13 @@ METRICS: dict[str, "callable"] = {
     "boss_kills": lambda u, uid: _c(u, "boss_k"),
     "boss_hard": lambda u, uid: _c(u, "boss_hard"),
     "boss_insane": lambda u, uid: _c(u, "boss_insane"),
+    # шахта (underground.py)
+    "ug_runs": lambda u, uid: _c(u, "ug_runs"),
+    "ug_ore": lambda u, uid: _c(u, "ug_ore"),
+    "ug_minerals": lambda u, uid: _c(u, "ug_minerals"),
+    "ug_sold": lambda u, uid: _c(u, "ug_sold"),
+    "ug_dur": lambda u, uid: _i(_d(u.get("ug")).get("dur_open"), 1),
+    "ug_pick": lambda u, uid: _i(_d(u.get("ug")).get("sel")) + 1,
     # банк (бывшие шахты)
     "mine_runs": lambda u, uid: _c(u, "mine_runs"),
     "mine_coins": lambda u, uid: _c(u, "mine_coins"),
@@ -245,8 +261,10 @@ METRICS: dict[str, "callable"] = {
 
 def _a(key: str, sec: str, tier: int, name: str, desc: str, metric: str, goal: int,
        coins: int, meat: int, fruit: int) -> dict:
+    crystals = 0 if sec in NO_CRYSTAL_SECTIONS else CRYSTALS_BY_TIER.get(tier, 0)
     return {"key": key, "sec": sec, "tier": tier, "name": name, "desc": desc, "metric": metric,
-            "goal": goal, "reward": {"coins": coins, "meat": meat, "fruit": fruit}}
+            "goal": goal, "reward": {"coins": coins, "meat": meat, "fruit": fruit,
+                                     "minerals": MINERALS_BY_TIER.get(tier, 0), "crystals": crystals}}
 
 
 _SHARE = f"{BOSS_MIN_SHARE * 100:g}%"
@@ -265,7 +283,19 @@ ACHIEVEMENTS: list[dict] = [
     _a("b_insane3", "boss", 4, "Охотник на безумных", "Победи 3 безумных боссов.", "boss_insane", 3, 30_000, 60, 60),
     _a("b_kill100", "boss", 5, "Бич чудовищ", "Победи 100 боссов.", "boss_kills", 100, 100_000, 150, 150),
 
-    # ---------------- Шахты ----------------
+    # ---------------- Шахта (underground.py) ----------------
+    _a("u_run1", "ug", 1, "Первый спуск", "Запусти шахту.", "ug_runs", 1, 300, 1, 2),
+    _a("u_ore200", "ug", 1, "Полный рюкзак", "Добудь и забери 200 единиц руды.", "ug_ore", 200, 400, 2, 1),
+    _a("u_sell1", "ug", 1, "Первая выручка", "Заработай 500 монет продажей руды.", "ug_sold", 500, 300, 2, 2),
+    _a("u_run25", "ug", 2, "Заядлый шахтёр", "Запусти шахту 25 раз.", "ug_runs", 25, 1_500, 6, 6),
+    _a("u_dur5", "ug", 2, "Время — руда", "Открой время запуска 4 часа.", "ug_dur", 5, 2_000, 6, 5),
+    _a("u_min1k", "ug", 2, "Минеральная жила", "Забери из шахты 1 000 минералов.", "ug_minerals", 1_000, 1_800, 5, 5),
+    _a("u_pick15", "ug", 3, "Глубокий горизонт", "Выбери шахту номер 15.", "ug_pick", 15, 5_000, 20, 20),
+    _a("u_sold1m", "ug", 3, "Рудный барон", "Заработай 1 000 000 монет продажей руды.", "ug_sold", 1_000_000, 6_000, 20, 20),
+    _a("u_dur8", "ug", 4, "Хозяин времени", "Открой время запуска 24 часа.", "ug_dur", 8, 25_000, 55, 55),
+    _a("u_pick60", "ug", 5, "Владыка недр", "Выбери шахту номер 60.", "ug_pick", 60, 90_000, 150, 150),
+
+    # ---------------- Банк ----------------
     _a("m_run1", "mine", 1, "Первая смена", "Запусти банк.", "mine_runs", 1, 300, 1, 2),
     _a("m_crew5", "mine", 1, "Свой штат", "Найми в банк 5 сотрудников.", "miners_total", 5, 400, 2, 1),
     _a("m_pick1", "mine", 1, "Первая карточка", "Купи первую карточку.", "picks_total", 1, 250, 2, 2),
@@ -409,6 +439,22 @@ def track(user: dict, key: str, n: int = 1) -> None:
 
 
 @_safe
+def on_ug_start(user: dict) -> None:
+    track(user, "ug_runs")
+
+
+@_safe
+def on_ug_collect(user: dict, ore: int, minerals: int) -> None:
+    track(user, "ug_ore", ore)
+    track(user, "ug_minerals", minerals)
+
+
+@_safe
+def on_ug_sell(user: dict, gain: int) -> None:
+    track(user, "ug_sold", gain)
+
+
+@_safe
 def on_mine_start(user: dict) -> None:
     track(user, "mine_runs")
 
@@ -467,6 +513,11 @@ def _grant(user: dict, reward: dict) -> None:
     user["coins"] = _i(user.get("coins")) + _i(reward.get("coins"))
     user["meat"] = _i(user.get("meat")) + _i(reward.get("meat"))
     user["fruit"] = _i(user.get("fruit")) + _i(reward.get("fruit"))
+    if reward.get("minerals"):
+        field = getattr(D, "MINERALS_FIELD", "minerals")
+        user[field] = _i(user.get(field)) + _i(reward.get("minerals"))
+    if reward.get("crystals"):
+        user["donate_coins"] = _i(user.get("donate_coins")) + _i(reward.get("crystals"))
 
 
 def evaluate(user: dict, uid) -> list[dict]:
@@ -491,6 +542,7 @@ def evaluate(user: dict, uid) -> list[dict]:
         for a in new:
             r = a["reward"]
             _led("ach_done", uid=str(uid), key=a["key"], coins=r["coins"], meat=r["meat"], fruit=r["fruit"],
+                 minerals=r.get("minerals", 0), crystals=r.get("crystals", 0),
                  coins_total=user.get("coins"))
     return new
 
@@ -504,11 +556,11 @@ def done_count(user: dict, sec: str | None = None) -> int:
 def total_rewards(user: dict) -> dict:
     """Сколько всего получено наград за выполненные достижения."""
     done = _st(user)["done"]
-    out = {"coins": 0, "meat": 0, "fruit": 0}
+    out = {"coins": 0, "meat": 0, "fruit": 0, "minerals": 0, "crystals": 0}
     for a in ACHIEVEMENTS:
         if a["key"] in done:
             for k in out:
-                out[k] += a["reward"][k]
+                out[k] += a["reward"].get(k, 0)
     return out
 
 
@@ -551,6 +603,14 @@ def _fruit() -> str:
     return _ce("FRUIT_EMOJI", "🥭")
 
 
+def _mineral() -> str:
+    return _ce("MINERAL_EMOJI", "🏜")
+
+
+def _crystal() -> str:
+    return _ce("CRYSTAL_EMOJI", "💎")
+
+
 def _reward_inline(r: dict) -> str:
     """Награда одной строкой: 🪙 1 500 · 🥩 8 · 🥭 7 (нулевые части пропускаем)."""
     parts = []
@@ -560,6 +620,10 @@ def _reward_inline(r: dict) -> str:
         parts.append(f"{_meat()} {_num(r['meat'])}")
     if r.get("fruit"):
         parts.append(f"{_fruit()} {_num(r['fruit'])}")
+    if r.get("minerals"):
+        parts.append(f"{_mineral()} {_num(r['minerals'])}")
+    if r.get("crystals"):
+        parts.append(f"{_crystal()} {_num(r['crystals'])}")
     return " · ".join(parts)
 
 
@@ -571,6 +635,10 @@ def _reward_lines(r: dict) -> list[str]:
         lines.append(f"{_meat()} Мясо: <b>+{_num(r['meat'])}</b>")
     if r.get("fruit"):
         lines.append(f"{_fruit()} Фрукты: <b>+{_num(r['fruit'])}</b>")
+    if r.get("minerals"):
+        lines.append(f"{_mineral()} Минералы: <b>+{_num(r['minerals'])}</b>")
+    if r.get("crystals"):
+        lines.append(f"{_crystal()} Кристаллы: <b>+{_num(r['crystals'])}</b>")
     return lines
 
 
@@ -604,10 +672,10 @@ def notice_html(new: list[dict], user: dict) -> str:
     lines = [f"{_face(a)} <b>{escape(a['name'])}</b>" for a in shown]
     if len(new) > len(shown):
         lines.append(f"…и ещё <b>{len(new) - len(shown)}</b>")
-    sums = {"coins": 0, "meat": 0, "fruit": 0}
+    sums = {"coins": 0, "meat": 0, "fruit": 0, "minerals": 0, "crystals": 0}
     for a in new:
         for k in sums:
-            sums[k] += a["reward"][k]
+            sums[k] += a["reward"].get(k, 0)
     return (
         f"{_ach_icon()} <b>ДОСТИЖЕНИЯ ПОЛУЧЕНЫ: {len(new)}</b>\n\n"
         f"{_tree_text(lines)}\n\n"
@@ -757,7 +825,7 @@ def home_html(user: dict, uid, with_image: bool = False, preview: bool = False) 
         f"{_image(with_image)}"
         + _head("ДОСТИЖЕНИЯ")
         + _quote("Выполняй задания в каждом разделе игры. За каждое достижение ты получаешь награду: "
-                 "монеты, мясо и фрукты. Награда выдаётся один раз и сразу приходит в запасы.")
+                 "монеты, мясо, фрукты и минералы, а за самые сложные ещё и кристаллы. Награда выдаётся один раз и сразу приходит в запасы.")
         + f"<p><b>Твой прогресс</b><br>{body}</p>"
     )
 
@@ -837,7 +905,7 @@ async def on_home(callback: CallbackQuery):
     await _open(callback, home_html, "menu:back", kb=_home_kb)
 
 
-@router.callback_query(F.data.regexp(r"^ach:s:(boss|mine|exrn|arena|market|donate)(:\d+)?$"))
+@router.callback_query(F.data.regexp(r"^ach:s:(boss|ug|mine|exrn|arena|market|donate)(:\d+)?$"))
 async def on_section(callback: CallbackQuery):
     parts = callback.data.split(":")
     sec = parts[2]
@@ -916,16 +984,16 @@ class AchMiddleware(BaseMiddleware):
 def tiers_summary() -> str:
     """Сколько наград в сумме выдают все достижения: проверка, что экономика не ломается."""
     rows = []
-    tot = {"coins": 0, "meat": 0, "fruit": 0}
+    tot = {"coins": 0, "meat": 0, "fruit": 0, "minerals": 0, "crystals": 0}
     for key, title, _, _ in SECTIONS:
-        s = {"coins": 0, "meat": 0, "fruit": 0}
+        s = {"coins": 0, "meat": 0, "fruit": 0, "minerals": 0, "crystals": 0}
         for a in BY_SEC[key]:
             for k in s:
-                s[k] += a["reward"][k]
-        rows.append(f"{title:<14} монет {s['coins']:>9,}  мяса {s['meat']:>5,}  фруктов {s['fruit']:>5,}")
+                s[k] += a["reward"].get(k, 0)
+        rows.append(f"{title:<14} монет {s['coins']:>9,}  мяса {s['meat']:>5,}  фруктов {s['fruit']:>5,}  минералов {s['minerals']:>6,}  кристаллов {s['crystals']:>3,}")
         for k in tot:
             tot[k] += s[k]
-    rows.append(f"{'ИТОГО':<14} монет {tot['coins']:>9,}  мяса {tot['meat']:>5,}  фруктов {tot['fruit']:>5,}")
+    rows.append(f"{'ИТОГО':<14} монет {tot['coins']:>9,}  мяса {tot['meat']:>5,}  фруктов {tot['fruit']:>5,}  минералов {tot['minerals']:>6,}  кристаллов {tot['crystals']:>3,}")
     return "\n".join(rows)
 
 
