@@ -39,6 +39,15 @@ from mine import _bar, _gap, fmt, fmt_dur   # оформление как в «�
 log = logging.getLogger(__name__)
 router = Router()
 
+
+def _ach(name: str, *args) -> None:
+    """Хук достижений (achives.py). Любая ошибка гасится: на шахту он не влияет."""
+    try:
+        import achives
+        getattr(achives, name)(*args)
+    except Exception:
+        log.debug("Шахта: хук достижений %s не сработал", name, exc_info=True)
+
 # Заполняется в setup()
 D = SimpleNamespace()
 
@@ -1218,6 +1227,7 @@ async def on_start(callback: CallbackQuery):
         "tot": roll_totals(p, minutes, bonus),
         "got": {},
     }
+    _ach("on_ug_start", user)
     D.save_users()
     _active.add(callback.from_user.id)
     await callback.answer(f"{p['name']} запущена на {label}!")
@@ -1261,13 +1271,16 @@ async def on_collect(callback: CallbackQuery):
         await callback.answer("Пока нечего забирать.", show_alert=True)
         return
 
+    ore_got = 0
     for k in ORES:
+        ore_got += int(pend[k])
         ug["ores"][k] += int(pend[k])
         pend[k] = 0
     minerals = int(pend["mineral"])
     pend["mineral"] = 0
     if minerals:
         user[D.MINERALS_FIELD] = int(user.get(D.MINERALS_FIELD, 0) or 0) + minerals
+    _ach("on_ug_collect", user, ore_got, minerals)
     D.save_users()
     note = f"Минералов: +{fmt(minerals)}. " if minerals else ""
     await callback.answer(f"{note}Руда в рюкзаке.")
@@ -1287,6 +1300,7 @@ async def on_sell(callback: CallbackQuery):
     for k in ORES:
         ug["ores"][k] = 0
     user["coins"] += gain
+    _ach("on_ug_sell", user, gain)
     D.save_users()
     await callback.answer(f"Продано. Монет: +{fmt(gain)}")
     await _show(callback, "ug_bag")
