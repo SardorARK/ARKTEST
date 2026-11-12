@@ -6,7 +6,7 @@
     user["res"]      = {ключ_ресурса: количество}
     user["ws_slots"] = сколько слотов кузницы открыто (1..MAX_SLOTS, сначала открыт один)
     user["ws_craft"] = [{"item": ключ, "slot": номер_слота, "start": время, "end": время}, ...]
-    user["ws_items"] = [{"key": ключ_предмета, "dur": текущая_прочность}, ...]
+    user["ws_items"] = [{"key": ключ_предмета, "dur": текущая_прочность_или_остаток_использований}, ...]
 
 Крафт идёт по времени и не требует, чтобы игрок ждал в боте: готовый предмет сам попадает
 в инвентарь, когда игрок открывает «Мастерскую». Ресурсы списываются при запуске крафта.
@@ -50,6 +50,7 @@ NO_EMOJI = ("5328093774650293878", "❌")      # ресурса не хвата�
 TIME_EMOJI = ("5850317551090800862", "⏰")    # время ковки
 BOOST_EMOJI = ("5938437708635443119", "⏫")   # бонус к добыче
 MAKE_EMOJI = ("6048599681292832729", "⚒️")   # кнопка «Создать»
+REPAIR_EMOJI = ("", "🔧")                      # кнопка «Восстановить» (впиши id кастомного)
 SLOT_TITLE_EMOJI = ("5350434966163443737", "🔥")   # заголовок «СЛОТ N» внутри слота
 
 # ключ -> (название, эмодзи)
@@ -86,7 +87,8 @@ CATEGORIES = {
 # Предметы и их рецепты.
 #   cost     - сколько ресурсов нужно
 #   seconds  - время крафта
-#   durability - прочность (сколько раз можно использовать)
+#   durability - прочность: шкала, которую можно восстанавливать за ресурсы
+#   uses     - (вместо durability) сколько раз сработает предмет; восстановить нельзя
 #   note     - (необязательно) строка с особым правилом, показывается в карточке рецепта
 #   cancel_cost - (необязательно) сколько прочности тратится при отмене действия предмета
 #   bonus    - (подпись бонуса, множитель): множитель умножает базовое значение, 1.15 = +15%
@@ -115,16 +117,28 @@ ITEMS = {
     },
     "medkit": {
         "name": "Аптечка",
-        "emoji": "🩹",
+        "emoji": ("6032888252837401493", "🚑"),
         "category": "items",
         "rarity": "Редкий",
         "desc": "Набор для срочного ремонта. Шахта работает дольше.",
         "cost": {"thread": 35, "resin": 15, "fiber": 40, "feather": 25},
         "seconds": 30 * 60,   # время крафта не было указано: поставил 30 мин, поменяй при необходимости
-        "durability": 3,      # сработает 3 раза
+        "uses": 3,            # сработает 3 раза (не восстанавливается)
         "cancel_cost": 1,     # при отмене тоже тратится 1 использование
         "note": "Сработает 3 раза, отмена тоже тратит 1",
         "bonus": ("Время работы шахты", 1.10),
+    },
+    "campfire": {
+        "name": "Костёр",
+        "emoji": "🏕️",
+        "category": "items",
+        "rarity": "Базовый",
+        "desc": "Тёплый костёр для привала. Экспедиция вернётся с добычей побогаче.",
+        "cost": {"wood": 25, "fire_core": 1, "clay": 15},
+        "seconds": 10 * 60,   # время крафта не было указано: поставил 10 мин
+        "uses": 1,            # работает 1 раз (не восстанавливается)
+        "note": "Работает 1 раз",
+        "bonus": ("Награды экспедиции", 1.10),
     },
 }
 
@@ -132,6 +146,7 @@ MAX_SLOTS = 4          # слотов в кузнице; сначала откр
 # Цена открытия слота (монеты). Слоты открываются строго по порядку: 2, потом 3, потом 4.
 SLOT_PRICES = {2: 50_000, 3: 150_000, 4: 400_000}
 INVENTORY_CAP = 200   # сколько предметов максимум в инвентаре мастерской
+MAX_ITEM_BUTTONS = 40  # сколько кнопок-предметов показывать в разделе (лимит Telegram - 100 кнопок)
 
 
 # ---------------------------------------------------------------------------
@@ -174,6 +189,56 @@ def items_of(user: dict) -> list:
 
 def can_afford(user: dict, item_key: str) -> bool:
     return all(have(user, k) >= n for k, n in ITEMS[item_key]["cost"].items())
+
+
+def max_dur(item: dict) -> int:
+    """Прочность или число использований предмета в целом виде."""
+    return int(item.get("durability") or item.get("uses") or 0)
+
+
+def can_repair(item: dict) -> bool:
+    """Восстанавливать можно только предметы с прочностью (не с «n использований»)."""
+    return "durability" in item
+
+
+def repair_cost(item: dict, dur: int) -> dict:
+    """Чем меньше прочность, тем больше ресурсов рецепта: при 30% нужно 70% рецепта (округляем вверх)."""
+    mx = max_dur(item)
+    if not can_repair(item) or mx <= 0:
+        return {}
+    miss = max(0, mx - max(0, dur))
+    cost = {k: -(-n * miss // mx) for k, n in item["cost"].items()}
+    return {k: n for k, n in cost.items() if n > 0}
+
+
+def inv_item(user: dict, idx: int):
+    """(запись инвентаря, описание предмета) по номеру или None."""
+    lst = items_of(user)
+    if not 0 <= idx < len(lst):
+        return None
+    item = ITEMS.get(lst[idx].get("key"))
+    return (lst[idx], item) if item else None
+
+
+def repair_item(user: dict, idx: int) -> str | None:
+    """Восстанавливает прочность до максимума за ресурсы. None при успехе или текст причины отказа."""
+    found = inv_item(user, idx)
+    if found is None:
+        return "Предмет не найден."
+    it, item = found
+    if not can_repair(item):
+        return "Этот предмет нельзя восстановить."
+    dur = min(_int(it.get("dur")), max_dur(item))
+    if dur >= max_dur(item):
+        return "Прочность уже полная."
+    cost = repair_cost(item, dur)
+    if any(have(user, k) < n for k, n in cost.items()):
+        return "Не хватает ресурсов для восстановления."
+    r = res_of(user)
+    for k, n in cost.items():
+        r[k] = have(user, k) - n
+    it["dur"] = max_dur(item)
+    return None
 
 
 def open_slots(user: dict) -> int:
@@ -245,7 +310,7 @@ def settle(user: dict, now: float | None = None) -> list[str]:
         if now < job["end"]:
             left.append(job)
             continue
-        items_of(user).append({"key": job["item"], "dur": ITEMS[job["item"]]["durability"]})
+        items_of(user).append({"key": job["item"], "dur": max_dur(ITEMS[job["item"]])})
         done.append(ITEMS[job["item"]]["name"])
     user["ws_craft"] = left
     return done
@@ -309,6 +374,11 @@ def _img(with_image: bool) -> str:
     return '<img src="tg://photo?id=pet"/>' if with_image else ""
 
 
+def _em(emoji: "str | tuple[str, str]") -> str:
+    """Эмодзи предмета для HTML-текста: пара (id, запасной) даёт кастомный, строка остаётся как есть."""
+    return D.custom_emoji(emoji) if isinstance(emoji, tuple) else emoji
+
+
 def _head(title: str, emoji: tuple[str, str] | str, quote: str) -> str:
     em = D.custom_emoji(emoji) if isinstance(emoji, tuple) else emoji
     return f"<p><b>{em} {escape(title)}</b></p><blockquote><i>{escape(quote)}</i></blockquote>"
@@ -330,18 +400,19 @@ def _back(data: str) -> list[InlineKeyboardButton]:
                                  icon_custom_emoji_id=D.BACK_EMOJI_ID)]
 
 
-def _owned_line(item: dict, dur: int) -> str:
-    """Предмет в инвентаре: здесь прочность показываем (при крафте её не видно)."""
-    return (f"{item['emoji']} <b>{escape(item['name'])}</b><br>"
-            f"Редкость: <b>{escape(item['rarity'])}</b><br>"
-            f"Прочность: <code>{dur}/{item['durability']}</code><br>"
-            f"{escape(item['bonus'][0])}: <code>×{item['bonus'][1]:g}</code>")
+def _ebtn(data: str, emoji: "str | tuple[str, str]",
+          style: ButtonStyle = ButtonStyle.PRIMARY) -> InlineKeyboardButton:
+    """Кнопка только со значком. С кастомным эмодзи текст - невидимый символ (пустой текст Telegram не принимает)."""
+    if isinstance(emoji, tuple):
+        cid, fallback = emoji
+        if cid:
+            return InlineKeyboardButton(text="⠀", callback_data=data, style=style, icon_custom_emoji_id=cid)
+        emoji = fallback
+    return InlineKeyboardButton(text=emoji, callback_data=data, style=style)
 
 
-def _recipe_line(item: dict) -> str:
-    """Рецепт в списке: коротко, без прочности."""
-    return (f"{item['emoji']} <b>{escape(item['name'])}</b><br>"
-            f"Редкость: <b>{escape(item['rarity'])}</b> · Время: <b>{fmt_time(item['seconds'])}</b>")
+def _rows(btns: list, per_row: int = 4) -> list[list]:
+    return [btns[i:i + per_row] for i in range(0, len(btns), per_row)]
 
 
 def _craft_status(user: dict) -> str:
@@ -349,7 +420,7 @@ def _craft_status(user: dict) -> str:
     if not jobs:
         return ""
     now = time.time()
-    lines = [f"<i>{ITEMS[j['item']]['emoji']} {escape(ITEMS[j['item']]['name'])} — {percent(j, now)}% · {fmt_time(j['end'] - now)}</i>"
+    lines = [f"<i>{_em(ITEMS[j['item']]['emoji'])} {escape(ITEMS[j['item']]['name'])} — {percent(j, now)}% · {fmt_time(j['end'] - now)}</i>"
              for j in jobs]
     return "<p>⠀<br>" + "<br>".join(lines) + "</p>"
 
@@ -392,18 +463,75 @@ def category_html(user: dict, key: str, with_image: bool) -> str:
                            "Добывай их, и они появятся здесь.</p>")
         lines = [f"{e} <b>{escape(n)}</b> — <code>{_f(c)}</code>" for _, n, e, c in owned]
         return text + "<p>⠀<br>" + "<br>".join(lines) + "</p>"
-    mine = [it for it in items_of(user) if ITEMS.get(it["key"], {}).get("category") == key]
-    recipes = [i for i in ITEMS.values() if i["category"] == key]
+    mine = [it for it in items_of(user) if ITEMS.get(it.get("key"), {}).get("category") == key]
     if mine:
-        text += ("<p><b>В инвентаре</b><br><br>"
-                 + "<br><br>".join(_owned_line(ITEMS[it["key"]], _int(it["dur"])) for it in mine) + "</p>")
-    if recipes:
-        text += ("<p><b>Доступные рецепты</b><br><br>"
-                 + "<br><br>".join(_recipe_line(i) for i in recipes)
-                 + "</p><p>Чтобы создать предмет, открой «Кузницу».</p>")
-    elif not mine:
+        shown = min(len(mine), MAX_ITEM_BUTTONS)
+        text += (f"<p>⠀<br><b>В инвентаре: {len(mine)}</b><br>"
+                 "Нажми на предмет, чтобы увидеть его прочность и восстановить.</p>")
+        if shown < len(mine):
+            text += f"<p><i>Показаны первые {shown}.</i></p>"
+    elif any(i["category"] == key for i in ITEMS.values()):
+        text += "<p><b>Пока пусто</b><br>Предметов нет. Создай что-нибудь в «Кузнице».</p>"
+    else:
         text += "<p><b>Пока пусто</b><br>Рецептов в этом разделе ещё нет. Скоро здесь появятся новые.</p>"
     return text
+
+
+def category_kb(user: dict, key: str) -> InlineKeyboardMarkup:
+    """Раздел: предметы игрока кнопками только со значком, по нажатию открывается карточка."""
+    btns = []
+    for idx, it in enumerate(items_of(user)):
+        item = ITEMS.get(it.get("key"))
+        if item and item["category"] == key and len(btns) < MAX_ITEM_BUTTONS:
+            btns.append(_ebtn(f"ws:it:{idx}", item["emoji"]))
+    return InlineKeyboardMarkup(inline_keyboard=_rows(btns) + [_back("ws:open")])
+
+
+def item_html(user: dict, idx: int, with_image: bool) -> str:
+    """Карточка предмета из инвентаря: прочность или остаток использований, цена восстановления."""
+    it, item = inv_item(user, idx)
+    mx = max_dur(item)
+    dur = min(_int(it.get("dur")), mx)
+    text = _img(with_image) + _head(item["name"].upper(), item["emoji"], item.get("desc") or "Предмет из инвентаря.")
+    ok, no, boost = D.custom_emoji(OK_EMOJI), D.custom_emoji(NO_EMOJI), D.custom_emoji(BOOST_EMOJI)
+    bonus_name, bonus_mult = item["bonus"]
+    bonus = f"+{(bonus_mult - 1) * 100:.0f}%"
+    gap = "⠀<br>"
+    if can_repair(item):
+        state = f"Прочность: {dur}/{mx} ({dur * 100 // mx}%)"
+    else:
+        state = f"Осталось использований: {dur}/{mx}"
+    text += (f"<p>{gap}<b>▸ Характеристики</b><br>"
+             f"<b>Редкость: {escape(item['rarity'])}</b><br>"
+             f"<b>{boost} {escape(bonus_name)}: {bonus}</b><br>"
+             f"<b>{escape(state)}</b>"
+             + (f"<br><b>{escape(item['note'])}</b>" if item.get("note") else "") + "</p>")
+    if not can_repair(item):
+        return text + f"<p>{gap}<i>Этот предмет нельзя восстановить.</i></p>"
+    if dur >= mx:
+        return text + f"<p>{gap}<i>Прочность полная, восстановление не нужно.</i></p>"
+    cost = repair_cost(item, dur)
+    miss_pct = (mx - dur) * 100 // mx
+    lines, lack = [], []
+    for k, n in cost.items():
+        name, em = RESOURCES[k]
+        got = have(user, k)
+        if got < n:
+            lack.append(f"{em} {escape(name)} ×{_n(n - got)}")
+        lines.append(f"{ok if got >= n else no} | {em} <b>{escape(name)}</b> — "
+                     f"<code>{_n(got)}</code> / <code>{_n(n)}</code>")
+    note = ("<i>Не хватает " + ", ".join(lack) + ".</i>") if lack else "<i>Всё готово. Нажми «Восстановить».</i>"
+    return text + (f"<p>{gap}<b>▸ Восстановление ({miss_pct}% ресурсов рецепта)</b><br>"
+                   + "<br>".join(lines) + f"<br>{note}</p>")
+
+
+def item_kb(user: dict, idx: int) -> InlineKeyboardMarkup:
+    it, item = inv_item(user, idx)
+    rows = []
+    if can_repair(item) and _int(it.get("dur")) < max_dur(item):
+        rows.append([_btn("Восстановить", f"ws:fix:{idx}", REPAIR_EMOJI, ButtonStyle.SUCCESS)])
+    rows.append(_back(f"ws:cat:{item['category']}"))
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def forge_html(user: dict, with_image: bool, note: str = "") -> str:
@@ -421,9 +549,8 @@ def forge_kb(user: dict) -> InlineKeyboardMarkup:
         st = slot_state(user, n)
         if st == "busy":
             job = job_at(user, n)
-            btns.append(InlineKeyboardButton(
-                text=f"{ITEMS[job['item']]['emoji']} • {percent(job, now)}%",
-                callback_data=f"ws:slot:{n}", style=ButtonStyle.PRIMARY))
+            btns.append(_btn(f"• {percent(job, now)}%", f"ws:slot:{n}",
+                             ITEMS[job['item']]['emoji'], ButtonStyle.PRIMARY))
         elif st == "free":
             btns.append(_btn("Свободно", f"ws:slot:{n}", SLOT_FREE_EMOJI, ButtonStyle.SUCCESS))
         elif st == "buy":
@@ -441,15 +568,14 @@ def slot_pick_html(user: dict, slot: int, with_image: bool) -> str:
 
 
 def slot_pick_kb(slot: int) -> InlineKeyboardMarkup:
-    rows = [[_btn(i["name"], f"ws:r:{slot}:{k}", i["emoji"], ButtonStyle.SUCCESS)] for k, i in ITEMS.items()]
-    rows.append(_back("ws:forge"))
-    return InlineKeyboardMarkup(inline_keyboard=rows)
+    btns = [_ebtn(f"ws:r:{slot}:{k}", i["emoji"], ButtonStyle.SUCCESS) for k, i in ITEMS.items()]
+    return InlineKeyboardMarkup(inline_keyboard=_rows(btns) + [_back("ws:forge")])
 
 
 def slot_busy_html(job: dict, slot: int, with_image: bool) -> str:
     item, now = ITEMS[job["item"]], time.time()
     text = _img(with_image) + _head(f"СЛОТ {slot}", SLOT_TITLE_EMOJI, "Здесь идёт создание предмета.")
-    return text + (f"<p><b>{item['emoji']} {escape(item['name'])}</b><br><br>"
+    return text + (f"<p><b>{_em(item['emoji'])} {escape(item['name'])}</b><br><br>"
                    f"Готово: <b>{percent(job, now)}%</b><br>"
                    f"Осталось: <b>{fmt_time(job['end'] - now)}</b></p>"
                    "<p>Готовый предмет сам попадёт в инвентарь, когда время выйдет.</p>")
@@ -560,8 +686,8 @@ async def on_category(callback: CallbackQuery):
     await callback.answer()
     if settle(user):
         D.save_users()
-    await D.show_rich_card(callback, "workshop", lambda wi: category_html(user, key, wi),
-                           InlineKeyboardMarkup(inline_keyboard=[_back("ws:open")]))
+    kb = InlineKeyboardMarkup(inline_keyboard=[_back("ws:open")]) if key == "res" else category_kb(user, key)
+    await D.show_rich_card(callback, "workshop", lambda wi: category_html(user, key, wi), kb)
 
 
 def _slot_arg(data: str, idx: int = 2) -> int | None:
@@ -668,3 +794,43 @@ async def on_make(callback: CallbackQuery):
     D.save_users()
     await callback.answer("Ковка запущена.")
     await _show_forge(callback, user)
+
+
+def _idx_arg(data: str) -> int | None:
+    try:
+        return int(data.split(":")[2])
+    except (ValueError, IndexError):
+        return None
+
+
+@router.callback_query(F.data.startswith("ws:it:"))
+async def on_item(callback: CallbackQuery):
+    user = await _user_or_alert(callback)
+    if user is None:
+        return
+    if settle(user):
+        D.save_users()
+    idx = _idx_arg(callback.data)
+    if idx is None or inv_item(user, idx) is None:
+        await callback.answer("Предмет не найден.", show_alert=True)
+        return
+    await callback.answer()
+    await D.show_rich_card(callback, "workshop", lambda wi: item_html(user, idx, wi), item_kb(user, idx))
+
+
+@router.callback_query(F.data.startswith("ws:fix:"))
+async def on_repair(callback: CallbackQuery):
+    user = await _user_or_alert(callback)
+    if user is None:
+        return
+    idx = _idx_arg(callback.data)
+    if idx is None:
+        await callback.answer()
+        return
+    err = repair_item(user, idx)
+    if err:
+        await callback.answer(err, show_alert=True)
+        return
+    D.save_users()
+    await callback.answer("Предмет восстановлен.")
+    await D.show_rich_card(callback, "workshop", lambda wi: item_html(user, idx, wi), item_kb(user, idx))
