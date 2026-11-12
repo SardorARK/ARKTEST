@@ -1,8 +1,8 @@
 """Раздел «Шахта»: активная добыча руды и минералов. 90 шахт (30 пород × 3 уровня).
 
 Модуль самостоятельный и не трогает данные «Банка» (mine.py): свои данные игрока
-user["ug"], свои кнопки (callback_data начинается с «ug:»). Раздел открывается кнопкой «Шахта»
-в нижнем (reply) меню: main.py вешает на неё underground.open_from_menu. Из mine.py берутся
+user["ug"], свои кнопки (callback_data начинается с «ug:»). Раздел открывается из «Заработать»
+(кнопка в нижнем меню), а также командой «шахта» (quick_cmds). Из mine.py берутся
 только функции оформления.
 
 Как это работает:
@@ -772,7 +772,7 @@ def _collect_btn(ug: dict, suffix: str = "") -> InlineKeyboardButton:
 
 def ug_kb(user_id: int) -> InlineKeyboardMarkup:
     """Ряды: 1) Шахты, Рюкзак; 2) Забрать; 3) Запустить (или Остановить) и Обновить; 4) Время запуска.
-    Кнопки «Назад» нет: раздел открывается из нижнего меню и сам является корнем."""
+    «Назад» ведёт в раздел «Заработать» (earn:open в main.py)."""
     _, ug = load(user_id)
     sel = selected(ug)
     if ug["run"] is None:       # если рано, бот скажет причину: отдых
@@ -785,6 +785,7 @@ def ug_kb(user_id: int) -> InlineKeyboardMarkup:
         [_collect_btn(ug)],
         [action, _btn("Обновить", "ug:refresh", ButtonStyle.PRIMARY, REFRESH_EMOJI_ID)],
         [_btn("Время запуска", "ug:time", ButtonStyle.PRIMARY, TIME_EMOJI[0])],
+        _back("earn:open"),            # назад в раздел «Заработать»
     ]
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
