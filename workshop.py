@@ -42,7 +42,7 @@ def setup(**deps) -> None:
 # Эмодзи: пустой id = обычный эмодзи; впиши id кастомного, когда он будет.
 BUTTON_EMOJI = ("", "🛠")        # кнопка «Мастерская» (нижнее меню)
 CRAFT_EMOJI = ("", "⚒️")         # кнопка «Кузница»
-SLOT_FREE_EMOJI = ("5906852613629941703", "🟢")   # свободный слот
+SLOT_FREE_EMOJI = ("5424972470023104089", "🔥")   # свободный слот
 SLOT_OPEN_EMOJI = ("6037496202990194718", "🔓")   # слот можно открыть
 SLOT_LOCK_EMOJI = ("5778570255555105942", "🔒")   # слот недоступен
 
@@ -316,7 +316,7 @@ def _craft_status(user: dict) -> str:
     if not jobs:
         return ""
     now = time.time()
-    lines = [f"<i>{ITEMS[j['item']]['emoji']} {escape(ITEMS[j['item']]['name'])} — {percent(j, now)}%</i>"
+    lines = [f"<i>{ITEMS[j['item']]['emoji']} {escape(ITEMS[j['item']]['name'])} — {percent(j, now)}% · {fmt_time(j['end'] - now)}</i>"
              for j in jobs]
     return "<p>" + "<br>".join(lines) + "</p>"
 
@@ -335,7 +335,7 @@ def root_html(user: dict, with_image: bool, done: list[str] | None = None) -> st
         "МАСТЕРСКАЯ", BUTTON_EMOJI,
         "Создавай инструменты, снаряжение и боезапас из добытых материалов. "
         "Выбери раздел или сразу переходи в кузницу.")
-    return text + _done_note(done) + _craft_status(user)
+    return text + _done_note(done)
 
 
 def root_kb() -> InlineKeyboardMarkup:
@@ -378,10 +378,6 @@ def forge_html(user: dict, with_image: bool, note: str = "") -> str:
         "КУЗНИЦА", CRAFT_EMOJI,
         f"{MAX_SLOTS} слота для создания предметов. Нажми на свободный слот, чтобы выбрать, что ковать.")
     text += note
-    opened = open_slots(user)
-    if opened < MAX_SLOTS:
-        text += (f"<p><b>Следующий слот</b><br><i>Слот {opened + 1}: открытие за "
-                 f"{_n(SLOT_PRICES[opened + 1])} монет.</i></p>")
     return text + _craft_status(user)
 
 
