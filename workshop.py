@@ -48,6 +48,7 @@ SLOT_LOCK_EMOJI = ("5778570255555105942", "🔒")   # слот недоступ�
 OK_EMOJI = ("5390846416530716134", "✅")      # ресурса хватает
 NO_EMOJI = ("5328093774650293878", "❌")      # ресурса не хватает
 TIME_EMOJI = ("5850317551090800862", "⏰")    # время ковки
+BOOST_EMOJI = ("5938437708635443119", "⏫")   # бонус к добыче
 
 # ключ -> (название, эмодзи)
 RESOURCES = {
@@ -455,6 +456,7 @@ def recipe_html(user: dict, key: str, slot: int, with_image: bool) -> str:
     text = _img(with_image) + _head(item["name"].upper(), item["emoji"], desc)
     bonus = f"+{(item['mult'] - 1) * 100:.0f}%"
     ok, no, clock = D.custom_emoji(OK_EMOJI), D.custom_emoji(NO_EMOJI), D.custom_emoji(TIME_EMOJI)
+    boost = D.custom_emoji(BOOST_EMOJI)
     lines, lack = [], []
     for k, n in item["cost"].items():
         name, em = RESOURCES[k]
@@ -466,12 +468,12 @@ def recipe_html(user: dict, key: str, slot: int, with_image: bool) -> str:
     gap = "⠀<br>"   # невидимый символ: пустая строка видна и на ПК (как в _craft_status)
     text += (f"<p>{gap}<b>▸ Характеристики</b><br>"
              f"<b>Редкость: {escape(item['rarity'])} · {clock} {fmt_time(item['seconds'])}</b><br>"
-             f"<b>Добыча: {bonus}</b></p>"
+             f"<b>{boost} Добыча: {bonus}</b></p>"
              f"<p>{gap}<b>▸ Нужно</b><br>" + "<br>".join(lines) + "</p>")
     if lack:
-        text += f"<p>{gap}▸ <i>Не хватает " + ", ".join(lack) + ".</i></p>"
+        text += f"<p>{gap}<i>Не хватает " + ", ".join(lack) + ".</i></p>"
     else:
-        text += f"<p>{gap}▸ <i>Всё готово. Нажми «Создать», чтобы начать.</i></p>"
+        text += f"<p>{gap}<i>Всё готово. Нажми «Создать», чтобы начать.</i></p>"
     return text
 
 
