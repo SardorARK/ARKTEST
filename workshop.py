@@ -49,6 +49,8 @@ OK_EMOJI = ("5390846416530716134", "✅")      # ресурса хватает
 NO_EMOJI = ("5328093774650293878", "❌")      # ресурса не хватает
 TIME_EMOJI = ("5850317551090800862", "⏰")    # время ковки
 BOOST_EMOJI = ("5938437708635443119", "⏫")   # бонус к добыче
+MAKE_EMOJI = ("6048599681292832729", "⚒️")   # кнопка «Создать»
+SLOT_TITLE_EMOJI = ("5350434966163443737", "🔥")   # заголовок «СЛОТ N» внутри слота
 
 # ключ -> (название, эмодзи)
 RESOURCES = {
@@ -408,10 +410,8 @@ def forge_kb(user: dict) -> InlineKeyboardMarkup:
 
 
 def slot_pick_html(user: dict, slot: int, with_image: bool) -> str:
-    text = _img(with_image) + _head(
-        f"СЛОТ {slot}", CRAFT_EMOJI, "Выбери предмет, чтобы посмотреть рецепт и начать ковку.")
-    return text + "<p><b>Что можно создать</b><br><br>" + "<br><br>".join(
-        _recipe_line(i) for i in ITEMS.values()) + "</p>"
+    return _img(with_image) + _head(
+        f"СЛОТ {slot}", SLOT_TITLE_EMOJI, "Выбери предмет, чтобы посмотреть рецепт и начать ковку.")
 
 
 def slot_pick_kb(slot: int) -> InlineKeyboardMarkup:
@@ -422,7 +422,7 @@ def slot_pick_kb(slot: int) -> InlineKeyboardMarkup:
 
 def slot_busy_html(job: dict, slot: int, with_image: bool) -> str:
     item, now = ITEMS[job["item"]], time.time()
-    text = _img(with_image) + _head(f"СЛОТ {slot}", CRAFT_EMOJI, "Здесь идёт создание предмета.")
+    text = _img(with_image) + _head(f"СЛОТ {slot}", SLOT_TITLE_EMOJI, "Здесь идёт создание предмета.")
     return text + (f"<p><b>{item['emoji']} {escape(item['name'])}</b><br><br>"
                    f"Готово: <b>{percent(job, now)}%</b><br>"
                    f"Осталось: <b>{fmt_time(job['end'] - now)}</b></p>"
@@ -479,7 +479,7 @@ def recipe_html(user: dict, key: str, slot: int, with_image: bool) -> str:
 
 def recipe_kb(key: str, slot: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
-        [_btn("Создать", f"ws:make:{slot}:{key}", CRAFT_EMOJI[1], ButtonStyle.SUCCESS)],
+        [_btn("Создать", f"ws:make:{slot}:{key}", MAKE_EMOJI, ButtonStyle.SUCCESS)],
         _back(f"ws:slot:{slot}"),
     ])
 
