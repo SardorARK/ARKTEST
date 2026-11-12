@@ -1,5 +1,6 @@
 import asyncio
 import copy
+from types import SimpleNamespace
 import logging
 import math
 import os
@@ -1426,7 +1427,7 @@ async def show_rich_card(
             _remember(msg, "rich", image)
             return edited if not isinstance(edited, bool) else msg
         except TelegramBadRequest as e:
-            if "not modified" in str(e):
+            if "modified" in str(e).lower():
                 return msg
             logging.warning("Не удалось обновить сообщение на месте, шлю новое: %s", e)
     try:
@@ -1444,22 +1445,30 @@ async def refresh_rich_card(
     pet_key: str,
     build_html,
     reply_markup: InlineKeyboardMarkup | None = None,
+    require_state: bool = True,
 ) -> bool:
-    """Обновляет rich-сообщение ТОЛЬКО правкой на месте и никогда не шлёт новое.
+    """Обновляет rich-сообщение ТОЛЬКО правкой на месте и никогда не шлёт и не удаляет сообщения.
     True: обновлено (или без изменений). False: так обновить нельзя (сообщение удалено, другое
-    фото, лимиты Telegram), вызывающий должен остановить само-обновление."""
+    фото, лимиты Telegram), вызывающий сам решает, что делать (остановиться или показать заново).
+    require_state=False: правим, даже если бот не помнит это сообщение (после перезапуска и т.п.),
+    для нажатия кнопки «Обновить»."""
     cur = _MSG_STATE.get((chat_id, message_id))
-    if cur is None or cur[0] != "rich" or cur[1] != pet_images.get(pet_key):
+    if require_state:
+        if cur is None or cur[0] != "rich" or cur[1] != pet_images.get(pet_key):
+            return False
+    elif chat_id < 0 and RESEND_IN_GROUPS:       # в группах экраны всегда шлются заново
         return False
     try:
-        rich, _ = _rich_input(pet_key, build_html)
+        rich, image = _rich_input(pet_key, build_html)
         await bot.edit_message_text(
             chat_id=chat_id, message_id=message_id, rich_message=rich, reply_markup=reply_markup
         )
     except TelegramBadRequest as e:
-        return "not modified" in str(e)
+        return "modified" in str(e).lower()
     except TelegramAPIError:
         return False
+    if cur is None:                              # запоминаем, чтобы дальше всё работало как обычно
+        _remember(SimpleNamespace(chat=SimpleNamespace(id=chat_id), message_id=message_id), "rich", image)
     return True
 
 
@@ -2770,6 +2779,7 @@ async def main():
     load_owners(OWNERS_FILE)
     owners_task = asyncio.create_task(owners_saver(OWNERS_FILE))
     maintenance = asyncio.create_task(store.run_maintenance())   # пачечная запись, бэкапы, выгрузка из памяти
+    underground_task = asyncio.create_task(underground.background_loop())   # «Добыто» растёт раз в 5 секунд
     notifier = asyncio.create_task(settings.notifier_loop(bot))  # «отряд вернулся из экспедиции»
     xrocket_task = asyncio.create_task(donate.xrocket_loop(bot))   # оплата xRocket Pay: проверка счетов
     cryptobot_task = asyncio.create_task(donate.cryptobot_loop(bot))   # оплата CryptoBot: проверка счетов
@@ -2779,6 +2789,7 @@ async def main():
         await dp.start_polling(bot)
     finally:
         maintenance.cancel()
+        underground_task.cancel()
         notifier.cancel()
         bonus_task.cancel()
         xrocket_task.cancel()
