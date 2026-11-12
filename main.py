@@ -1074,9 +1074,9 @@ def player_level_html(user_id: int, with_image: bool = False) -> str:
         (f"{MINERAL_EMOJI} Минералы", player_minerals(user), need_min),
         (f"{custom_emoji(COIN_EMOJI)} Монеты", user["coins"], need_coins),
     )
-    rows = GAP.join(
-        f"<p>{custom_emoji(DONE_EMOJI) if have >= need else custom_emoji(LACK_EMOJI)} | "
-        f"<b>{label}:</b> {_fmt(have)} / {_fmt(need)}<br>{_simple_bar(have, need)}</p>"
+    rows = "<br>&nbsp;<br>".join(
+        f"{custom_emoji(DONE_EMOJI) if have >= need else custom_emoji(LACK_EMOJI)} | "
+        f"<b>{label}:</b> {_fmt(have)} / {_fmt(need)}<br>{_simple_bar(have, need)}"
         for label, have, need in needs
     )
     lack = player_lack(user)
@@ -1090,11 +1090,9 @@ def player_level_html(user_id: int, with_image: bool = False) -> str:
         head
         + "<blockquote><i>Качай уровень игрока: собирай минералы в шахтах, "
         "копи монеты и поднимайся к 500-му уровню.</i></blockquote>"
-        f"{GAP}"
-        f"{rows}"
-        f"{GAP}"
-        f"<p>{status}</p>"
-        f"{GAP}"
+        # всё одним абзацем и без пустой строки в конце: телефон добавляет отступ между
+        # абзацами и показывает конечную пустую строку, компьютер нет, поэтому лишнего нет
+        f"<p>{rows}<br>{status}</p>"
         "<tg-button-row>"
         '<tg-button type="callback_data" data="plv:do" '
         f'style="{"danger" if lack else "success"}">'
