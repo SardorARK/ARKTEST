@@ -105,8 +105,19 @@ HOURS_PER_STEP = 12                    # сколько часов добычи 
 STEP_HOURS = (0.4, 0.5, 0.7, 0.8, 2.5, 3.5, 5.0, 6.5)
 
 
+# Поздняя игра: шахты, которые открываются с LATE_FROM уровня игрока и выше, требуют всё больше
+# времени на шаг (до 12 * (1 + LATE_EXTRA) часов к 500 уровню). До LATE_FROM ничего не меняется.
+LATE_FROM = 225
+LATE_EXTRA = 8.0
+MAX_PLAYER_LEVEL = 500
+
+
 def step_hours(n: int) -> float:
-    return STEP_HOURS[n - 1] if n <= len(STEP_HOURS) else HOURS_PER_STEP
+    if n <= len(STEP_HOURS):
+        return STEP_HOURS[n - 1]
+    need = _need_level(n)
+    late = max(0.0, min(1.0, (need - LATE_FROM) / (MAX_PLAYER_LEVEL - LATE_FROM)))
+    return HOURS_PER_STEP * (1 + LATE_EXTRA * late)
 
 # Формула цены уровня игрока в main.py: round(25 * L ** 1.35) минералов.
 # Если поменяешь её там, поменяй здесь, иначе минералы шахт разойдутся с уровнями.
