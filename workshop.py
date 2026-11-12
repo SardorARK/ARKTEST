@@ -487,6 +487,17 @@ def category_kb(user: dict, key: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=_rows(btns) + [_back("ws:open")])
 
 
+def _bar(cur: int, mx: int, width: int = 12) -> str:
+    """Шкала ▰▰▰▱▱: не пустая, пока что-то осталось, и не полная, пока не максимум."""
+    if mx <= 0:
+        return "▱" * width
+    filled = round(cur / mx * width)
+    if 0 < cur < mx:
+        filled = max(1, min(width - 1, filled))
+    filled = max(0, min(width, filled if cur < mx else width))
+    return "▰" * filled + "▱" * (width - filled)
+
+
 def item_html(user: dict, idx: int, with_image: bool) -> str:
     """Карточка предмета из инвентаря: прочность или остаток использований, цена восстановления."""
     it, item = inv_item(user, idx)
@@ -503,9 +514,10 @@ def item_html(user: dict, idx: int, with_image: bool) -> str:
         state = f"Осталось использований: {dur}/{mx}"
     text += (f"<p>{gap}<b>▸ Характеристики</b><br>"
              f"<b>Редкость: {escape(item['rarity'])}</b><br>"
-             f"<b>{boost} {escape(bonus_name)}: {bonus}</b><br>"
-             f"<b>{escape(state)}</b>"
-             + (f"<br><b>{escape(item['note'])}</b>" if item.get("note") else "") + "</p>")
+             f"<b>{boost} {escape(bonus_name)}: {bonus}</b>"
+             + (f"<br><b>{escape(item['note'])}</b>" if item.get("note") else "") + "</p>"
+             f"<p>{gap}<b>▸ Состояние</b><br>"
+             f"<b>{escape(state)}</b><br>{_bar(dur, mx)}</p>")
     if not can_repair(item):
         return text + f"<p>{gap}<i>Этот предмет нельзя восстановить.</i></p>"
     if dur >= mx:
@@ -521,7 +533,7 @@ def item_html(user: dict, idx: int, with_image: bool) -> str:
         lines.append(f"{ok if got >= n else no} | {em} <b>{escape(name)}</b> — "
                      f"<code>{_n(got)}</code> / <code>{_n(n)}</code>")
     note = ("<i>Не хватает " + ", ".join(lack) + ".</i>") if lack else "<i>Всё готово. Нажми «Восстановить».</i>"
-    return text + (f"<p>{gap}<b>▸ Восстановление ({miss_pct}% ресурсов рецепта)</b><br>"
+    return text + (f"<p>{gap}<b>▸ Восстановление ({miss_pct}% рецепта)</b><br>"
                    + "<br>".join(lines) + f"<br>{note}</p>")
 
 
