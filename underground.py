@@ -53,7 +53,8 @@ def setup(**deps) -> None:
 
 COOLDOWN_MIN = 10        # пауза после окончания запуска до следующего
 TICK_SEC = 5             # раз в сколько секунд добыча попадает в «Добыто»
-AUTO_REFRESH_MIN = 10    # сколько минут открытый экран шахты сам обновляется (0 = не обновлять сам)
+AUTO_REFRESH_SEC = 30    # раз в сколько секунд открытый экран шахты обновляется сам
+AUTO_REFRESH_MIN = 120   # предохранитель: сколько минут максимум (0 = совсем не обновлять сам)
 MINERAL_CHANCE = 35      # шанс (%), что добыча окажется минералом; всё остальное руда
 
 # Руда: цена за штуку и вес (шанс при выборе руды, всего 100). Порядок = порядок в рюкзаке.
@@ -871,15 +872,16 @@ async def _require_user(callback: CallbackQuery) -> dict | None:
 
 
 # ---------- Само-обновление экрана шахты ----------
-# Пока игрок смотрит главный экран шахты, карточка сама обновляется раз в TICK_SEC секунд,
-# чтобы «Добыто» росло на глазах. Любое нажатие любой кнопки этим игроком (в том числе в других
-# разделах) останавливает обновление: для этого в main.py подключён LiveStopMiddleware.
+# Пока игрок смотрит главный экран шахты, карточка сама обновляется раз в AUTO_REFRESH_SEC секунд.
+# Любое нажатие кнопки или сообщение этого игрока (он ушёл в другой раздел) сразу останавливает
+# обновление, чтобы не мешать ему: для этого в main.py подключён LiveStopMiddleware.
+# Если сообщение удалено или его нельзя поправить, обновление тоже прекращается.
 _live: dict[int, int] = {}          # user_id -> номер текущего обновления
 _live_tasks: set = set()
 
 
 class LiveStopMiddleware(BaseMiddleware):
-    """Подключается в main.py: останавливает само-обновление при любом нажатии кнопки."""
+    """Подключается в main.py (на кнопки и на сообщения): останавливает само-обновление."""
 
     async def __call__(self, handler, event, data):
         uid = getattr(getattr(event, "from_user", None), "id", None)
@@ -888,32 +890,31 @@ class LiveStopMiddleware(BaseMiddleware):
         return await handler(event, data)
 
 
-async def _live_loop(callback: CallbackQuery, uid: int, token: int) -> None:
+async def _live_loop(bot, chat_id: int, message_id: int, uid: int, token: int) -> None:
+    """Правит ОДНО и то же сообщение. Новых сообщений не шлёт никогда: при любой неудаче
+    (сообщение удалено, другое фото, лимиты Telegram) обновление просто прекращается."""
     deadline = time.time() + AUTO_REFRESH_MIN * 60
-    fails = 0
     while _live.get(uid) == token and time.time() < deadline:
-        await asyncio.sleep(TICK_SEC)
+        await asyncio.sleep(AUTO_REFRESH_SEC)
         if _live.get(uid) != token:
             return
+        html, kb = SCREENS["ug"]
         try:
-            html, kb = SCREENS["ug"]
-            await D.show_rich_card(callback, img_key("ug"), lambda wi: html(uid, wi), kb(uid))
-            fails = 0
-        except Exception:                       # сообщение удалено, не изменилось, лимиты Telegram
-            fails += 1
-            if fails >= 5:
-                return
-            continue
+            ok = await D.refresh_rich_card(bot, chat_id, message_id, img_key("ug"),
+                                           lambda wi: html(uid, wi), kb(uid))
+        except Exception:
+            return
+        if not ok:
+            return
         user = D.get_user(uid)
         if user is None or get_ug(user)["run"] is None:
             return                              # запуск закончился: последнее обновление уже показано
 
 
-def _start_live(callback: CallbackQuery) -> None:
-    uid = callback.from_user.id
+def _start_live(bot, chat_id: int, message_id: int, uid: int) -> None:
     token = _live.get(uid, 0) + 1
     _live[uid] = token
-    task = asyncio.create_task(_live_loop(callback, uid, token))
+    task = asyncio.create_task(_live_loop(bot, chat_id, message_id, uid, token))
     _live_tasks.add(task)
     task.add_done_callback(_live_tasks.discard)
 
@@ -922,11 +923,11 @@ async def _show(callback: CallbackQuery, key: str) -> None:
     uid = callback.from_user.id
     html, kb = SCREENS[key]
     _live.pop(uid, None)                        # старое само-обновление больше не нужно
-    await D.show_rich_card(callback, img_key(key), lambda wi: html(uid, wi), kb(uid))
-    if key == "ug" and AUTO_REFRESH_MIN > 0:
+    msg = await D.show_rich_card(callback, img_key(key), lambda wi: html(uid, wi), kb(uid))
+    if key == "ug" and AUTO_REFRESH_MIN > 0 and hasattr(msg, "message_id"):
         user = D.get_user(uid)
         if user is not None and get_ug(user)["run"] is not None:
-            _start_live(callback)
+            _start_live(callback.bot, msg.chat.id, msg.message_id, uid)
 
 
 def _num(callback: CallbackQuery, pos: int, limit: int) -> int | None:
