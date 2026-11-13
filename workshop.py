@@ -439,7 +439,7 @@ def _em(emoji: "str | tuple[str, str]") -> str:
 def _legend(*pairs) -> str:
     """Подсказка к кнопкам-значкам: «эмодзи - Действие»."""
     lines = [f"{_em(e)} - {escape(t)}" for e, t in pairs]
-    return "<p>⠀<br><b>▸ Кнопки</b><br>" + "<br>".join(lines) + "</p>"
+    return "<p>⠀</p><blockquote expandable><b>Кнопки</b><br>" + "<br>".join(lines) + "</blockquote>"
 
 
 def _head(title: str, emoji: tuple[str, str] | str, quote: str) -> str:
@@ -550,15 +550,17 @@ def category_kb(user: dict, key: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=_rows(btns) + [_back("ws:open")])
 
 
-def _bar(cur: int, mx: int, width: int = 12) -> str:
-    """Шкала ▰▰▰▱▱: не пустая, пока что-то осталось, и не полная, пока не максимум."""
+def _bar(cur: int, mx: int, width: int = 10) -> str:
+    """Цветная шкала из квадратов: 🟩 больше 60%, 🟨 30-60%, 🟥 меньше 30%, ⬜ пусто."""
     if mx <= 0:
-        return "▱" * width
-    filled = round(cur / mx * width)
+        return "⬜" * width
+    share = max(0, min(cur, mx)) / mx
+    filled = round(share * width)
     if 0 < cur < mx:
         filled = max(1, min(width - 1, filled))
-    filled = max(0, min(width, filled if cur < mx else width))
-    return "▰" * filled + "▱" * (width - filled)
+    filled = width if cur >= mx else filled
+    color = "🟩" if share >= 0.6 else "🟨" if share >= 0.3 else "🟥"
+    return color * filled + "⬜" * (width - filled)
 
 
 def _cost_lines(user: dict, cost: dict) -> tuple[list[str], list[str]]:
@@ -601,27 +603,40 @@ def item_html(user: dict, idx: int, with_image: bool) -> str:
              f"<b>{escape(state)}</b><br>{_bar(dur, mx)}</p>")
     legend = []
     if can_upgrade(item):
-        if lvl >= MAX_LEVEL:
-            text += f"<p>{gap}<b>▸ Улучшение</b><br><i>Максимальный уровень {MAX_LEVEL}/{MAX_LEVEL}.</i></p>"
-        else:
-            lines, lack = _cost_lines(user, upgrade_cost(item, lvl + 1))
-            note = ("<i>Не хватает " + ", ".join(lack) + ".</i>") if lack else "<i>Всё готово, можно улучшать.</i>"
-            text += (f"<p>{gap}<b>▸ Улучшение до {lvl + 1} уровня</b><br>"
-                     + "<br>".join(lines) + f"<br>{note}</p>")
         legend.append((UPGRADE_EMOJI, "Улучшить"))
     if can_repair(item):
-        if dur >= mx:
-            text += f"<p>{gap}<b>▸ Восстановление</b><br><i>Прочность на 100%.</i></p>"
-        else:
+        legend.append((REPAIR_EMOJI, "Восстановить"))
+        if dur < mx:
             miss_pct = (mx - dur) * 100 // mx
             lines, lack = _cost_lines(user, repair_cost(item, dur))
             note = ("<i>Не хватает " + ", ".join(lack) + ".</i>") if lack else "<i>Всё готово, можно восстанавливать.</i>"
             text += (f"<p>{gap}<b>▸ Восстановление ({miss_pct}% рецепта)</b><br>"
                      + "<br>".join(lines) + f"<br>{note}</p>")
-        legend.append((REPAIR_EMOJI, "Восстановить"))
     else:
         text += f"<p>{gap}<i>Этот предмет нельзя восстановить.</i></p>"
     return text + (_legend(*legend) if legend else "")
+
+
+def upgrade_html(user: dict, idx: int, with_image: bool) -> str:
+    """Экран улучшения: требования к ресурсам показываются только здесь."""
+    it, item = inv_item(user, idx)
+    lvl = level_of(it)
+    boost = D.custom_emoji(BOOST_EMOJI)
+    text = _img(with_image) + _head(item["name"].upper(), item["emoji"], "Улучшение предмета.")
+    lines, lack = _cost_lines(user, upgrade_cost(item, lvl + 1))
+    note = ("<i>Не хватает " + ", ".join(lack) + ".</i>") if lack else "<i>Всё готово, можно улучшать.</i>"
+    gap = "⠀<br>"
+    text += (f"<p>{gap}<b>▸ Уровень</b><br><b>{lvl}/{MAX_LEVEL} → {lvl + 1}/{MAX_LEVEL}</b><br>"
+             f"<b>{boost} {escape(item['bonus'][0])}: {_pct(bonus_pct(item, lvl))} → {_pct(bonus_pct(item, lvl + 1))}</b></p>"
+             f"<p>{gap}<b>▸ Нужно</b><br>" + "<br>".join(lines) + f"<br>{note}</p>")
+    return text + _legend((UPGRADE_EMOJI, "Улучшить"))
+
+
+def upgrade_kb(idx: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [_ebtn(f"ws:ugo:{idx}", UPGRADE_EMOJI, ButtonStyle.SUCCESS)],
+        _back(f"ws:it:{idx}"),
+    ])
 
 
 def item_kb(user: dict, idx: int) -> InlineKeyboardMarkup:
@@ -943,6 +958,29 @@ async def on_repair(callback: CallbackQuery):
 
 @router.callback_query(F.data.startswith("ws:up:"))
 async def on_upgrade(callback: CallbackQuery):
+    """Кнопка «Улучшить» на карточке: открывает экран с требованиями."""
+    user = await _user_or_alert(callback)
+    if user is None:
+        return
+    idx = _idx_arg(callback.data)
+    found = inv_item(user, idx) if idx is not None else None
+    if found is None:
+        await callback.answer("Предмет не найден.", show_alert=True)
+        return
+    it, item = found
+    if not can_upgrade(item):
+        await callback.answer("Этот предмет нельзя улучшить.", show_alert=True)
+        return
+    if level_of(it) >= MAX_LEVEL:
+        await callback.answer("Максимальный уровень уже достигнут.", show_alert=True)
+        return
+    await callback.answer()
+    await D.show_rich_card(callback, "workshop", lambda wi: upgrade_html(user, idx, wi), upgrade_kb(idx))
+
+
+@router.callback_query(F.data.startswith("ws:ugo:"))
+async def on_upgrade_do(callback: CallbackQuery):
+    """Подтверждение улучшения: списывает ресурсы и повышает уровень."""
     user = await _user_or_alert(callback)
     if user is None:
         return
