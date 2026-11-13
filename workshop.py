@@ -55,7 +55,8 @@ MAKE_EMOJI = ("6048599681292832729", "⚒️")   # кнопка «Создать
 REPAIR_EMOJI = ("", "🔧")                      # кнопка «Восстановить» (впиши id кастомного)
 UPGRADE_EMOJI = ("", "✨")                     # кнопка «Улучшить» (впиши id кастомного)
 REFRESH_EMOJI = ("", "🔄")                     # кнопка «Обновить»
-MERGE_EMOJI = ("", "🔗")                       # кнопка «Слияние»
+MERGE_EMOJI = ("", "🧬")                       # кнопка «Слияние»
+USE_EMOJI = ("", "⚡")                         # кнопка «Использовать» (пока заглушка)
 SLOT_TITLE_EMOJI = ("5350434966163443737", "🔥")   # заголовок «СЛОТ N» внутри слота
 
 # ключ -> (название, эмодзи)
@@ -687,7 +688,7 @@ def _stats_box(item: dict, lvl: int, fuse: int = 0) -> str:
     boost = D.custom_emoji(BOOST_EMOJI)
     lines = []
     if can_upgrade(item):
-        lines.append(f"<b>⭐ Уровень:</b> <code>{lvl} / {MAX_LEVEL}</code>")
+        lines.append(f"<b>✨ Уровень:</b> <code>{lvl} / {MAX_LEVEL}</code>")
     bonus = f"<b>{boost} {escape(item['bonus'][0])}:</b> <code>{_pct(bonus_pct(item, lvl, fuse))}</code>"
     if can_upgrade(item) and lvl < MAX_LEVEL:
         bonus += f" → <code>{_pct(bonus_pct(item, lvl + 1, fuse))}</code>"
@@ -699,7 +700,7 @@ def _stats_box(item: dict, lvl: int, fuse: int = 0) -> str:
             dur_line += f" → <code>{max_dur(item, lvl + 1)}</code>"
         lines.append(dur_line)
     if fuse:
-        lines.append(f"<b>🔗 Слияний:</b> <code>{fuse}</code> (+{fuse * MERGE_BONUS * 100:g}% к бонусу)")
+        lines.append(f"<b>🧬 Слияний:</b> <code>{fuse}</code> (+{fuse * MERGE_BONUS * 100:g}% к бонусу)")
     if item.get("note"):
         lines.append(f"<b>📌 {escape(item['note'])}</b>")
     return "<p>⠀<br>" + "<br>".join(lines) + "</p>"
@@ -721,7 +722,7 @@ def item_html(user: dict, idx: int, with_image: bool) -> str:
     else:
         text += f"<p>{gap}<b>❤️ Осталось использований:</b> <code>{dur} / {mx}</code><br>{_bar(dur, mx)}</p>"
 
-    legend = []
+    legend = [(USE_EMOJI, "Использовать")]
     if can_upgrade(item):
         legend += [(UPGRADE_EMOJI, "Улучшить"), (MERGE_EMOJI, "Слияние")]
     if can_repair(item):
@@ -794,7 +795,7 @@ def upgrade_kb(idx: int) -> InlineKeyboardMarkup:
 def item_kb(user: dict, idx: int) -> InlineKeyboardMarkup:
     """Кнопки-значки показываются всегда; если действие недоступно, ответ придёт при нажатии."""
     it, item = inv_item(user, idx)
-    acts = []
+    acts = [_ebtn(f"ws:use:{idx}", USE_EMOJI, ButtonStyle.PRIMARY)]
     if can_upgrade(item):
         acts.append(_ebtn(f"ws:up:{idx}", UPGRADE_EMOJI, ButtonStyle.SUCCESS))
         acts.append(_ebtn(f"ws:mg:{idx}", MERGE_EMOJI, ButtonStyle.PRIMARY))
@@ -1181,6 +1182,19 @@ async def on_upgrade_do(callback: CallbackQuery):
     D.save_users()
     await callback.answer(f"Уровень повышен: {level_of(inv_item(user, idx)[0])}/{MAX_LEVEL}.")
     await D.show_rich_card(callback, "workshop", lambda wi: item_html(user, idx, wi), item_kb(user, idx))
+
+
+@router.callback_query(F.data.startswith("ws:use:"))
+async def on_use(callback: CallbackQuery):
+    """Кнопка «Использовать»: пока заглушка."""
+    user = await _user_or_alert(callback)
+    if user is None:
+        return
+    idx = _idx_arg(callback.data)
+    if idx is None or inv_item(user, idx) is None:
+        await callback.answer("Предмет не найден.", show_alert=True)
+        return
+    await callback.answer("🚧 Использование предметов скоро появится.", show_alert=True)
 
 
 @router.callback_query(F.data.startswith("ws:mg:"))
