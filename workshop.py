@@ -16,6 +16,8 @@
 Модуль подключается так (main.py): workshop.setup(...); dp.include_router(workshop.router).
 """
 import logging
+import math
+import random
 import time
 from html import escape
 from types import SimpleNamespace
@@ -51,8 +53,9 @@ TIME_EMOJI = ("5850317551090800862", "⏰")    # время ковки
 BOOST_EMOJI = ("5938437708635443119", "⏫")   # бонус к добыче
 MAKE_EMOJI = ("6048599681292832729", "⚒️")   # кнопка «Создать»
 REPAIR_EMOJI = ("", "🔧")                      # кнопка «Восстановить» (впиши id кастомного)
-UPGRADE_EMOJI = ("", "⬆️")                     # кнопка «Улучшить» (впиши id кастомного)
+UPGRADE_EMOJI = ("", "✨")                     # кнопка «Улучшить» (впиши id кастомного)
 REFRESH_EMOJI = ("", "🔄")                     # кнопка «Обновить»
+MERGE_EMOJI = ("", "🔗")                       # кнопка «Слияние»
 SLOT_TITLE_EMOJI = ("5350434966163443737", "🔥")   # заголовок «СЛОТ N» внутри слота
 
 # ключ -> (название, эмодзи)
@@ -105,7 +108,11 @@ ITEMS = {
         "seconds": 5 * 60,
         "durability": 100,
         "upgradable": True,
-        "upgrade_extra": [("iron", 6), ("bone", 6)],   # 4-й и 5-й ресурс улучшения (база, растёт с уровнем)
+        "max_bonus": 150,    # бонус добычи на 10 уровне: +150%
+        # Цена улучшения: (ресурс, уровень-образец, сколько на нём, сколько на 10 уровне, с какого уровня нужен).
+        # Между образцом и 10 уровнем цена растёт плавно. 2 ур.: 8 дерева, 6 перьев, 4 лозы; 10 ур.: 100 / 85 / 80.
+        "upgrade": [("wood", 2, 8, 100, 1), ("feather", 2, 6, 85, 1), ("vine", 2, 4, 80, 1),
+                    ("iron", 4, 12, 70, 4), ("bone", 6, 10, 60, 6)],   # 4-й ресурс с 4 ур., 5-й с 6 ур.
         "bonus": ("Добыча", 1.05),
     },
     "rope": {
@@ -118,7 +125,8 @@ ITEMS = {
         "seconds": 5 * 60,
         "durability": 100,
         "upgradable": True,
-        "upgrade_extra": [("fiber", 8), ("leather", 5)],
+        "upgrade": [("thread", 2, 14, 120, 1), ("vine", 2, 5, 70, 1), ("clay", 2, 4, 60, 1),
+                    ("fiber", 4, 12, 70, 4), ("leather", 6, 8, 50, 6)],
         "bonus": ("Шанс найти золото", 1.15),   # было 1%, станет 1.15%
     },
     "medkit": {
@@ -149,15 +157,17 @@ ITEMS = {
 }
 
 # Уровни предметов (только где стоит "upgradable": True - кирка и верёвка)
-# Во сколько раз каждое улучшение увеличивает бонус предмета (перемножаются: 1 ур. = x1.5, 2 ур. = x1.5*1.5 ...).
-# Первые уровни дают больше, последние меньше (диапазон 1.3-1.5). Итого на 10 уровне бонус x25.6 от стартового.
-LEVEL_MULTS = (1.5, 1.5, 1.45, 1.4, 1.4, 1.35, 1.35, 1.3, 1.3, 1.3)
+# Во сколько раз каждое улучшение увеличивает бонус (диапазон 1.3-1.5, перемножаются). Первые уровни дают больше.
+# Если у предмета задан "max_bonus" (бонус на 10 уровне, %), кривая подгоняется так, чтобы на 10 уровне было ровно столько.
+LEVEL_MULTS = (1.45, 1.45, 1.45, 1.4, 1.4, 1.4, 1.4, 1.35, 1.35, 1.35)
 MAX_LEVEL = len(LEVEL_MULTS)   # максимальный уровень (10)
-# Цена улучшения: ресурсы рецепта x (START * GROWTH^(уровень-1)); 1 ур. = 0.5 рецепта, 10 ур. = ~2.6 рецепта.
-UPGRADE_COST_START = 0.5
-UPGRADE_COST_GROWTH = 1.2
-# Сколько разных ресурсов нужно: уровни 1-3 - 3, уровни 4-5 - 4, уровни 6-10 - 5.
-UPGRADE_KINDS = (3, 3, 3, 4, 4, 5, 5, 5, 5, 5)
+_LOGS = [0.0]
+for _m in LEVEL_MULTS:
+    _LOGS.append(_LOGS[-1] + math.log(_m))   # накопленный рост бонуса по уровням
+
+# Слияние двух одинаковых предметов (одинаковый ключ, уровень и число слияний)
+MERGE_CHANCE = 0.25     # шанс успеха; при провале оба предмета пропадают
+MERGE_BONUS = 1.0       # успех: +100% к бонусу за каждое слияние
 
 MAX_SLOTS = 4          # слотов в кузнице; сначала открыт только первый
 # Цена открытия слота (монеты). Слоты открываются строго по порядку: 2, потом 3, потом 4.
@@ -236,18 +246,20 @@ def level_of(it: dict) -> int:
     return min(MAX_LEVEL, _int(it.get("lvl")))
 
 
-def level_mult(to_level: int) -> float:
-    """Во сколько раз улучшение до уровня to_level (1..10) увеличивает бонус."""
-    return LEVEL_MULTS[to_level - 1]
+def fuse_of(it: dict) -> int:
+    return _int(it.get("fuse"))
 
 
-def bonus_pct(item: dict, lvl: int = 0) -> float:
-    """Бонус предмета в процентах на уровне lvl: 0 уровень - стартовый, каждый уровень умножает его."""
+def bonus_pct(item: dict, lvl: int = 0, fuse: int = 0) -> float:
+    """Бонус предмета в % на уровне lvl: уровни умножают стартовый бонус, каждое слияние добавляет +100%."""
     val = (item["bonus"][1] - 1) * 100
     if can_upgrade(item):
-        for n in LEVEL_MULTS[:lvl]:
-            val *= n
-    return round(val, 1)
+        top = item.get("max_bonus")
+        if top and val > 0:
+            val *= (top / val) ** (_LOGS[lvl] / _LOGS[MAX_LEVEL])
+        else:
+            val *= math.exp(_LOGS[lvl])
+    return round(val * (1 + MERGE_BONUS * fuse), 1)
 
 
 def _pct(v: float) -> str:
@@ -255,13 +267,41 @@ def _pct(v: float) -> str:
 
 
 def upgrade_cost(item: dict, to_level: int) -> dict:
-    """Цена улучшения до уровня to_level: ресурсы рецепта и добавочные, чем выше уровень, тем их больше и они разнообразнее."""
-    scale = UPGRADE_COST_START * UPGRADE_COST_GROWTH ** (to_level - 1)
-    cost = {k: max(1, round(n * scale)) for k, n in item["cost"].items()}
-    extra = item.get("upgrade_extra") or []
-    for k, n in extra[:max(0, UPGRADE_KINDS[to_level - 1] - len(cost))]:
-        cost[k] = max(1, round(n * scale))
+    """Цена улучшения до уровня to_level (1..10): с ростом уровня ресурсов нужно больше и они разнообразнее."""
+    cost = {}
+    for res, ref_lvl, ref_amt, amt10, first in item.get("upgrade", []):
+        if to_level < first:
+            continue
+        ratio = (amt10 / ref_amt) ** (1 / (MAX_LEVEL - ref_lvl))
+        cost[res] = max(1, round(ref_amt * ratio ** (to_level - ref_lvl)))
     return cost
+
+
+def merge_partners(user: dict, idx: int) -> list[int]:
+    """Номера предметов, с которыми можно слить предмет idx: тот же предмет, уровень и число слияний."""
+    found = inv_item(user, idx)
+    if found is None or not can_upgrade(found[1]):
+        return []
+    it = found[0]
+    return [j for j, o in enumerate(items_of(user))
+            if j != idx and o.get("key") == it.get("key")
+            and level_of(o) == level_of(it) and fuse_of(o) == fuse_of(it)]
+
+
+def merge_items(user: dict, a: int, b: int) -> tuple[str | None, bool, int]:
+    """Слияние a и b. Возвращает (причина отказа или None, удалось ли, новый номер предмета при успехе)."""
+    if a == b or b not in merge_partners(user, a):
+        return "Слить можно только два одинаковых предмета одного уровня.", False, a
+    lst = items_of(user)
+    if random.random() < MERGE_CHANCE:
+        it = lst[a]
+        it["fuse"] = fuse_of(it) + 1
+        it["dur"] = max_dur(ITEMS[it["key"]])
+        del lst[b]
+        return None, True, a - 1 if b < a else a
+    for i in sorted((a, b), reverse=True):
+        del lst[i]
+    return None, False, a
 
 
 def upgrade_item(user: dict, idx: int) -> str | None:
@@ -570,16 +610,14 @@ def category_kb(user: dict, key: str) -> InlineKeyboardMarkup:
 
 
 def _bar(cur: int, mx: int, width: int = 10) -> str:
-    """Цветная шкала из квадратов: 🟩 больше 60%, 🟨 30-60%, 🟥 меньше 30%, ⬜ пусто."""
+    """Шкала в рамке: [▰▰▰▰▰▰▰▱▱▱]. Не пустая, пока что-то осталось, и не полная, пока не максимум."""
     if mx <= 0:
-        return "⬜" * width
-    share = max(0, min(cur, mx)) / mx
-    filled = round(share * width)
+        return "[" + "▱" * width + "]"
+    filled = round(max(0, min(cur, mx)) / mx * width)
     if 0 < cur < mx:
         filled = max(1, min(width - 1, filled))
     filled = width if cur >= mx else filled
-    color = "🟩" if share >= 0.6 else "🟨" if share >= 0.3 else "🟥"
-    return color * filled + "⬜" * (width - filled)
+    return "[" + "▰" * filled + "▱" * (width - filled) + "]"
 
 
 def _cost_lines(user: dict, cost: dict) -> tuple[list[str], list[str]]:
@@ -595,17 +633,19 @@ def _cost_lines(user: dict, cost: dict) -> tuple[list[str], list[str]]:
     return lines, lack
 
 
-def _stats_box(item: dict, lvl: int) -> str:
+def _stats_box(item: dict, lvl: int, fuse: int = 0) -> str:
     """Цитата с уровнем, бонусом и редкостью: одинаковая в карточке предмета и на экране улучшения."""
     boost = D.custom_emoji(BOOST_EMOJI)
     box = []
     if can_upgrade(item):
         box.append(f"⭐ Уровень: <b>{lvl} / {MAX_LEVEL}</b>")
-    bonus = f"{boost} {escape(item['bonus'][0])}: <b>{_pct(bonus_pct(item, lvl))}</b>"
+    bonus = f"{boost} {escape(item['bonus'][0])}: <b>{_pct(bonus_pct(item, lvl, fuse))}</b>"
     if can_upgrade(item) and lvl < MAX_LEVEL:
-        bonus += f" → {_pct(bonus_pct(item, lvl + 1))}"
+        bonus += f" → {_pct(bonus_pct(item, lvl + 1, fuse))}"
     box.append(bonus)
     box.append(f"💎 Редкость: {escape(item['rarity'])}")
+    if fuse:
+        box.append(f"🔗 Слияний: <b>{fuse}</b> (+{fuse * MERGE_BONUS * 100:g}% к бонусу)")
     if item.get("note"):
         box.append(f"📌 {escape(item['note'])}")
     return "<blockquote>" + "<br>".join(box) + "</blockquote>"
@@ -620,19 +660,16 @@ def item_html(user: dict, idx: int, with_image: bool) -> str:
     ok, no = D.custom_emoji(OK_EMOJI), D.custom_emoji(NO_EMOJI)
     gap = "⠀<br>"
     text = _img(with_image) + _head(item["name"].upper(), item["emoji"], item.get("desc") or "Предмет из инвентаря.")
-    text += f"<p>{gap}</p>" + _stats_box(item, lvl)   # рамка: уровень, бонус, редкость
+    text += f"<p>{gap}</p>" + _stats_box(item, lvl, fuse_of(it))
 
-    # прочность / использования
     if can_repair(item):
-        state = f"Прочность: {dur * 100 // mx}%"
+        text += f"<p>{gap}<b>❤️ Прочность</b><br>{_bar(dur, mx)} <b>{dur * 100 // mx}%</b></p>"
     else:
-        state = f"Осталось использований: {dur} / {mx}"
-    text += f"<p>{gap}<b>❤️ {escape(state)}</b><br>{_bar(dur, mx)}</p>"
+        text += f"<p>{gap}<b>❤️ Осталось использований: {dur} / {mx}</b><br>{_bar(dur, mx)}</p>"
 
-    # ремонт: только если прочность ниже 100%
     legend = []
     if can_upgrade(item):
-        legend.append((UPGRADE_EMOJI, "Улучшить"))
+        legend += [(UPGRADE_EMOJI, "Улучшить"), (MERGE_EMOJI, "Слияние")]
     if can_repair(item):
         legend.append((REPAIR_EMOJI, "Восстановить"))
         if dur < mx:
@@ -653,8 +690,29 @@ def upgrade_html(user: dict, idx: int, with_image: bool) -> str:
     lines, lack = _cost_lines(user, upgrade_cost(item, lvl + 1))
     note = ("<i>Не хватает " + ", ".join(lack) + ".</i>") if lack else "<i>Всё готово, можно улучшать.</i>"
     gap = "⠀<br>"
-    return text + (f"<p>{gap}</p>" + _stats_box(item, lvl)
+    return text + (f"<p>{gap}</p>" + _stats_box(item, lvl, fuse_of(it))
                    + f"<p>{gap}<b>▸ Нужно</b><br>" + "<br>".join(lines) + f"<br>{note}</p>")
+
+
+def merge_html(user: dict, idx: int, with_image: bool) -> str:
+    it, item = inv_item(user, idx)
+    text = _img(with_image) + _head(item["name"].upper(), item["emoji"], "Слияние двух одинаковых предметов.")
+    gap = "⠀<br>"
+    text += (f"<p>{gap}</p><blockquote>🎲 Шанс успеха: <b>{MERGE_CHANCE * 100:g}%</b><br>"
+             f"✅ Успех: <b>+{MERGE_BONUS * 100:g}%</b> к бонусу, прочность полная<br>"
+             f"💥 Провал: <b>оба предмета пропадут</b></blockquote>"
+             f"<p>{gap}<i>Слить можно только одинаковые предметы одного уровня. Выбери второй предмет.</i></p>")
+    return text
+
+
+def merge_kb(user: dict, idx: int) -> InlineKeyboardMarkup:
+    it, item = inv_item(user, idx)
+    btns = []
+    for j in merge_partners(user, idx)[:MAX_ITEM_BUTTONS]:
+        o = items_of(user)[j]
+        btns.append(_btn(f"№{j + 1} · {_int(o.get('dur')) * 100 // max_dur(item)}%",
+                         f"ws:mgo:{idx}:{j}", item["emoji"], ButtonStyle.DANGER))
+    return InlineKeyboardMarkup(inline_keyboard=_rows(btns, 2) + [_back(f"ws:it:{idx}")])
 
 
 def upgrade_kb(idx: int) -> InlineKeyboardMarkup:
@@ -670,6 +728,7 @@ def item_kb(user: dict, idx: int) -> InlineKeyboardMarkup:
     acts = []
     if can_upgrade(item):
         acts.append(_ebtn(f"ws:up:{idx}", UPGRADE_EMOJI, ButtonStyle.SUCCESS))
+        acts.append(_ebtn(f"ws:mg:{idx}", MERGE_EMOJI, ButtonStyle.PRIMARY))
     if can_repair(item):
         acts.append(_ebtn(f"ws:fix:{idx}", REPAIR_EMOJI, ButtonStyle.SUCCESS))
     rows = [acts] if acts else []
@@ -1020,3 +1079,51 @@ async def on_upgrade_do(callback: CallbackQuery):
     D.save_users()
     await callback.answer(f"Уровень повышен: {level_of(inv_item(user, idx)[0])}/{MAX_LEVEL}.")
     await D.show_rich_card(callback, "workshop", lambda wi: item_html(user, idx, wi), item_kb(user, idx))
+
+
+@router.callback_query(F.data.startswith("ws:mg:"))
+async def on_merge(callback: CallbackQuery):
+    """Кнопка «Слияние»: экран выбора второго предмета."""
+    user = await _user_or_alert(callback)
+    if user is None:
+        return
+    idx = _idx_arg(callback.data)
+    found = inv_item(user, idx) if idx is not None else None
+    if found is None:
+        await callback.answer("Предмет не найден.", show_alert=True)
+        return
+    if not can_upgrade(found[1]):
+        await callback.answer("Этот предмет нельзя слить.", show_alert=True)
+        return
+    if not merge_partners(user, idx):
+        await callback.answer("Нужен второй такой же предмет того же уровня.", show_alert=True)
+        return
+    await callback.answer()
+    await D.show_rich_card(callback, "workshop", lambda wi: merge_html(user, idx, wi), merge_kb(user, idx))
+
+
+@router.callback_query(F.data.startswith("ws:mgo:"))
+async def on_merge_do(callback: CallbackQuery):
+    """Выбор второго предмета: сразу делает бросок на слияние."""
+    user = await _user_or_alert(callback)
+    if user is None:
+        return
+    try:
+        a, b = int(callback.data.split(":")[2]), int(callback.data.split(":")[3])
+    except (ValueError, IndexError):
+        await callback.answer()
+        return
+    found = inv_item(user, a)
+    category = found[1]["category"] if found else "items"
+    err, success, new_idx = merge_items(user, a, b)
+    if err:
+        await callback.answer(err, show_alert=True)
+        return
+    D.save_users()
+    if success:
+        await callback.answer(f"Слияние удалось! Бонус +{MERGE_BONUS * 100:g}%.", show_alert=True)
+        await D.show_rich_card(callback, "workshop", lambda wi: item_html(user, new_idx, wi), item_kb(user, new_idx))
+    else:
+        await callback.answer("Слияние не удалось: оба предмета пропали.", show_alert=True)
+        await D.show_rich_card(callback, "workshop", lambda wi: category_html(user, category, wi),
+                               category_kb(user, category))
