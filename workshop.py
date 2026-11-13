@@ -648,7 +648,8 @@ def _cost_lines(user: dict, cost: dict) -> tuple[list[str], list[str]]:
         got = have(user, k)
         if got < n:
             lack.append(f"{em} {escape(name)} ×{_n(n - got)}")
-        lines.append(f"{ok if got >= n else no} {em} {escape(name)} {_n(got)} / {_n(n)}")
+        lines.append(f"{ok if got >= n else no} | {em} <b>{escape(name)}</b> — "
+                     f"<code>{_n(got)}</code> / <code>{_n(n)}</code>")
     return lines, lack
 
 
