@@ -577,43 +577,48 @@ def _cost_lines(user: dict, cost: dict) -> tuple[list[str], list[str]]:
 
 
 def item_html(user: dict, idx: int, with_image: bool) -> str:
-    """Карточка предмета из инвентаря: уровень, бонус, прочность, улучшение и восстановление."""
+    """Карточка предмета: рамка с уровнем и бонусом, прочность со шкалой, ремонт, подсказка по кнопкам."""
     it, item = inv_item(user, idx)
     mx = max_dur(item)
     dur = min(_int(it.get("dur")), mx)
     lvl = level_of(it)
-    text = _img(with_image) + _head(item["name"].upper(), item["emoji"], item.get("desc") or "Предмет из инвентаря.")
-    boost = D.custom_emoji(BOOST_EMOJI)
-    bonus_name = item["bonus"][0]
+    ok, no, boost = D.custom_emoji(OK_EMOJI), D.custom_emoji(NO_EMOJI), D.custom_emoji(BOOST_EMOJI)
     gap = "⠀<br>"
-    if can_repair(item):
-        state = f"Прочность: {dur}/{mx} ({dur * 100 // mx}%)"
-    else:
-        state = f"Осталось использований: {dur}/{mx}"
-    stats = f"<b>Редкость: {escape(item['rarity'])}</b><br>"
+    text = _img(with_image) + _head(item["name"].upper(), item["emoji"], item.get("desc") or "Предмет из инвентаря.")
+
+    # рамка: уровень, бонус, редкость
+    box = []
     if can_upgrade(item):
-        stats += f"<b>Уровень: {lvl}/{MAX_LEVEL}</b><br>"
-    stats += f"<b>{boost} {escape(bonus_name)}: {_pct(bonus_pct(item, lvl))}</b>"
+        box.append(f"⭐ Уровень: <b>{lvl} / {MAX_LEVEL}</b>")
+    bonus = f"{boost} {escape(item['bonus'][0])}: <b>{_pct(bonus_pct(item, lvl))}</b>"
     if can_upgrade(item) and lvl < MAX_LEVEL:
-        stats += f" → {_pct(bonus_pct(item, lvl + 1))}"
+        bonus += f" → {_pct(bonus_pct(item, lvl + 1))}"
+    box.append(bonus)
+    box.append(f"💎 Редкость: {escape(item['rarity'])}")
     if item.get("note"):
-        stats += f"<br><b>{escape(item['note'])}</b>"
-    text += (f"<p>{gap}<b>▸ Характеристики</b><br>{stats}</p>"
-             f"<p>{gap}<b>▸ Состояние</b><br>"
-             f"<b>{escape(state)}</b><br>{_bar(dur, mx)}</p>")
+        box.append(f"📌 {escape(item['note'])}")
+    text += f"<p>{gap}</p><blockquote>" + "<br>".join(box) + "</blockquote>"
+
+    # прочность / использования
+    if can_repair(item):
+        state = f"Прочность: {dur * 100 // mx}%"
+    else:
+        state = f"Осталось использований: {dur} / {mx}"
+    text += f"<p>{gap}<b>❤️ {escape(state)}</b><br>{_bar(dur, mx)}</p>"
+
+    # ремонт: только если прочность ниже 100%
     legend = []
     if can_upgrade(item):
         legend.append((UPGRADE_EMOJI, "Улучшить"))
     if can_repair(item):
         legend.append((REPAIR_EMOJI, "Восстановить"))
         if dur < mx:
-            miss_pct = (mx - dur) * 100 // mx
-            lines, lack = _cost_lines(user, repair_cost(item, dur))
-            note = ("<i>Не хватает " + ", ".join(lack) + ".</i>") if lack else "<i>Всё готово, можно восстанавливать.</i>"
-            text += (f"<p>{gap}<b>▸ Восстановление ({miss_pct}% рецепта)</b><br>"
-                     + "<br>".join(lines) + f"<br>{note}</p>")
-    else:
-        text += f"<p>{gap}<i>Этот предмет нельзя восстановить.</i></p>"
+            lines = []
+            for k, n in repair_cost(item, dur).items():
+                name, em = RESOURCES[k]
+                got = have(user, k)
+                lines.append(f"{ok if got >= n else no} {em} {escape(name)} {_n(got)} / {_n(n)}")
+            text += f"<p>{gap}<b>🔧 Для ремонта</b><br>" + "<br>".join(lines) + "</p>"
     return text + (_legend(*legend) if legend else "")
 
 
