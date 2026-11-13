@@ -360,6 +360,12 @@ def group_stacks(user: dict, key: str) -> list[list[int]]:
     return [st for st in stacks_of(user, ITEMS[key]["category"]) if lst[st[0]].get("key") == key]
 
 
+def single_item(user: dict, key: str) -> int | None:
+    """Номер предмета, если он в группе key один-единственный (иначе None)."""
+    sts = group_stacks(user, key)
+    return sts[0][0] if len(sts) == 1 and len(sts[0]) == 1 else None
+
+
 def group_page(user: dict, key: str) -> int:
     """На какой странице раздела лежит группа key."""
     keys = list(groups_of(user, ITEMS[key]["category"]))
@@ -819,8 +825,8 @@ def group_kb(user: dict, key: str, page: int = 0) -> InlineKeyboardMarkup:
             parts.append(f"{UPGRADE_EMOJI[1]}{level_of(it)}")
         if evo_of(it):
             parts.append(f"{EVO_EMOJI[1]}{evo_of(it)}")
-        label = "| " + " · ".join(parts or [f"{UPGRADE_EMOJI[1]}0"])
-        btns.append(_btn(label, f"ws:it:{st[0]}", ITEMS[key]["emoji"]))
+        label = " · ".join(parts or [f"{UPGRADE_EMOJI[1]}0"])
+        btns.append(InlineKeyboardButton(text=label, callback_data=f"ws:it:{st[0]}", style=ButtonStyle.PRIMARY))
     rows = _rows(btns, ITEMS_PER_ROW)
     if pages > 1:
         rows.append([
@@ -1011,7 +1017,10 @@ def item_kb(user: dict, idx: int) -> InlineKeyboardMarkup:
     if can_repair(item):
         acts.append(_ebtn(f"ws:rp:{idx}", REPAIR_EMOJI, ButtonStyle.PRIMARY))
     rows = [acts]
-    rows.append(_back(f"ws:grp:{it['key']}:{stack_page(user, idx)}"))
+    if single_item(user, it["key"]) is not None:   # предмет один: экрана-списка не было, назад сразу в раздел
+        rows.append(_back(f"ws:cat:{item['category']}:{group_page(user, it['key'])}"))
+    else:
+        rows.append(_back(f"ws:grp:{it['key']}:{stack_page(user, idx)}"))
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -1186,6 +1195,16 @@ async def on_category(callback: CallbackQuery):
     await D.show_rich_card(callback, "workshop", lambda wi: category_html(user, key, wi, page), kb)
 
 
+async def _show_group(callback: CallbackQuery, user: dict, key: str, page: int = 0) -> None:
+    """Группа предметов; если предмет один, сразу его карточка."""
+    one = single_item(user, key)
+    if one is not None:
+        await D.show_rich_card(callback, "workshop", lambda wi: item_html(user, one, wi), item_kb(user, one))
+        return
+    page = min(max(page, 0), _pages(len(group_stacks(user, key))) - 1)
+    await D.show_rich_card(callback, "workshop", lambda wi: group_html(user, key, wi, page), group_kb(user, key, page))
+
+
 @router.callback_query(F.data.startswith("ws:grp:"))
 async def on_group(callback: CallbackQuery):
     """Нажатие на «⛏️ | 4х»: все предметы этого вида по уровням и эволюциям."""
@@ -1209,8 +1228,7 @@ async def on_group(callback: CallbackQuery):
         await D.show_rich_card(callback, "workshop", lambda wi: category_html(user, cat, wi, 0), category_kb(user, cat, 0))
         return
     await callback.answer()
-    page = min(max(page, 0), _pages(len(group_stacks(user, key))) - 1)
-    await D.show_rich_card(callback, "workshop", lambda wi: group_html(user, key, wi, page), group_kb(user, key, page))
+    await _show_group(callback, user, key, page)
 
 
 def _slot_arg(data: str, idx: int = 2) -> int | None:
@@ -1456,7 +1474,7 @@ async def on_recon_do(callback: CallbackQuery):
     got = ", ".join(f"{RESOURCES[k][1]}{n}" for k, n in refund.items())
     await callback.answer(f"Реконструкция выполнена: {got}", show_alert=True)
     if group_stacks(user, key):
-        await D.show_rich_card(callback, "workshop", lambda wi: group_html(user, key, wi, 0), group_kb(user, key, 0))
+        await _show_group(callback, user, key, 0)
     else:
         cat = ITEMS[key]["category"]
         pg = min(group_page_after(user, cat), _pages(len(groups_of(user, cat))) - 1)
