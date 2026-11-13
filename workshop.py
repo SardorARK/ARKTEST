@@ -174,8 +174,14 @@ for _m in LEVEL_MULTS:
 REPAIR_COST_SHARE = 0.5
 
 # Слияние двух одинаковых предметов (одинаковый ключ, уровень и число слияний)
-MERGE_CHANCE = 0.25     # шанс успеха; при провале оба предмета пропадают
-MERGE_BONUS = 1.0       # успех: +100% к бонусу за каждое слияние
+# 3 этапа: на каждом сливаются два предмета с одинаковым числом слияний. При провале оба предмета пропадают.
+# (шанс успеха, итоговая прибавка к бонусу в % после успешного слияния)
+MERGE_STAGES = (
+    (0.25, 100),   # этап 1: два предмета без слияний -> +100%
+    (0.05, 200),   # этап 2: два предмета с 1 слиянием -> +200%
+    (0.01, 500),   # этап 3: два предмета с 2 слияниями -> +500%
+)
+MAX_FUSE = len(MERGE_STAGES)   # больше слияний сделать нельзя
 
 MAX_SLOTS = 4          # слотов в кузнице; сначала открыт только первый
 # Цена открытия слота (монеты). Слоты открываются строго по порядку: 2, потом 3, потом 4.
@@ -268,7 +274,12 @@ def level_of(it: dict) -> int:
 
 
 def fuse_of(it: dict) -> int:
-    return _int(it.get("fuse"))
+    return min(MAX_FUSE, _int(it.get("fuse")))
+
+
+def fuse_bonus(fuse: int) -> int:
+    """Прибавка к бонусу в % за слияния: 0 слияний - 0, 1 - 100, 2 - 200, 3 - 500."""
+    return MERGE_STAGES[fuse - 1][1] if fuse > 0 else 0
 
 
 def bonus_pct(item: dict, lvl: int = 0, fuse: int = 0) -> float:
@@ -280,7 +291,7 @@ def bonus_pct(item: dict, lvl: int = 0, fuse: int = 0) -> float:
             val *= (top / val) ** (_LOGS[lvl] / _LOGS[MAX_LEVEL])
         else:
             val *= math.exp(_LOGS[lvl])
-    return round(val * (1 + MERGE_BONUS * fuse), 1)
+    return round(val * (1 + fuse_bonus(fuse) / 100), 1)
 
 
 def _pct(v: float) -> str:
@@ -301,7 +312,7 @@ def upgrade_cost(item: dict, to_level: int) -> dict:
 def merge_partners(user: dict, idx: int) -> list[int]:
     """Номера предметов, с которыми можно слить предмет idx: тот же предмет, уровень и число слияний."""
     found = inv_item(user, idx)
-    if found is None or not can_upgrade(found[1]):
+    if found is None or not can_upgrade(found[1]) or fuse_of(found[0]) >= MAX_FUSE:
         return []
     it = found[0]
     return [j for j, o in enumerate(items_of(user))
@@ -312,9 +323,9 @@ def merge_partners(user: dict, idx: int) -> list[int]:
 def merge_items(user: dict, a: int, b: int) -> tuple[str | None, bool, int]:
     """Слияние a и b. Возвращает (причина отказа или None, удалось ли, новый номер предмета при успехе)."""
     if a == b or b not in merge_partners(user, a):
-        return "Слить можно только два одинаковых предмета одного уровня.", False, a
+        return "Слить можно только два одинаковых предмета: один уровень и число слияний.", False, a
     lst = items_of(user)
-    if random.random() < MERGE_CHANCE:
+    if random.random() < MERGE_STAGES[fuse_of(lst[a])][0]:
         it = lst[a]
         it["fuse"] = fuse_of(it) + 1
         it["dur"] = max_dur(ITEMS[it["key"]], level_of(it))
@@ -700,7 +711,7 @@ def _stats_box(item: dict, lvl: int, fuse: int = 0) -> str:
             dur_line += f" → <code>{max_dur(item, lvl + 1)}</code>"
         lines.append(dur_line)
     if fuse:
-        lines.append(f"<b>🧬 Слияний:</b> <code>{fuse}</code> (+{fuse * MERGE_BONUS * 100:g}% к бонусу)")
+        lines.append(f"<b>🧬 Слияний:</b> <code>{fuse} / {MAX_FUSE}</code> <code>(+{fuse_bonus(fuse)}%)</code>")
     if item.get("note"):
         lines.append(f"<b>📌 {escape(item['note'])}</b>")
     return "<p>⠀<br>" + "<br>".join(lines) + "</p>"
@@ -768,10 +779,13 @@ def merge_html(user: dict, idx: int, with_image: bool) -> str:
     it, item = inv_item(user, idx)
     text = _img(with_image) + _head(item["name"].upper(), item["emoji"], "Слияние двух одинаковых предметов.")
     gap = "⠀<br>"
-    text += (f"<p>{gap}<b>🎲 Шанс успеха:</b> <code>{MERGE_CHANCE * 100:g}%</code><br>"
-             f"<b>✅ Успех:</b> <code>+{MERGE_BONUS * 100:g}%</code> к бонусу, прочность полная<br>"
+    stage = fuse_of(it)
+    chance, bonus = MERGE_STAGES[stage]
+    text += (f"<p>{gap}<b>🧬 Этап:</b> <code>{stage + 1} / {MAX_FUSE}</code><br>"
+             f"<b>🎲 Шанс успеха:</b> <code>{chance * 100:g}%</code><br>"
+             f"<b>✅ Успех:</b> <code>+{bonus}%</code> к бонусу, прочность полная<br>"
              f"<b>💥 Провал:</b> оба предмета пропадут</p>"
-             f"<p>{gap}<i>Слить можно только одинаковые предметы одного уровня. Выбери второй предмет.</i></p>")
+             f"<p>{gap}<i>Слить можно только одинаковые предметы с одним уровнем и числом слияний. Выбери второй предмет.</i></p>")
     return text
 
 
@@ -1211,8 +1225,11 @@ async def on_merge(callback: CallbackQuery):
     if not can_upgrade(found[1]):
         await callback.answer("Этот предмет нельзя слить.", show_alert=True)
         return
+    if fuse_of(found[0]) >= MAX_FUSE:
+        await callback.answer(f"Достигнут максимум слияний: {MAX_FUSE} из {MAX_FUSE}.", show_alert=True)
+        return
     if not merge_partners(user, idx):
-        await callback.answer("Нужен второй такой же предмет того же уровня.", show_alert=True)
+        await callback.answer("Нужен второй такой же предмет: тот же уровень и число слияний.", show_alert=True)
         return
     await callback.answer()
     await D.show_rich_card(callback, "workshop", lambda wi: merge_html(user, idx, wi), merge_kb(user, idx))
@@ -1237,7 +1254,7 @@ async def on_merge_do(callback: CallbackQuery):
         return
     D.save_users()
     if success:
-        await callback.answer(f"Слияние удалось! Бонус +{MERGE_BONUS * 100:g}%.", show_alert=True)
+        await callback.answer(f"Слияние удалось! Бонус от слияний: +{fuse_bonus(fuse_of(inv_item(user, new_idx)[0]))}%.", show_alert=True)
         await D.show_rich_card(callback, "workshop", lambda wi: item_html(user, new_idx, wi), item_kb(user, new_idx))
     else:
         await callback.answer("Слияние не удалось: оба предмета пропали.", show_alert=True)
