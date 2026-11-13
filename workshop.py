@@ -168,6 +168,10 @@ _LOGS = [0.0]
 for _m in LEVEL_MULTS:
     _LOGS.append(_LOGS[-1] + math.log(_m))   # накопленный рост бонуса по уровням
 
+# Ремонт: полный ремонт на уровне N стоит минимум рецепт предмета и не меньше этой доли цены улучшения до уровня N.
+# Чем выше уровень, тем дороже ремонт (и появляются доп. ресурсы улучшения). Берётся доля недостающей прочности.
+REPAIR_COST_SHARE = 0.5
+
 # Слияние двух одинаковых предметов (одинаковый ключ, уровень и число слияний)
 MERGE_CHANCE = 0.25     # шанс успеха; при провале оба предмета пропадают
 MERGE_BONUS = 1.0       # успех: +100% к бонусу за каждое слияние
@@ -236,12 +240,17 @@ def can_repair(item: dict) -> bool:
 
 
 def repair_cost(item: dict, dur: int, lvl: int = 0) -> dict:
-    """Чем меньше прочность, тем больше ресурсов рецепта: при 30% нужно 70% рецепта (округляем вверх)."""
+    """Цена ремонта: доля полной цены, равная доле недостающей прочности (округляем вверх).
+    Полная цена = рецепт предмета; на уровнях выше нуля - не меньше REPAIR_COST_SHARE от цены улучшения до этого уровня."""
     mx = max_dur(item, lvl)
     if not can_repair(item) or mx <= 0:
         return {}
+    full = dict(item["cost"])
+    if lvl > 0 and can_upgrade(item):
+        for k, n in upgrade_cost(item, lvl).items():
+            full[k] = max(full.get(k, 0), round(n * REPAIR_COST_SHARE))
     miss = max(0, mx - max(0, dur))
-    cost = {k: -(-n * miss // mx) for k, n in item["cost"].items()}
+    cost = {k: -(-n * miss // mx) for k, n in full.items()}
     return {k: n for k, n in cost.items() if n > 0}
 
 
