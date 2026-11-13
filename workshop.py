@@ -670,8 +670,8 @@ def _head(title: str, emoji: tuple[str, str] | str, quote: str) -> str:
 
 
 def _btn(text: str, data: str, emoji: "str | tuple[str, str]",
-         style: ButtonStyle = ButtonStyle.PRIMARY) -> InlineKeyboardButton:
-    """Кнопка с эмодзи. Пара (id, запасной эмодзи): с id будет кастомный значок, без id обычный."""
+         style: "ButtonStyle | None" = ButtonStyle.PRIMARY) -> InlineKeyboardButton:
+    """Кнопка с эмодзи (style=None - без цвета). Пара (id, запасной эмодзи): с id будет кастомный значок, без id обычный."""
     if isinstance(emoji, tuple):
         cid, fallback = emoji
         if cid:
@@ -787,7 +787,7 @@ def category_kb(user: dict, key: str, page: int = 0) -> InlineKeyboardMarkup:
     per = ITEMS_PER_ROW * ROWS_PER_PAGE
     pages = _pages(len(mine))
     page = min(max(page, 0), pages - 1)
-    btns = [_btn(f"| {cnt}х", f"ws:grp:{k}:0", ITEMS[k]["emoji"])   # например: ⛏️ | 4х (все уровни вместе)
+    btns = [_btn(f"| {cnt}х", f"ws:grp:{k}:0", ITEMS[k]["emoji"], None)   # например: ⛏️ | 4х (все уровни вместе)
             for k, cnt in mine[page * per:(page + 1) * per]]
     rows = _rows(btns, ITEMS_PER_ROW)
     if pages > 1:
@@ -825,8 +825,8 @@ def group_kb(user: dict, key: str, page: int = 0) -> InlineKeyboardMarkup:
             parts.append(f"{UPGRADE_EMOJI[1]}{level_of(it)}")
         if evo_of(it):
             parts.append(f"{EVO_EMOJI[1]}{evo_of(it)}")
-        label = " · ".join(parts or [f"{UPGRADE_EMOJI[1]}0"])
-        btns.append(InlineKeyboardButton(text=label, callback_data=f"ws:it:{st[0]}", style=ButtonStyle.PRIMARY))
+        label = "| " + " · ".join(parts or [f"{UPGRADE_EMOJI[1]}0"])
+        btns.append(_btn(label, f"ws:it:{st[0]}", ITEMS[key]["emoji"], None))   # без цвета
     rows = _rows(btns, ITEMS_PER_ROW)
     if pages > 1:
         rows.append([
