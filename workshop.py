@@ -136,7 +136,12 @@ ITEMS = {
         "upgradable": True,
         "upgrade": [("thread", 2, 14, 120, 1), ("vine", 2, 5, 70, 1), ("clay", 2, 4, 60, 1),
                     ("fiber", 4, 12, 70, 4), ("leather", 6, 8, 50, 6)],
-        "bonus": ("Шанс найти золото", 1.15),   # было 1%, станет 1.15%
+        # Бонус верёвки - прибавка к шансу золота в процентных пунктах (к базовым 1% шахты).
+        # 0 ур.: +0.2%; 10 ур.: +1.17%; эволюция х2 / х3 / х6 (этап 1 / 2 / 3).
+        # Максимум (10 ур. + 3 этап): 1.17 * 6 = +7%, итого 1% + 7% = 8% золота. Больше 8% не бывает.
+        "bonus": ("Шанс найти золото", 1.002),
+        "max_bonus": 7 / 6,
+        "bonus_abs": True,   # бонус считается в пунктах шанса, а не в процентах от добычи
     },
     "medkit": {
         "name": "Аптечка",
@@ -302,6 +307,66 @@ def bonus_pct(item: dict, lvl: int = 0, evo: int = 0) -> float:
         else:
             val *= math.exp(_LOGS[lvl])
     return round(val * (1 + evo_bonus(evo) / 100), 1)
+
+
+# ---------------------------------------------------------------------------
+# Предметы в шахте (вызывается из underground.py при запуске шахты)
+# ---------------------------------------------------------------------------
+GOLD_CHANCE_CAP = 8.0   # итоговый шанс золота в шахте не может быть выше (%), чтобы не ломать экономику
+
+# Сколько прочности предмет теряет за один запуск шахты. Предметы «на n использований» тратят 1 использование.
+MINE_WEAR = {"pickaxe": 5, "rope": 5}
+# Какие предметы работают в шахте и какой эффект дают: ключ -> тип эффекта
+MINE_ITEMS = {"pickaxe": "ore", "rope": "gold", "medkit": "time"}
+
+
+def mine_items_apply(user: dict) -> dict:
+    """Берёт из инвентаря по одному лучшему предмету каждого вида, который работает в шахте, и списывает износ.
+    Возвращает {"ore": %, "gold": пункты, "time": %, "used": [{"key", "lvl", "evo", "bonus"}]}.
+    Если подходящих предметов нет, used пустой, а бонусы нулевые."""
+    res = {"ore": 0.0, "gold": 0.0, "time": 0.0, "used": []}
+    lst = items_of(user)
+    for key, kind in MINE_ITEMS.items():
+        item = ITEMS.get(key)
+        if not item:
+            continue
+        best = None
+        for it in lst:
+            if it.get("key") != key or _int(it.get("dur")) <= 0:
+                continue   # сломанный предмет (прочность 0 / использования кончились) не работает
+            b = bonus_pct(item, level_of(it), evo_of(it))
+            if best is None or (b, -_int(it.get("dur"))) > (best[0], -_int(best[1].get("dur"))):
+                best = (b, it)
+        if best is None:
+            continue
+        b, it = best
+        wear = 1 if "uses" in item else MINE_WEAR.get(key, 5)
+        it["dur"] = max(0, _int(it.get("dur")) - wear)
+        res[kind] += b
+        res["used"].append({"key": key, "lvl": level_of(it), "evo": evo_of(it), "bonus": b})
+    res["gold"] = min(res["gold"], GOLD_CHANCE_CAP)
+    return res
+
+
+def mine_item_label(entry: dict) -> tuple[str, str]:
+    """Подпись и значение для блока «Используемые предметы» в шахте."""
+    item = ITEMS.get(entry.get("key"))
+    if not item:
+        return "Предмет", ""
+    emoji = _em(item["emoji"])
+    name = f"{emoji} {item['name']}"
+    lvl, evo, b = entry.get("lvl", 0), entry.get("evo", 0), entry.get("bonus", 0)
+    kind = MINE_ITEMS.get(entry.get("key"))
+    if kind == "gold":
+        eff = f"золото +{b:g}%"
+    elif kind == "time":
+        eff = f"время +{b:g}%"
+    else:
+        eff = f"добыча +{b:g}%"
+    head = f"{lvl} ур." if can_upgrade(item) else ""
+    if can_upgrade(item) and evo:
+        head += f", эвол. {evo}"
+    return name, (f"{head} · {eff}" if head else eff)
 
 
 def _pct(v: float) -> str:
