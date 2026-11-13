@@ -595,17 +595,9 @@ def _cost_lines(user: dict, cost: dict) -> tuple[list[str], list[str]]:
     return lines, lack
 
 
-def item_html(user: dict, idx: int, with_image: bool) -> str:
-    """Карточка предмета: рамка с уровнем и бонусом, прочность со шкалой, ремонт, подсказка по кнопкам."""
-    it, item = inv_item(user, idx)
-    mx = max_dur(item)
-    dur = min(_int(it.get("dur")), mx)
-    lvl = level_of(it)
-    ok, no, boost = D.custom_emoji(OK_EMOJI), D.custom_emoji(NO_EMOJI), D.custom_emoji(BOOST_EMOJI)
-    gap = "⠀<br>"
-    text = _img(with_image) + _head(item["name"].upper(), item["emoji"], item.get("desc") or "Предмет из инвентаря.")
-
-    # рамка: уровень, бонус, редкость
+def _stats_box(item: dict, lvl: int) -> str:
+    """Цитата с уровнем, бонусом и редкостью: одинаковая в карточке предмета и на экране улучшения."""
+    boost = D.custom_emoji(BOOST_EMOJI)
     box = []
     if can_upgrade(item):
         box.append(f"⭐ Уровень: <b>{lvl} / {MAX_LEVEL}</b>")
@@ -616,7 +608,19 @@ def item_html(user: dict, idx: int, with_image: bool) -> str:
     box.append(f"💎 Редкость: {escape(item['rarity'])}")
     if item.get("note"):
         box.append(f"📌 {escape(item['note'])}")
-    text += f"<p>{gap}</p><blockquote>" + "<br>".join(box) + "</blockquote>"
+    return "<blockquote>" + "<br>".join(box) + "</blockquote>"
+
+
+def item_html(user: dict, idx: int, with_image: bool) -> str:
+    """Карточка предмета: рамка с уровнем и бонусом, прочность со шкалой, ремонт, подсказка по кнопкам."""
+    it, item = inv_item(user, idx)
+    mx = max_dur(item)
+    dur = min(_int(it.get("dur")), mx)
+    lvl = level_of(it)
+    ok, no = D.custom_emoji(OK_EMOJI), D.custom_emoji(NO_EMOJI)
+    gap = "⠀<br>"
+    text = _img(with_image) + _head(item["name"].upper(), item["emoji"], item.get("desc") or "Предмет из инвентаря.")
+    text += f"<p>{gap}</p>" + _stats_box(item, lvl)   # рамка: уровень, бонус, редкость
 
     # прочность / использования
     if can_repair(item):
@@ -642,23 +646,20 @@ def item_html(user: dict, idx: int, with_image: bool) -> str:
 
 
 def upgrade_html(user: dict, idx: int, with_image: bool) -> str:
-    """Экран улучшения: требования к ресурсам показываются только здесь."""
+    """Экран улучшения: те же характеристики, что в карточке, и требования к ресурсам."""
     it, item = inv_item(user, idx)
     lvl = level_of(it)
-    boost = D.custom_emoji(BOOST_EMOJI)
     text = _img(with_image) + _head(item["name"].upper(), item["emoji"], "Улучшение предмета.")
     lines, lack = _cost_lines(user, upgrade_cost(item, lvl + 1))
     note = ("<i>Не хватает " + ", ".join(lack) + ".</i>") if lack else "<i>Всё готово, можно улучшать.</i>"
     gap = "⠀<br>"
-    text += (f"<p>{gap}<b>▸ Уровень</b><br><b>{lvl}/{MAX_LEVEL} → {lvl + 1}/{MAX_LEVEL}</b><br>"
-             f"<b>{boost} {escape(item['bonus'][0])}: {_pct(bonus_pct(item, lvl))} → {_pct(bonus_pct(item, lvl + 1))} (×{level_mult(lvl + 1):g})</b></p>"
-             f"<p>{gap}<b>▸ Нужно</b><br>" + "<br>".join(lines) + f"<br>{note}</p>")
-    return text + _legend((UPGRADE_EMOJI, "Улучшить"))
+    return text + (f"<p>{gap}</p>" + _stats_box(item, lvl)
+                   + f"<p>{gap}<b>▸ Нужно</b><br>" + "<br>".join(lines) + f"<br>{note}</p>")
 
 
 def upgrade_kb(idx: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
-        [_ebtn(f"ws:ugo:{idx}", UPGRADE_EMOJI, ButtonStyle.SUCCESS)],
+        [_btn("Улучшить", f"ws:ugo:{idx}", UPGRADE_EMOJI, ButtonStyle.SUCCESS)],
         _back(f"ws:it:{idx}"),
     ])
 
