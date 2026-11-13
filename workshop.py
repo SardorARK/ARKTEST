@@ -639,8 +639,7 @@ def _cost_lines(user: dict, cost: dict) -> tuple[list[str], list[str]]:
         got = have(user, k)
         if got < n:
             lack.append(f"{em} {escape(name)} ×{_n(n - got)}")
-        lines.append(f"{ok if got >= n else no} | {em} <b>{escape(name)}</b> — "
-                     f"<code>{_n(got)}</code> / <code>{_n(n)}</code>")
+        lines.append(f"{ok if got >= n else no} {em} {escape(name)} {_n(got)} / {_n(n)}")
     return lines, lack
 
 
@@ -673,7 +672,6 @@ def item_html(user: dict, idx: int, with_image: bool) -> str:
     lvl = level_of(it)
     mx = max_dur(item, lvl)
     dur = min(_int(it.get("dur")), mx)
-    ok, no = D.custom_emoji(OK_EMOJI), D.custom_emoji(NO_EMOJI)
     gap = "⠀<br>"
     text = _img(with_image) + _head(item["name"].upper(), item["emoji"], item.get("desc") or "Предмет из инвентаря.")
     text += f"<p>{gap}</p>" + _stats_box(item, lvl, fuse_of(it))
@@ -688,14 +686,28 @@ def item_html(user: dict, idx: int, with_image: bool) -> str:
         legend += [(UPGRADE_EMOJI, "Улучшить"), (MERGE_EMOJI, "Слияние")]
     if can_repair(item):
         legend.append((REPAIR_EMOJI, "Восстановить"))
-        if dur < mx:
-            lines = []
-            for k, n in repair_cost(item, dur, lvl).items():
-                name, em = RESOURCES[k]
-                got = have(user, k)
-                lines.append(f"{ok if got >= n else no} {em} {escape(name)} {_n(got)} / {_n(n)}")
-            text += f"<p>{gap}<b>🔧 Для ремонта</b><br>" + "<br>".join(lines) + "</p>"
     return text + (_legend(*legend) if legend else "")
+
+
+def repair_html(user: dict, idx: int, with_image: bool) -> str:
+    """Экран восстановления: прочность и требования к ресурсам (как экран улучшения)."""
+    it, item = inv_item(user, idx)
+    lvl = level_of(it)
+    mx = max_dur(item, lvl)
+    dur = min(_int(it.get("dur")), mx)
+    text = _img(with_image) + _head(item["name"].upper(), item["emoji"], "Восстановление предмета.")
+    lines, lack = _cost_lines(user, repair_cost(item, dur, lvl))
+    note = ("<i>Не хватает " + ", ".join(lack) + ".</i>") if lack else "<i>Всё готово, можно восстанавливать.</i>"
+    gap = "⠀<br>"
+    return text + (f"<p>{gap}<b>❤️ Прочность</b><br>{_bar(dur, mx)} <b>{dur * 100 // mx}%</b> ({dur} / {mx})</p>"
+                   f"<p>{gap}<b>▸ Нужно</b><br>" + "<br>".join(lines) + f"<br>{note}</p>")
+
+
+def repair_kb(idx: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [_btn("Восстановить", f"ws:fix:{idx}", REPAIR_EMOJI, ButtonStyle.SUCCESS)],
+        _back(f"ws:it:{idx}"),
+    ])
 
 
 def upgrade_html(user: dict, idx: int, with_image: bool) -> str:
@@ -746,7 +758,7 @@ def item_kb(user: dict, idx: int) -> InlineKeyboardMarkup:
         acts.append(_ebtn(f"ws:up:{idx}", UPGRADE_EMOJI, ButtonStyle.SUCCESS))
         acts.append(_ebtn(f"ws:mg:{idx}", MERGE_EMOJI, ButtonStyle.PRIMARY))
     if can_repair(item):
-        acts.append(_ebtn(f"ws:fix:{idx}", REPAIR_EMOJI, ButtonStyle.SUCCESS))
+        acts.append(_ebtn(f"ws:rp:{idx}", REPAIR_EMOJI, ButtonStyle.SUCCESS))
     rows = [acts] if acts else []
     rows.append(_back(f"ws:cat:{item['category']}"))
     return InlineKeyboardMarkup(inline_keyboard=rows)
@@ -1036,6 +1048,28 @@ async def on_item(callback: CallbackQuery):
         return
     await callback.answer()
     await D.show_rich_card(callback, "workshop", lambda wi: item_html(user, idx, wi), item_kb(user, idx))
+
+
+@router.callback_query(F.data.startswith("ws:rp:"))
+async def on_repair_screen(callback: CallbackQuery):
+    """Кнопка «Восстановить» на карточке: экран с требованиями (или сообщение, что прочность полная)."""
+    user = await _user_or_alert(callback)
+    if user is None:
+        return
+    idx = _idx_arg(callback.data)
+    found = inv_item(user, idx) if idx is not None else None
+    if found is None:
+        await callback.answer("Предмет не найден.", show_alert=True)
+        return
+    it, item = found
+    if not can_repair(item):
+        await callback.answer("Этот предмет нельзя восстановить.", show_alert=True)
+        return
+    if min(_int(it.get("dur")), max_dur(item, level_of(it))) >= max_dur(item, level_of(it)):
+        await callback.answer("Прочность на 100%.", show_alert=True)
+        return
+    await callback.answer()
+    await D.show_rich_card(callback, "workshop", lambda wi: repair_html(user, idx, wi), repair_kb(idx))
 
 
 @router.callback_query(F.data.startswith("ws:fix:"))
