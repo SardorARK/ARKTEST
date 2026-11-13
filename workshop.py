@@ -321,7 +321,8 @@ MINE_ITEMS = {"pickaxe": "ore", "rope": "gold", "medkit": "time"}
 
 
 def mine_items_apply(user: dict) -> dict:
-    """Берёт из инвентаря по одному лучшему предмету каждого вида, который работает в шахте, и списывает износ.
+    """Применяет в шахте только те предметы, которые игрок сам включил кнопкой «Использовать» (флаг "use"),
+    и списывает износ. Сам по себе ничего не берётся.
     Возвращает {"ore": %, "gold": пункты, "time": %, "used": [{"key", "lvl", "evo", "bonus"}]}.
     Если подходящих предметов нет, used пустой, а бонусы нулевые."""
     res = {"ore": 0.0, "gold": 0.0, "time": 0.0, "used": []}
@@ -330,18 +331,17 @@ def mine_items_apply(user: dict) -> dict:
         item = ITEMS.get(key)
         if not item:
             continue
-        best = None
-        for it in lst:
-            if it.get("key") != key or _int(it.get("dur")) <= 0:
-                continue   # сломанный предмет (прочность 0 / использования кончились) не работает
-            b = bonus_pct(item, level_of(it), evo_of(it))
-            if best is None or (b, -_int(it.get("dur"))) > (best[0], -_int(best[1].get("dur"))):
-                best = (b, it)
-        if best is None:
+        it = next((o for o in lst if o.get("key") == key and o.get("use")), None)
+        if it is None:
+            continue   # игрок этот предмет не включал
+        if _int(it.get("dur")) <= 0:
+            it.pop("use", None)   # сломан / использования кончились: включение сбрасывается
             continue
-        b, it = best
+        b = bonus_pct(item, level_of(it), evo_of(it))
         wear = 1 if "uses" in item else MINE_WEAR.get(key, 5)
         it["dur"] = max(0, _int(it.get("dur")) - wear)
+        if it["dur"] <= 0:
+            it.pop("use", None)
         res[kind] += b
         res["used"].append({"key": key, "lvl": level_of(it), "evo": evo_of(it), "bonus": b})
     res["gold"] = min(res["gold"], GOLD_CHANCE_CAP)
@@ -967,6 +967,9 @@ def item_html(user: dict, idx: int, with_image: bool) -> str:
     else:
         text += f"<p>{gap}<b>❤️ Осталось использований:</b> <code>{dur} / {mx}</code><br>{_bar(dur, mx)}</p>"
 
+    if it.get("use") and it.get("key") in MINE_ITEMS:
+        text += f"<p>{gap}<b>✅ Включён для шахты</b><br><i>Сработает при запуске. Нажми «Использовать» ещё раз, чтобы выключить.</i></p>"
+
     legend = []
     if can_upgrade(item):
         legend += [(UPGRADE_EMOJI, "Улучшить"), (EVO_EMOJI, "Эволюция")]
@@ -1548,15 +1551,36 @@ async def on_recon_do(callback: CallbackQuery):
 
 @router.callback_query(F.data.startswith("ws:use:"))
 async def on_use(callback: CallbackQuery):
-    """Кнопка «Использовать»: пока заглушка."""
+    """Кнопка «Использовать»: включает предмет для шахты (повторное нажатие выключает).
+    Включённым может быть один предмет каждого вида; в шахте работают только включённые."""
     user = await _user_or_alert(callback)
     if user is None:
         return
     idx = _idx_arg(callback.data)
-    if idx is None or inv_item(user, idx) is None:
+    found = inv_item(user, idx) if idx is not None else None
+    if found is None:
         await callback.answer("Предмет не найден.", show_alert=True)
         return
-    await callback.answer("🚧 Использование предметов скоро появится.", show_alert=True)
+    it, item = found
+    key = it.get("key")
+    if key not in MINE_ITEMS:
+        await callback.answer("🚧 Использование этого предмета скоро появится.", show_alert=True)
+        return
+    if it.get("use"):
+        it.pop("use", None)
+        msg = "Предмет выключен: в шахте он работать не будет."
+    elif _int(it.get("dur")) <= 0:
+        await callback.answer("Предмет сломан или использования кончились: в шахте он не сработает.", show_alert=True)
+        return
+    else:
+        for o in items_of(user):
+            if o.get("key") == key:
+                o.pop("use", None)   # из одного вида включён только один предмет
+        it["use"] = True
+        msg = "Предмет включён: сработает при следующем запуске шахты."
+    D.save_users()
+    await callback.answer(msg, show_alert=True)
+    await D.show_rich_card(callback, "workshop", lambda wi: item_html(user, idx, wi), item_kb(user, idx))
 
 
 @router.callback_query(F.data.startswith("ws:ev:"))
