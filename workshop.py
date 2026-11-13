@@ -61,7 +61,7 @@ UPGRADE_EMOJI = ("", "✨")                     # кнопка «Улучшит�
 REFRESH_EMOJI = ("", "🔄")                     # кнопка «Обновить»
 EVO_EMOJI = ("", "🌱")                          # кнопка «Эволюция»
 RECON_EMOJI = ("", "♻️")                        # кнопка «Реконструкция» (впиши id кастомного)
-USE_EMOJI = ("", "⚡")                         # кнопка «Использовать» (пока заглушка)
+USE_EMOJI = ("", "✳️")                         # кнопка «Использовать» (пока заглушка)
 SLOT_TITLE_EMOJI = ("5350434966163443737", "🔥")   # заголовок «СЛОТ N» внутри слота
 
 # ключ -> (название, эмодзи)
@@ -816,10 +816,10 @@ def group_kb(user: dict, key: str, page: int = 0) -> InlineKeyboardMarkup:
         if len(st) > 1:   # «1х» не пишем: и так понятно, что предмет один
             parts.append(f"{len(st)}х")
         if level_of(it):
-            parts.append(f"ур.{level_of(it)}")
+            parts.append(f"{UPGRADE_EMOJI[1]}{level_of(it)}")
         if evo_of(it):
             parts.append(f"{EVO_EMOJI[1]}{evo_of(it)}")
-        label = "| " + " · ".join(parts or ["ур.0"])
+        label = "| " + " · ".join(parts or [f"{UPGRADE_EMOJI[1]}0"])
         btns.append(_btn(label, f"ws:it:{st[0]}", ITEMS[key]["emoji"]))
     rows = _rows(btns, ITEMS_PER_ROW)
     if pages > 1:
@@ -899,7 +899,7 @@ def item_html(user: dict, idx: int, with_image: bool) -> str:
     legend = []
     if can_upgrade(item):
         legend += [(UPGRADE_EMOJI, "Улучшить"), (EVO_EMOJI, "Эволюция")]
-    legend += [(USE_EMOJI, "Использовать"), (RECON_EMOJI, "Реконструкция (50% ресурсов)")]
+    legend += [(USE_EMOJI, "Использовать"), (RECON_EMOJI, "Реконструкция")]
     if can_repair(item):
         legend.append((REPAIR_EMOJI, "Починить"))
     return text + (_legend(*legend, div=True) if legend else "")
