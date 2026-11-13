@@ -683,26 +683,26 @@ def _cost_lines(user: dict, cost: dict) -> tuple[list[str], list[str]]:
 
 
 def _stats_box(item: dict, lvl: int, fuse: int = 0) -> str:
-    """Цитата с уровнем, бонусом и редкостью: одинаковая в карточке предмета и на экране улучшения."""
+    """Характеристики без цитаты: подпись жирным, значение моно (копируется по нажатию). Общие для карточки и экрана улучшения."""
     boost = D.custom_emoji(BOOST_EMOJI)
-    box = []
+    lines = []
     if can_upgrade(item):
-        box.append(f"⭐ Уровень: <b>{lvl} / {MAX_LEVEL}</b>")
-    bonus = f"{boost} {escape(item['bonus'][0])}: <b>{_pct(bonus_pct(item, lvl, fuse))}</b>"
+        lines.append(f"<b>⭐ Уровень:</b> <code>{lvl} / {MAX_LEVEL}</code>")
+    bonus = f"<b>{boost} {escape(item['bonus'][0])}:</b> <code>{_pct(bonus_pct(item, lvl, fuse))}</code>"
     if can_upgrade(item) and lvl < MAX_LEVEL:
-        bonus += f" → {_pct(bonus_pct(item, lvl + 1, fuse))}"
-    box.append(bonus)
-    box.append(f"💎 Редкость: {escape(item['rarity'])}")
+        bonus += f" → <code>{_pct(bonus_pct(item, lvl + 1, fuse))}</code>"
+    lines.append(bonus)
+    lines.append(f"<b>💎 Редкость:</b> <code>{escape(item['rarity'])}</code>")
     if can_upgrade(item) and can_repair(item):
-        dur_line = f"🛡 Макс. прочность: <b>{max_dur(item, lvl)}</b>"
+        dur_line = f"<b>🛡 Прочность:</b> <code>{max_dur(item, lvl)}</code>"
         if lvl < MAX_LEVEL:
-            dur_line += f" → {max_dur(item, lvl + 1)}"
-        box.append(dur_line)
+            dur_line += f" → <code>{max_dur(item, lvl + 1)}</code>"
+        lines.append(dur_line)
     if fuse:
-        box.append(f"🔗 Слияний: <b>{fuse}</b> (+{fuse * MERGE_BONUS * 100:g}% к бонусу)")
+        lines.append(f"<b>🔗 Слияний:</b> <code>{fuse}</code> (+{fuse * MERGE_BONUS * 100:g}% к бонусу)")
     if item.get("note"):
-        box.append(f"📌 {escape(item['note'])}")
-    return "<blockquote>" + "<br>".join(box) + "</blockquote>"
+        lines.append(f"<b>📌 {escape(item['note'])}</b>")
+    return "<p>⠀<br>" + "<br>".join(lines) + "</p>"
 
 
 def item_html(user: dict, idx: int, with_image: bool) -> str:
@@ -713,12 +713,13 @@ def item_html(user: dict, idx: int, with_image: bool) -> str:
     dur = min(_int(it.get("dur")), mx)
     gap = "⠀<br>"
     text = _img(with_image) + _head(item["name"].upper(), item["emoji"], item.get("desc") or "Предмет из инвентаря.")
-    text += f"<p>{gap}</p>" + _stats_box(item, lvl, fuse_of(it))
+    text += _stats_box(item, lvl, fuse_of(it))
 
     if can_repair(item):
-        text += f"<p>{gap}<b>❤️ Прочность</b><br>{_bar(dur, mx)} <b>{dur * 100 // mx}%</b> ({dur} / {mx})</p>"
+        text += (f"<p>{gap}<b>❤️ Прочность</b><br>{_bar(dur, mx)} "
+                 f"<code>{dur * 100 // mx}%</code> · <code>{dur} / {mx}</code></p>")
     else:
-        text += f"<p>{gap}<b>❤️ Осталось использований: {dur} / {mx}</b><br>{_bar(dur, mx)}</p>"
+        text += f"<p>{gap}<b>❤️ Осталось использований:</b> <code>{dur} / {mx}</code><br>{_bar(dur, mx)}</p>"
 
     legend = []
     if can_upgrade(item):
@@ -738,7 +739,8 @@ def repair_html(user: dict, idx: int, with_image: bool) -> str:
     lines, lack = _cost_lines(user, repair_cost(item, dur, lvl))
     note = ("<i>Не хватает " + ", ".join(lack) + ".</i>") if lack else "<i>Всё готово, можно восстанавливать.</i>"
     gap = "⠀<br>"
-    return text + (f"<p>{gap}<b>❤️ Прочность</b><br>{_bar(dur, mx)} <b>{dur * 100 // mx}%</b> ({dur} / {mx})</p>"
+    return text + (f"<p>{gap}<b>❤️ Прочность</b><br>{_bar(dur, mx)} "
+                   f"<code>{dur * 100 // mx}%</code> · <code>{dur} / {mx}</code></p>"
                    f"<p>{gap}<b>▸ Нужно</b><br>" + "<br>".join(lines) + f"<br>{note}</p>")
 
 
@@ -757,7 +759,7 @@ def upgrade_html(user: dict, idx: int, with_image: bool) -> str:
     lines, lack = _cost_lines(user, upgrade_cost(item, lvl + 1))
     note = ("<i>Не хватает " + ", ".join(lack) + ".</i>") if lack else "<i>Всё готово, можно улучшать.</i>"
     gap = "⠀<br>"
-    return text + (f"<p>{gap}</p>" + _stats_box(item, lvl, fuse_of(it))
+    return text + (_stats_box(item, lvl, fuse_of(it))
                    + f"<p>{gap}<b>▸ Нужно</b><br>" + "<br>".join(lines) + f"<br>{note}</p>")
 
 
@@ -765,9 +767,9 @@ def merge_html(user: dict, idx: int, with_image: bool) -> str:
     it, item = inv_item(user, idx)
     text = _img(with_image) + _head(item["name"].upper(), item["emoji"], "Слияние двух одинаковых предметов.")
     gap = "⠀<br>"
-    text += (f"<p>{gap}</p><blockquote>🎲 Шанс успеха: <b>{MERGE_CHANCE * 100:g}%</b><br>"
-             f"✅ Успех: <b>+{MERGE_BONUS * 100:g}%</b> к бонусу, прочность полная<br>"
-             f"💥 Провал: <b>оба предмета пропадут</b></blockquote>"
+    text += (f"<p>{gap}<b>🎲 Шанс успеха:</b> <code>{MERGE_CHANCE * 100:g}%</code><br>"
+             f"<b>✅ Успех:</b> <code>+{MERGE_BONUS * 100:g}%</code> к бонусу, прочность полная<br>"
+             f"<b>💥 Провал:</b> оба предмета пропадут</p>"
              f"<p>{gap}<i>Слить можно только одинаковые предметы одного уровня. Выбери второй предмет.</i></p>")
     return text
 
