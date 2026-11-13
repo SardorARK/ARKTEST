@@ -180,7 +180,11 @@ MAX_SLOTS = 4          # слотов в кузнице; сначала откр
 # Цена открытия слота (монеты). Слоты открываются строго по порядку: 2, потом 3, потом 4.
 SLOT_PRICES = {2: 50_000, 3: 150_000, 4: 400_000}
 INVENTORY_CAP = 200   # сколько предметов максимум в инвентаре мастерской
-MAX_ITEM_BUTTONS = 40  # сколько кнопок-предметов показывать в разделе (лимит Telegram - 100 кнопок)
+MAX_ITEM_BUTTONS = 40  # лимит кнопок в списке кандидатов на слияние
+ITEMS_PER_ROW = 3      # предметов в ряду в разделе
+ROWS_PER_PAGE = 3      # рядов на странице; дальше предметы делятся на страницы (3 x 3 = 9 на странице)
+PAGE_PREV_EMOJI = ("", "◀️")
+PAGE_NEXT_EMOJI = ("", "▶️")
 
 
 # ---------------------------------------------------------------------------
@@ -594,7 +598,25 @@ def root_kb() -> InlineKeyboardMarkup:
     ])
 
 
-def category_html(user: dict, key: str, with_image: bool) -> str:
+def cat_indices(user: dict, key: str) -> list[int]:
+    """Номера (в инвентаре) предметов раздела key."""
+    return [i for i, it in enumerate(items_of(user)) if ITEMS.get(it.get("key"), {}).get("category") == key]
+
+
+def _pages(total: int) -> int:
+    return max(1, -(-total // (ITEMS_PER_ROW * ROWS_PER_PAGE)))
+
+
+def page_of(user: dict, idx: int) -> int:
+    """На какой странице раздела лежит предмет idx (чтобы «Назад» возвращал на ту же страницу)."""
+    found = inv_item(user, idx)
+    if found is None:
+        return 0
+    mine = cat_indices(user, found[1]["category"])
+    return mine.index(idx) // (ITEMS_PER_ROW * ROWS_PER_PAGE) if idx in mine else 0
+
+
+def category_html(user: dict, key: str, with_image: bool, page: int = 0) -> str:
     title, emoji, desc = CATEGORIES[key]
     text = _img(with_image) + _head(title.upper(), emoji, desc)
     if key == "res":
@@ -605,13 +627,13 @@ def category_html(user: dict, key: str, with_image: bool) -> str:
                            "Добывай их, и они появятся здесь.</p>")
         lines = [f"{e} <b>{escape(n)}</b> — <code>{_f(c)}</code>" for _, n, e, c in owned]
         return text + "<p>⠀<br>" + "<br>".join(lines) + "</p>"
-    mine = [it for it in items_of(user) if ITEMS.get(it.get("key"), {}).get("category") == key]
+    mine = cat_indices(user, key)
     if mine:
-        shown = min(len(mine), MAX_ITEM_BUTTONS)
+        pages = _pages(len(mine))
         text += (f"<p>⠀<br><b>В инвентаре: {len(mine)}</b><br>"
                  "Нажми на предмет: состояние, улучшение и восстановление.</p>")
-        if shown < len(mine):
-            text += f"<p><i>Показаны первые {shown}.</i></p>"
+        if pages > 1:
+            text += f"<p><i>Страница {min(max(page, 0), pages - 1) + 1} из {pages}.</i></p>"
     elif any(i["category"] == key for i in ITEMS.values()):
         text += "<p><b>Пока пусто</b><br>Предметов нет. Создай что-нибудь в «Кузнице».</p>"
     else:
@@ -619,14 +641,21 @@ def category_html(user: dict, key: str, with_image: bool) -> str:
     return text
 
 
-def category_kb(user: dict, key: str) -> InlineKeyboardMarkup:
-    """Раздел: предметы игрока кнопками только со значком, по нажатию открывается карточка."""
-    btns = []
-    for idx, it in enumerate(items_of(user)):
-        item = ITEMS.get(it.get("key"))
-        if item and item["category"] == key and len(btns) < MAX_ITEM_BUTTONS:
-            btns.append(_ebtn(f"ws:it:{idx}", item["emoji"]))
-    return InlineKeyboardMarkup(inline_keyboard=_rows(btns) + [_back("ws:open")])
+def category_kb(user: dict, key: str, page: int = 0) -> InlineKeyboardMarkup:
+    """Раздел: предметы игрока значками, по 3 в ряд, 3 ряда на странице; дальше листание страниц."""
+    mine = cat_indices(user, key)
+    per = ITEMS_PER_ROW * ROWS_PER_PAGE
+    pages = _pages(len(mine))
+    page = min(max(page, 0), pages - 1)
+    btns = [_ebtn(f"ws:it:{i}", ITEMS[items_of(user)[i]["key"]]["emoji"]) for i in mine[page * per:(page + 1) * per]]
+    rows = _rows(btns, ITEMS_PER_ROW)
+    if pages > 1:
+        rows.append([
+            _ebtn(f"ws:cat:{key}:{(page - 1) % pages}", PAGE_PREV_EMOJI),
+            InlineKeyboardButton(text=f"{page + 1} / {pages}", callback_data="ws:noop", style=ButtonStyle.PRIMARY),
+            _ebtn(f"ws:cat:{key}:{(page + 1) % pages}", PAGE_NEXT_EMOJI),
+        ])
+    return InlineKeyboardMarkup(inline_keyboard=rows + [_back("ws:open")])
 
 
 def _bar(cur: int, mx: int, width: int = 10) -> str:
@@ -770,7 +799,7 @@ def item_kb(user: dict, idx: int) -> InlineKeyboardMarkup:
     if can_repair(item):
         acts.append(_ebtn(f"ws:rp:{idx}", REPAIR_EMOJI, ButtonStyle.SUCCESS))
     rows = [acts] if acts else []
-    rows.append(_back(f"ws:cat:{item['category']}"))
+    rows.append(_back(f"ws:cat:{item['category']}:{page_of(user, idx)}"))
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -916,20 +945,31 @@ async def on_open(callback: CallbackQuery):
     await D.show_rich_card(callback, "workshop", lambda wi: root_html(user, wi, done), root_kb())
 
 
+@router.callback_query(F.data == "ws:noop")
+async def on_noop(callback: CallbackQuery):
+    await callback.answer()
+
+
 @router.callback_query(F.data.startswith("ws:cat:"))
 async def on_category(callback: CallbackQuery):
     user = await _user_or_alert(callback)
     if user is None:
         return
-    key = callback.data.split(":", 2)[2]
+    parts = callback.data.split(":")
+    key = parts[2] if len(parts) > 2 else ""
+    try:
+        page = int(parts[3]) if len(parts) > 3 else 0
+    except ValueError:
+        page = 0
     if key not in CATEGORIES:
         await callback.answer()
         return
     await callback.answer()
     if settle(user):
         D.save_users()
-    kb = InlineKeyboardMarkup(inline_keyboard=[_back("ws:open")]) if key == "res" else category_kb(user, key)
-    await D.show_rich_card(callback, "workshop", lambda wi: category_html(user, key, wi), kb)
+    page = min(max(page, 0), _pages(len(cat_indices(user, key))) - 1)
+    kb = InlineKeyboardMarkup(inline_keyboard=[_back("ws:open")]) if key == "res" else category_kb(user, key, page)
+    await D.show_rich_card(callback, "workshop", lambda wi: category_html(user, key, wi, page), kb)
 
 
 def _slot_arg(data: str, idx: int = 2) -> int | None:
