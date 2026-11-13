@@ -52,6 +52,16 @@ def _ach(name: str, *args) -> None:
 D = SimpleNamespace()
 
 
+def _ws():
+    """Модуль «Мастерской» (предметы). Если его нет или он сломан, шахта работает без предметов."""
+    try:
+        import workshop
+        return workshop
+    except Exception:
+        log.debug("Шахта: мастерская недоступна", exc_info=True)
+        return None
+
+
 def setup(**deps) -> None:
     """Передаём модулю функции и эмодзи из main.py.
     Нужны: get_user, save_users, send_rich_card, show_rich_card, custom_emoji,
@@ -427,7 +437,21 @@ def minerals_range(p: dict, minutes: int) -> tuple[int, int]:
     return v, v
 
 
-def roll_totals(pick: dict, minutes: int, bonus: int = 0) -> dict[str, int]:
+GOLD_CHANCE_CAP = 8.0    # золото в шахте не может выпадать чаще, чем в 8% случаев руды (защита экономики)
+
+
+def ore_weights(gold_extra: float = 0.0) -> dict[str, float]:
+    """Шансы руд (всего 100). Золото: базовый шанс из ORES + прибавка верёвки, но не больше GOLD_CHANCE_CAP.
+    Остальные руды делят оставшиеся проценты в прежних пропорциях."""
+    gold = min(GOLD_CHANCE_CAP, max(0.0, ORES["gold"]["weight"] + gold_extra))
+    others = {k: o["weight"] for k, o in ORES.items() if k != "gold"}
+    scale = (100 - gold) / sum(others.values())
+    w = {k: v * scale for k, v in others.items()}
+    w["gold"] = gold
+    return {k: w[k] for k in ORES}
+
+
+def roll_totals(pick: dict, minutes: float, bonus: float = 0, gold_extra: float = 0.0) -> dict[str, int]:
     """Весь запуск целиком: сколько штук каждой добычи он даст (уже с множителем шахты).
     Руда: случайное число из диапазона шахты и случайный состав по шансам ORES.
     Минералы: СТАБИЛЬНО, всегда одинаково (см. mineral_drops). bonus: бонус времени запуска в %.
@@ -436,7 +460,8 @@ def roll_totals(pick: dict, minutes: int, bonus: int = 0) -> dict[str, int]:
     n_ore = round(random.randint(lo, hi) * (100 - MINERAL_CHANCE) / 100 * (100 + bonus) / 100)
     tot = {k: 0 for k in ORES}
     keys = list(ORES)
-    for k in random.choices(keys, [ORES[k]["weight"] for k in keys], k=n_ore):
+    w = ore_weights(gold_extra)
+    for k in random.choices(keys, [w[k] for k in keys], k=n_ore):
         tot[k] += 1
     tot = {k: v * pick["qty"] for k, v in tot.items()}
     tot["mineral"] = mineral_drops(pick, minutes, bonus)
@@ -617,6 +642,20 @@ def _dur_label(minutes: int) -> str:
 
 # ---------- Экраны ----------
 
+def _used_block(run: dict | None) -> str:
+    """Блок «Используемые предметы»: только пока шахта работает и только если предметы реально применились."""
+    if not run or not run.get("used"):
+        return ""
+    ws = _ws()
+    if ws is None:
+        return ""
+    try:
+        rows = [ws.mine_item_label(e) for e in run["used"]]
+    except Exception:
+        return ""
+    return _quote("Используемые предметы", rows) + _gap()
+
+
 def ug_html(user_id: int, with_image: bool = False) -> str:
     """Меню раздела: шахта, прогресс и время до конца. Шахты и рюкзак открываются кнопками."""
     user, ug = load(user_id)
@@ -644,6 +683,7 @@ def ug_html(user_id: int, with_image: bool = False) -> str:
         f"{_image(with_image)}"
         + _tree(state, "Состояние", mono=False)
         + _gap()
+        + _used_block(run)
         + _quote("Добыто, ещё не забрано", _found_rows(ug), expandable=True)
     )
 
@@ -1219,14 +1259,29 @@ async def on_start(callback: CallbackQuery):
     p = PICKS[i]
     minutes, _, bonus, label = DURATIONS[dur_selected(ug)]
     now = time.time()
+
+    # Предметы мастерской: лучший из каждого вида (кирка, верёвка, аптечка) работает на этот запуск
+    ore_b = gold_b = time_b = 0.0
+    used: list = []
+    ws = _ws()
+    if ws is not None:
+        try:
+            fx = ws.mine_items_apply(user)
+            ore_b, gold_b, time_b, used = fx["ore"], fx["gold"], fx["time"], fx["used"]
+        except Exception:
+            log.warning("Шахта: не удалось применить предметы", exc_info=True)
+
+    real_min = minutes * (100 + time_b) / 100     # аптечка: шахта работает дольше (и добывает за это время)
     ug["run"] = {
         "start": now,
-        "end": now + minutes * 60,
+        "end": now + real_min * 60,
         "pick": i,
         "dur": minutes,
-        "tot": roll_totals(p, minutes, bonus),
+        "tot": roll_totals(p, real_min, bonus + ore_b, gold_b),
         "got": {},
     }
+    if used:
+        ug["run"]["used"] = used     # показывается в блоке «Используемые предметы»
     _ach("on_ug_start", user)
     D.save_users()
     _active.add(callback.from_user.id)
