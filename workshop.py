@@ -105,6 +105,7 @@ ITEMS = {
         "seconds": 5 * 60,
         "durability": 100,
         "upgradable": True,
+        "upgrade_extra": [("iron", 6), ("bone", 6)],   # 4-й и 5-й ресурс улучшения (база, растёт с уровнем)
         "bonus": ("Добыча", 1.05),
     },
     "rope": {
@@ -117,6 +118,7 @@ ITEMS = {
         "seconds": 5 * 60,
         "durability": 100,
         "upgradable": True,
+        "upgrade_extra": [("fiber", 8), ("leather", 5)],
         "bonus": ("Шанс найти золото", 1.15),   # было 1%, станет 1.15%
     },
     "medkit": {
@@ -147,9 +149,15 @@ ITEMS = {
 }
 
 # Уровни предметов (только где стоит "upgradable": True - кирка и верёвка)
-MAX_LEVEL = 10          # максимальный уровень
-LEVEL_BONUS_MULT = 5    # на 10 уровне бонус в 5 раз больше стартового (+5% -> +25%), растёт равномерно
-UPGRADE_TOTAL_MULT = 3.5  # все 10 улучшений вместе стоят ~3.5 цены предмета; каждый следующий уровень дороже
+# Во сколько раз каждое улучшение увеличивает бонус предмета (перемножаются: 1 ур. = x1.5, 2 ур. = x1.5*1.5 ...).
+# Первые уровни дают больше, последние меньше (диапазон 1.3-1.5). Итого на 10 уровне бонус x25.6 от стартового.
+LEVEL_MULTS = (1.5, 1.5, 1.45, 1.4, 1.4, 1.35, 1.35, 1.3, 1.3, 1.3)
+MAX_LEVEL = len(LEVEL_MULTS)   # максимальный уровень (10)
+# Цена улучшения: ресурсы рецепта x (START * GROWTH^(уровень-1)); 1 ур. = 0.5 рецепта, 10 ур. = ~2.6 рецепта.
+UPGRADE_COST_START = 0.5
+UPGRADE_COST_GROWTH = 1.2
+# Сколько разных ресурсов нужно: уровни 1-3 - 3, уровни 4-5 - 4, уровни 6-10 - 5.
+UPGRADE_KINDS = (3, 3, 3, 4, 4, 5, 5, 5, 5, 5)
 
 MAX_SLOTS = 4          # слотов в кузнице; сначала открыт только первый
 # Цена открытия слота (монеты). Слоты открываются строго по порядку: 2, потом 3, потом 4.
@@ -228,11 +236,18 @@ def level_of(it: dict) -> int:
     return min(MAX_LEVEL, _int(it.get("lvl")))
 
 
+def level_mult(to_level: int) -> float:
+    """Во сколько раз улучшение до уровня to_level (1..10) увеличивает бонус."""
+    return LEVEL_MULTS[to_level - 1]
+
+
 def bonus_pct(item: dict, lvl: int = 0) -> float:
-    """Бонус предмета в процентах на уровне lvl: 0 уровень - стартовый, 10 уровень - стартовый x5."""
-    base = (item["bonus"][1] - 1) * 100
-    k = 1 + (LEVEL_BONUS_MULT - 1) * (lvl / MAX_LEVEL) if can_upgrade(item) else 1
-    return round(base * k, 2)
+    """Бонус предмета в процентах на уровне lvl: 0 уровень - стартовый, каждый уровень умножает его."""
+    val = (item["bonus"][1] - 1) * 100
+    if can_upgrade(item):
+        for n in LEVEL_MULTS[:lvl]:
+            val *= n
+    return round(val, 1)
 
 
 def _pct(v: float) -> str:
@@ -240,9 +255,13 @@ def _pct(v: float) -> str:
 
 
 def upgrade_cost(item: dict, to_level: int) -> dict:
-    """Цена улучшения до уровня to_level (1..10). Сумма всех уровней = ~UPGRADE_TOTAL_MULT цен предмета."""
-    weight = to_level / (MAX_LEVEL * (MAX_LEVEL + 1) / 2)
-    return {k: max(1, round(n * UPGRADE_TOTAL_MULT * weight)) for k, n in item["cost"].items()}
+    """Цена улучшения до уровня to_level: ресурсы рецепта и добавочные, чем выше уровень, тем их больше и они разнообразнее."""
+    scale = UPGRADE_COST_START * UPGRADE_COST_GROWTH ** (to_level - 1)
+    cost = {k: max(1, round(n * scale)) for k, n in item["cost"].items()}
+    extra = item.get("upgrade_extra") or []
+    for k, n in extra[:max(0, UPGRADE_KINDS[to_level - 1] - len(cost))]:
+        cost[k] = max(1, round(n * scale))
+    return cost
 
 
 def upgrade_item(user: dict, idx: int) -> str | None:
@@ -632,7 +651,7 @@ def upgrade_html(user: dict, idx: int, with_image: bool) -> str:
     note = ("<i>Не хватает " + ", ".join(lack) + ".</i>") if lack else "<i>Всё готово, можно улучшать.</i>"
     gap = "⠀<br>"
     text += (f"<p>{gap}<b>▸ Уровень</b><br><b>{lvl}/{MAX_LEVEL} → {lvl + 1}/{MAX_LEVEL}</b><br>"
-             f"<b>{boost} {escape(item['bonus'][0])}: {_pct(bonus_pct(item, lvl))} → {_pct(bonus_pct(item, lvl + 1))}</b></p>"
+             f"<b>{boost} {escape(item['bonus'][0])}: {_pct(bonus_pct(item, lvl))} → {_pct(bonus_pct(item, lvl + 1))} (×{level_mult(lvl + 1):g})</b></p>"
              f"<p>{gap}<b>▸ Нужно</b><br>" + "<br>".join(lines) + f"<br>{note}</p>")
     return text + _legend((UPGRADE_EMOJI, "Улучшить"))
 
