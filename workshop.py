@@ -93,6 +93,7 @@ CATEGORIES = {
 #   cost     - сколько ресурсов нужно
 #   seconds  - время крафта
 #   durability - прочность: шкала, которую можно восстанавливать за ресурсы
+#   max_durability - (необязательно) прочность на 10 уровне; без неё прочность от уровня не зависит
 #   uses     - (вместо durability) сколько раз сработает предмет; восстановить нельзя
 #   note     - (необязательно) строка с особым правилом, показывается в карточке рецепта
 #   cancel_cost - (необязательно) сколько прочности тратится при отмене действия предмета
@@ -107,6 +108,7 @@ ITEMS = {
         "cost": {"wood": 10, "feather": 4, "vine": 5},
         "seconds": 5 * 60,
         "durability": 100,
+        "max_durability": 450,   # макс. прочность на 10 уровне (растёт равномерно с уровнем: +35 за уровень)
         "upgradable": True,
         "max_bonus": 150,    # бонус добычи на 10 уровне: +150%
         # Цена улучшения: (ресурс, уровень-образец, сколько на нём, сколько на 10 уровне, с какого уровня нужен).
@@ -124,6 +126,7 @@ ITEMS = {
         "cost": {"thread": 15, "vine": 5, "clay": 4},
         "seconds": 5 * 60,
         "durability": 100,
+        "max_durability": 450,
         "upgradable": True,
         "upgrade": [("thread", 2, 14, 120, 1), ("vine", 2, 5, 70, 1), ("clay", 2, 4, 60, 1),
                     ("fiber", 4, 12, 70, 4), ("leather", 6, 8, 50, 6)],
@@ -218,9 +221,13 @@ def can_afford(user: dict, item_key: str) -> bool:
     return all(have(user, k) >= n for k, n in ITEMS[item_key]["cost"].items())
 
 
-def max_dur(item: dict) -> int:
-    """Прочность или число использований предмета в целом виде."""
-    return int(item.get("durability") or item.get("uses") or 0)
+def max_dur(item: dict, lvl: int = 0) -> int:
+    """Прочность или число использований предмета на уровне lvl (прочность растёт с уровнем до max_durability)."""
+    base = int(item.get("durability") or item.get("uses") or 0)
+    top = item.get("max_durability")
+    if top and item.get("upgradable") and "durability" in item:
+        return round(base + (top - base) * max(0, min(lvl, MAX_LEVEL)) / MAX_LEVEL)
+    return base
 
 
 def can_repair(item: dict) -> bool:
@@ -228,9 +235,9 @@ def can_repair(item: dict) -> bool:
     return "durability" in item
 
 
-def repair_cost(item: dict, dur: int) -> dict:
+def repair_cost(item: dict, dur: int, lvl: int = 0) -> dict:
     """Чем меньше прочность, тем больше ресурсов рецепта: при 30% нужно 70% рецепта (округляем вверх)."""
-    mx = max_dur(item)
+    mx = max_dur(item, lvl)
     if not can_repair(item) or mx <= 0:
         return {}
     miss = max(0, mx - max(0, dur))
@@ -296,7 +303,7 @@ def merge_items(user: dict, a: int, b: int) -> tuple[str | None, bool, int]:
     if random.random() < MERGE_CHANCE:
         it = lst[a]
         it["fuse"] = fuse_of(it) + 1
-        it["dur"] = max_dur(ITEMS[it["key"]])
+        it["dur"] = max_dur(ITEMS[it["key"]], level_of(it))
         del lst[b]
         return None, True, a - 1 if b < a else a
     for i in sorted((a, b), reverse=True):
@@ -321,6 +328,9 @@ def upgrade_item(user: dict, idx: int) -> str | None:
     r = res_of(user)
     for k, n in cost.items():
         r[k] = have(user, k) - n
+    if can_repair(item):   # прочность растёт с уровнем: прирост достаётся предмету сразу
+        old_mx, new_mx = max_dur(item, lvl), max_dur(item, lvl + 1)
+        it["dur"] = min(_int(it.get("dur")), old_mx) + (new_mx - old_mx)
     it["lvl"] = lvl + 1
     return None
 
@@ -342,16 +352,17 @@ def repair_item(user: dict, idx: int) -> str | None:
     it, item = found
     if not can_repair(item):
         return "Этот предмет нельзя восстановить."
-    dur = min(_int(it.get("dur")), max_dur(item))
-    if dur >= max_dur(item):
+    mx = max_dur(item, level_of(it))
+    dur = min(_int(it.get("dur")), mx)
+    if dur >= mx:
         return "Прочность на 100%."
-    cost = repair_cost(item, dur)
+    cost = repair_cost(item, dur, level_of(it))
     if any(have(user, k) < n for k, n in cost.items()):
         return "Не хватает ресурсов для восстановления."
     r = res_of(user)
     for k, n in cost.items():
         r[k] = have(user, k) - n
-    it["dur"] = max_dur(item)
+    it["dur"] = mx
     return None
 
 
@@ -644,6 +655,11 @@ def _stats_box(item: dict, lvl: int, fuse: int = 0) -> str:
         bonus += f" → {_pct(bonus_pct(item, lvl + 1, fuse))}"
     box.append(bonus)
     box.append(f"💎 Редкость: {escape(item['rarity'])}")
+    if can_upgrade(item) and can_repair(item):
+        dur_line = f"🛡 Макс. прочность: <b>{max_dur(item, lvl)}</b>"
+        if lvl < MAX_LEVEL:
+            dur_line += f" → {max_dur(item, lvl + 1)}"
+        box.append(dur_line)
     if fuse:
         box.append(f"🔗 Слияний: <b>{fuse}</b> (+{fuse * MERGE_BONUS * 100:g}% к бонусу)")
     if item.get("note"):
@@ -654,16 +670,16 @@ def _stats_box(item: dict, lvl: int, fuse: int = 0) -> str:
 def item_html(user: dict, idx: int, with_image: bool) -> str:
     """Карточка предмета: рамка с уровнем и бонусом, прочность со шкалой, ремонт, подсказка по кнопкам."""
     it, item = inv_item(user, idx)
-    mx = max_dur(item)
-    dur = min(_int(it.get("dur")), mx)
     lvl = level_of(it)
+    mx = max_dur(item, lvl)
+    dur = min(_int(it.get("dur")), mx)
     ok, no = D.custom_emoji(OK_EMOJI), D.custom_emoji(NO_EMOJI)
     gap = "⠀<br>"
     text = _img(with_image) + _head(item["name"].upper(), item["emoji"], item.get("desc") or "Предмет из инвентаря.")
     text += f"<p>{gap}</p>" + _stats_box(item, lvl, fuse_of(it))
 
     if can_repair(item):
-        text += f"<p>{gap}<b>❤️ Прочность</b><br>{_bar(dur, mx)} <b>{dur * 100 // mx}%</b></p>"
+        text += f"<p>{gap}<b>❤️ Прочность</b><br>{_bar(dur, mx)} <b>{dur * 100 // mx}%</b> ({dur} / {mx})</p>"
     else:
         text += f"<p>{gap}<b>❤️ Осталось использований: {dur} / {mx}</b><br>{_bar(dur, mx)}</p>"
 
@@ -674,7 +690,7 @@ def item_html(user: dict, idx: int, with_image: bool) -> str:
         legend.append((REPAIR_EMOJI, "Восстановить"))
         if dur < mx:
             lines = []
-            for k, n in repair_cost(item, dur).items():
+            for k, n in repair_cost(item, dur, lvl).items():
                 name, em = RESOURCES[k]
                 got = have(user, k)
                 lines.append(f"{ok if got >= n else no} {em} {escape(name)} {_n(got)} / {_n(n)}")
@@ -710,7 +726,7 @@ def merge_kb(user: dict, idx: int) -> InlineKeyboardMarkup:
     btns = []
     for j in merge_partners(user, idx)[:MAX_ITEM_BUTTONS]:
         o = items_of(user)[j]
-        btns.append(_btn(f"№{j + 1} · {_int(o.get('dur')) * 100 // max_dur(item)}%",
+        btns.append(_btn(f"№{j + 1} · {min(_int(o.get('dur')), max_dur(item, level_of(o))) * 100 // max_dur(item, level_of(o))}%",
                          f"ws:mgo:{idx}:{j}", item["emoji"], ButtonStyle.DANGER))
     return InlineKeyboardMarkup(inline_keyboard=_rows(btns, 2) + [_back(f"ws:it:{idx}")])
 
