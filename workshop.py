@@ -6,7 +6,10 @@
     user["res"]      = {ключ_ресурса: количество}
     user["ws_slots"] = сколько слотов кузницы открыто (1..MAX_SLOTS, сначала открыт один)
     user["ws_craft"] = [{"item": ключ, "slot": номер_слота, "start": время, "end": время}, ...]
-    user["ws_items"] = [{"key": ключ_предмета, "dur": текущая_прочность_или_остаток_использований}, ...]
+    user["ws_items"] = [{"key": ключ_предмета, "dur": прочность_или_остаток_использований, "lvl": уровень, "evo": этап_эволюции}, ...]
+
+Одинаковые предметы (ключ + уровень + этап эволюции) показываются в разделе одной стопкой «⛏️ | 5х».
+Иметь можно не больше STACK_MAX одинаковых предметов. Внутри это обычные записи, каждая со своей прочностью.
 
 Крафт идёт по времени и не требует, чтобы игрок ждал в боте: готовый предмет сам попадает
 в инвентарь, когда игрок открывает «Мастерскую». Ресурсы списываются при запуске крафта.
@@ -55,7 +58,7 @@ MAKE_EMOJI = ("6048599681292832729", "⚒️")   # кнопка «Создать
 REPAIR_EMOJI = ("", "🔧")                      # кнопка «Восстановить» (впиши id кастомного)
 UPGRADE_EMOJI = ("", "✨")                     # кнопка «Улучшить» (впиши id кастомного)
 REFRESH_EMOJI = ("", "🔄")                     # кнопка «Обновить»
-MERGE_EMOJI = ("", "🧬")                       # кнопка «Слияние»
+EVO_EMOJI = ("", "🌱")                          # кнопка «Эволюция»
 USE_EMOJI = ("", "⚡")                         # кнопка «Использовать» (пока заглушка)
 SLOT_TITLE_EMOJI = ("5350434966163443737", "🔥")   # заголовок «СЛОТ N» внутри слота
 
@@ -173,15 +176,16 @@ for _m in LEVEL_MULTS:
 # Чем выше уровень, тем дороже ремонт (и появляются доп. ресурсы улучшения). Берётся доля недостающей прочности.
 REPAIR_COST_SHARE = 0.5
 
-# Слияние двух одинаковых предметов (одинаковый ключ, уровень и число слияний)
-# 3 этапа: на каждом сливаются два предмета с одинаковым числом слияний. При провале оба предмета пропадают.
-# (шанс успеха, итоговая прибавка к бонусу в % после успешного слияния)
-MERGE_STAGES = (
-    (0.25, 100),   # этап 1: два предмета без слияний -> +100%
-    (0.05, 200),   # этап 2: два предмета с 1 слиянием -> +200%
-    (0.01, 500),   # этап 3: два предмета с 2 слияниями -> +500%
+# Эволюция предмета (только для улучшаемых предметов: кирка и верёвка). Другие предметы не нужны, платим ресурсами.
+# 3 этапа подряд. При провале ресурсы сгорают, а предмет остаётся как был.
+# (шанс успеха, итоговая прибавка к бонусу в % после успеха, во сколько раз больше ресурсов, чем в рецепте крафта предмета)
+EVO_STAGES = (
+    (0.25, 100, 2),    # этап 1: 2x ресурсов рецепта, шанс 25%, +100%
+    (0.05, 200, 10),   # этап 2: 10x ресурсов рецепта, шанс 5%, +200%
+    (0.01, 500, 50),   # этап 3: 50x ресурсов рецепта, шанс 1%, +500%
 )
-MAX_FUSE = len(MERGE_STAGES)   # больше слияний сделать нельзя
+MAX_EVO = len(EVO_STAGES)   # больше этапов эволюции нет
+STACK_MAX = 5               # сколько одинаковых предметов (ключ + уровень + этап) можно иметь
 
 DIVIDER_LEN = 18       # длина линии-разделителя из тире
 DIV = "<code>" + "—" * DIVIDER_LEN + "</code>"   # линия моно, разделяет блоки текста в разделе «Предметы»
@@ -190,7 +194,6 @@ MAX_SLOTS = 4          # слотов в кузнице; сначала откр
 # Цена открытия слота (монеты). Слоты открываются строго по порядку: 2, потом 3, потом 4.
 SLOT_PRICES = {2: 50_000, 3: 150_000, 4: 400_000}
 INVENTORY_CAP = 200   # сколько предметов максимум в инвентаре мастерской
-MAX_ITEM_BUTTONS = 40  # лимит кнопок в списке кандидатов на слияние
 ITEMS_PER_ROW = 3      # предметов в ряду в разделе
 ROWS_PER_PAGE = 3      # рядов на странице; дальше предметы делятся на страницы (3 x 3 = 9 на странице)
 PAGE_PREV_EMOJI = ("", "◀️")
@@ -276,17 +279,18 @@ def level_of(it: dict) -> int:
     return min(MAX_LEVEL, _int(it.get("lvl")))
 
 
-def fuse_of(it: dict) -> int:
-    return min(MAX_FUSE, _int(it.get("fuse")))
+def evo_of(it: dict) -> int:
+    """Этап эволюции предмета (старое поле «fuse» из слияний читается как этап)."""
+    return min(MAX_EVO, _int(it["evo"] if "evo" in it else it.get("fuse")))
 
 
-def fuse_bonus(fuse: int) -> int:
-    """Прибавка к бонусу в % за слияния: 0 слияний - 0, 1 - 100, 2 - 200, 3 - 500."""
-    return MERGE_STAGES[fuse - 1][1] if fuse > 0 else 0
+def evo_bonus(evo: int) -> int:
+    """Прибавка к бонусу в % за эволюцию: этап 0 - 0, 1 - 100, 2 - 200, 3 - 500."""
+    return EVO_STAGES[evo - 1][1] if evo > 0 else 0
 
 
-def bonus_pct(item: dict, lvl: int = 0, fuse: int = 0) -> float:
-    """Бонус предмета в % на уровне lvl: уровни умножают стартовый бонус, каждое слияние добавляет +100%."""
+def bonus_pct(item: dict, lvl: int = 0, evo: int = 0) -> float:
+    """Бонус предмета в % на уровне lvl: уровни умножают стартовый бонус, эволюция добавляет свой процент сверху."""
     val = (item["bonus"][1] - 1) * 100
     if can_upgrade(item):
         top = item.get("max_bonus")
@@ -294,7 +298,7 @@ def bonus_pct(item: dict, lvl: int = 0, fuse: int = 0) -> float:
             val *= (top / val) ** (_LOGS[lvl] / _LOGS[MAX_LEVEL])
         else:
             val *= math.exp(_LOGS[lvl])
-    return round(val * (1 + fuse_bonus(fuse) / 100), 1)
+    return round(val * (1 + evo_bonus(evo) / 100), 1)
 
 
 def _pct(v: float) -> str:
@@ -312,31 +316,72 @@ def upgrade_cost(item: dict, to_level: int) -> dict:
     return cost
 
 
-def merge_partners(user: dict, idx: int) -> list[int]:
-    """Номера предметов, с которыми можно слить предмет idx: тот же предмет, уровень и число слияний."""
-    found = inv_item(user, idx)
-    if found is None or not can_upgrade(found[1]) or fuse_of(found[0]) >= MAX_FUSE:
-        return []
-    it = found[0]
-    return [j for j, o in enumerate(items_of(user))
-            if j != idx and o.get("key") == it.get("key")
-            and level_of(o) == level_of(it) and fuse_of(o) == fuse_of(it)]
+def count_same(user: dict, key: str, lvl: int, evo: int) -> int:
+    """Сколько в инвентаре предметов с таким ключом, уровнем и этапом эволюции."""
+    return sum(1 for o in items_of(user)
+               if o.get("key") == key and level_of(o) == lvl and evo_of(o) == evo)
 
 
-def merge_items(user: dict, a: int, b: int) -> tuple[str | None, bool, int]:
-    """Слияние a и b. Возвращает (причина отказа или None, удалось ли, новый номер предмета при успехе)."""
-    if a == b or b not in merge_partners(user, a):
-        return "Слить можно только два одинаковых предмета: один уровень и число слияний.", False, a
+def owned_count(user: dict, key: str) -> int:
+    """Сколько новых (0 ур., 0 этап) предметов уже есть и ещё куются: столько занимает стопка при крафте."""
+    return count_same(user, key, 0, 0) + sum(1 for j in jobs_of(user) if j["item"] == key)
+
+
+def stacks_of(user: dict, category: str) -> list[list[int]]:
+    """Стопки раздела: номера предметов с одним ключом, уровнем и этапом эволюции (до STACK_MAX в стопке).
+    Первым в стопке идёт предмет с наименьшей прочностью: с него начинаются ремонт, улучшение и эволюция."""
     lst = items_of(user)
-    if random.random() < MERGE_STAGES[fuse_of(lst[a])][0]:
-        it = lst[a]
-        it["fuse"] = fuse_of(it) + 1
-        it["dur"] = max_dur(ITEMS[it["key"]], level_of(it))
-        del lst[b]
-        return None, True, a - 1 if b < a else a
-    for i in sorted((a, b), reverse=True):
-        del lst[i]
-    return None, False, a
+    groups: dict = {}
+    for i, it in enumerate(lst):
+        if ITEMS.get(it.get("key"), {}).get("category") == category:
+            groups.setdefault((it["key"], level_of(it), evo_of(it)), []).append(i)
+    out = []
+    for idxs in groups.values():
+        idxs.sort(key=lambda i: (_int(lst[i].get("dur")), i))
+        out += [idxs[j:j + STACK_MAX] for j in range(0, len(idxs), STACK_MAX)]   # старые сохранения с >5 делятся на стопки
+    return out
+
+
+def stack_of(user: dict, idx: int) -> list[int]:
+    """Стопка, в которой лежит предмет idx."""
+    found = inv_item(user, idx)
+    if found is None:
+        return [idx]
+    return next((st for st in stacks_of(user, found[1]["category"]) if idx in st), [idx])
+
+
+def evo_cost(item: dict, stage: int) -> dict:
+    """Цена эволюции на этап stage (1..3): ресурсы рецепта крафта предмета, умноженные на множитель этапа."""
+    mult = EVO_STAGES[stage - 1][2]
+    return {k: n * mult for k, n in item["cost"].items()}
+
+
+def evolve_item(user: dict, idx: int) -> tuple[str | None, bool]:
+    """Эволюция предмета за ресурсы. Возвращает (причина отказа или None, удалась ли).
+    Провал: ресурсы сгорают, предмет остаётся."""
+    found = inv_item(user, idx)
+    if found is None:
+        return "Предмет не найден.", False
+    it, item = found
+    if not can_upgrade(item):
+        return "Этот предмет нельзя эволюционировать.", False
+    evo = evo_of(it)
+    if evo >= MAX_EVO:
+        return "Максимальный этап эволюции уже достигнут.", False
+    if count_same(user, it["key"], level_of(it), evo + 1) >= STACK_MAX:
+        return f"Таких предметов следующего этапа уже {STACK_MAX}: больше иметь нельзя.", False
+    cost = evo_cost(item, evo + 1)
+    if any(have(user, k) < n for k, n in cost.items()):
+        return "Не хватает ресурсов для эволюции.", False
+    r = res_of(user)
+    for k, n in cost.items():
+        r[k] = have(user, k) - n
+    if random.random() >= EVO_STAGES[evo][0]:
+        return None, False
+    it["evo"] = evo + 1
+    it.pop("fuse", None)
+    it["dur"] = max_dur(item, level_of(it))
+    return None, True
 
 
 def upgrade_item(user: dict, idx: int) -> str | None:
@@ -350,6 +395,8 @@ def upgrade_item(user: dict, idx: int) -> str | None:
     lvl = level_of(it)
     if lvl >= MAX_LEVEL:
         return "Максимальный уровень уже достигнут."
+    if count_same(user, it["key"], lvl + 1, evo_of(it)) >= STACK_MAX:
+        return f"Таких предметов следующего уровня уже {STACK_MAX}: больше иметь нельзя."
     cost = upgrade_cost(item, lvl + 1)
     if any(have(user, k) < n for k, n in cost.items()):
         return "Не хватает ресурсов для улучшения."
@@ -480,6 +527,8 @@ def start_craft(user: dict, item_key: str, slot: int, now: float | None = None) 
         return "Слот занят: дождись окончания крафта."
     if len(items_of(user)) >= INVENTORY_CAP:
         return "Инвентарь мастерской переполнен."
+    if owned_count(user, item_key) >= STACK_MAX:
+        return f"У тебя уже {STACK_MAX} таких предметов (с учётом тех, что куются): больше иметь нельзя."
     if not can_afford(user, item_key):
         return "Не хватает ресурсов."
     r = res_of(user)
@@ -613,22 +662,19 @@ def root_kb() -> InlineKeyboardMarkup:
     ])
 
 
-def cat_indices(user: dict, key: str) -> list[int]:
-    """Номера (в инвентаре) предметов раздела key."""
-    return [i for i, it in enumerate(items_of(user)) if ITEMS.get(it.get("key"), {}).get("category") == key]
-
-
 def _pages(total: int) -> int:
     return max(1, -(-total // (ITEMS_PER_ROW * ROWS_PER_PAGE)))
 
 
 def page_of(user: dict, idx: int) -> int:
-    """На какой странице раздела лежит предмет idx (чтобы «Назад» возвращал на ту же страницу)."""
+    """На какой странице раздела лежит стопка с предметом idx (чтобы «Назад» возвращал на ту же страницу)."""
     found = inv_item(user, idx)
     if found is None:
         return 0
-    mine = cat_indices(user, found[1]["category"])
-    return mine.index(idx) // (ITEMS_PER_ROW * ROWS_PER_PAGE) if idx in mine else 0
+    for n, st in enumerate(stacks_of(user, found[1]["category"])):
+        if idx in st:
+            return n // (ITEMS_PER_ROW * ROWS_PER_PAGE)
+    return 0
 
 
 def category_html(user: dict, key: str, with_image: bool, page: int = 0) -> str:
@@ -642,11 +688,12 @@ def category_html(user: dict, key: str, with_image: bool, page: int = 0) -> str:
                            "Добывай их, и они появятся здесь.</p>")
         lines = [f"{e} <b>{escape(n)}</b> — <code>{_f(c)}</code>" for _, n, e, c in owned]
         return text + "<p>⠀<br>" + "<br>".join(lines) + "</p>"
-    mine = cat_indices(user, key)
+    mine = stacks_of(user, key)
     if mine:
         pages = _pages(len(mine))
-        text += (f"<p>{DIV}<br><b>В инвентаре: {len(mine)}</b><br>"
-                 "Нажми на предмет: состояние, улучшение и восстановление.</p>")
+        text += (f"<p>{DIV}<br><b>В инвентаре: {sum(len(st) for st in mine)}</b><br>"
+                 f"Одинаковые предметы лежат стопками, в стопке до {STACK_MAX}. "
+                 "Нажми на стопку: состояние, улучшение, эволюция и восстановление.</p>")
         if pages > 1:
             text += f"<p><i>Страница {min(max(page, 0), pages - 1) + 1} из {pages}.</i></p>"
     elif any(i["category"] == key for i in ITEMS.values()):
@@ -657,12 +704,20 @@ def category_html(user: dict, key: str, with_image: bool, page: int = 0) -> str:
 
 
 def category_kb(user: dict, key: str, page: int = 0) -> InlineKeyboardMarkup:
-    """Раздел: предметы игрока значками, по 3 в ряд, 3 ряда на странице; дальше листание страниц."""
-    mine = cat_indices(user, key)
+    """Раздел: стопки предметов кнопками «значок | 5х», по 3 в ряд, 3 ряда на странице; дальше листание страниц."""
+    mine = stacks_of(user, key)
     per = ITEMS_PER_ROW * ROWS_PER_PAGE
     pages = _pages(len(mine))
     page = min(max(page, 0), pages - 1)
-    btns = [_ebtn(f"ws:it:{i}", ITEMS[items_of(user)[i]["key"]]["emoji"]) for i in mine[page * per:(page + 1) * per]]
+    btns = []
+    for st in mine[page * per:(page + 1) * per]:
+        it = items_of(user)[st[0]]
+        label = f"| {len(st)}х"   # например: ⛏️ | 5х
+        if level_of(it):
+            label += f" · ур.{level_of(it)}"
+        if evo_of(it):
+            label += f" · {EVO_EMOJI[1]}{evo_of(it)}"
+        btns.append(_btn(label, f"ws:it:{st[0]}", ITEMS[it["key"]]["emoji"]))
     rows = _rows(btns, ITEMS_PER_ROW)
     if pages > 1:
         rows.append([
@@ -697,15 +752,15 @@ def _cost_lines(user: dict, cost: dict) -> tuple[list[str], list[str]]:
     return lines, lack
 
 
-def _stats_box(item: dict, lvl: int, fuse: int = 0) -> str:
+def _stats_box(item: dict, lvl: int, evo: int = 0, stack: int = 0) -> str:
     """Характеристики без цитаты: подпись жирным, значение моно (копируется по нажатию). Общие для карточки и экрана улучшения."""
     boost = D.custom_emoji(BOOST_EMOJI)
     lines = []
     if can_upgrade(item):
         lines.append(f"<b>✨ Уровень:</b> <code>{lvl} / {MAX_LEVEL}</code>")
-    bonus = f"<b>{boost} {escape(item['bonus'][0])}:</b> <code>{_pct(bonus_pct(item, lvl, fuse))}</code>"
+    bonus = f"<b>{boost} {escape(item['bonus'][0])}:</b> <code>{_pct(bonus_pct(item, lvl, evo))}</code>"
     if can_upgrade(item) and lvl < MAX_LEVEL:
-        bonus += f" → <code>{_pct(bonus_pct(item, lvl + 1, fuse))}</code>"
+        bonus += f" → <code>{_pct(bonus_pct(item, lvl + 1, evo))}</code>"
     lines.append(bonus)
     lines.append(f"<b>💎 Редкость:</b> <code>{escape(item['rarity'])}</code>")
     if can_upgrade(item) and can_repair(item):
@@ -713,8 +768,10 @@ def _stats_box(item: dict, lvl: int, fuse: int = 0) -> str:
         if lvl < MAX_LEVEL:
             dur_line += f" → <code>{max_dur(item, lvl + 1)}</code>"
         lines.append(dur_line)
-    if fuse:
-        lines.append(f"<b>🧬 Слияний:</b> <code>{fuse} / {MAX_FUSE}</code> <code>(+{fuse_bonus(fuse)}%)</code>")
+    if evo:
+        lines.append(f"<b>{_em(EVO_EMOJI)} Эволюция:</b> <code>{evo} / {MAX_EVO}</code> <code>(+{evo_bonus(evo)}%)</code>")
+    if stack:
+        lines.append(f"<b>📦 В стопке:</b> <code>{stack} / {STACK_MAX}</code>")
     if item.get("note"):
         lines.append(f"<b>📌 {escape(item['note'])}</b>")
     return f"<p>{DIV}<br>" + "<br>".join(lines) + "</p>"
@@ -728,7 +785,7 @@ def item_html(user: dict, idx: int, with_image: bool) -> str:
     dur = min(_int(it.get("dur")), mx)
     gap = DIV + "<br>"
     text = _img(with_image) + _head(item["name"].upper(), item["emoji"], item.get("desc") or "Предмет из инвентаря.")
-    text += _stats_box(item, lvl, fuse_of(it))
+    text += _stats_box(item, lvl, evo_of(it), len(stack_of(user, idx)))
 
     if can_repair(item):
         text += (f"<p>{gap}<b>❤️ Прочность</b><br>{_bar(dur, mx)} "
@@ -738,7 +795,7 @@ def item_html(user: dict, idx: int, with_image: bool) -> str:
 
     legend = [(USE_EMOJI, "Использовать")]
     if can_upgrade(item):
-        legend += [(UPGRADE_EMOJI, "Улучшить"), (MERGE_EMOJI, "Слияние")]
+        legend += [(UPGRADE_EMOJI, "Улучшить"), (EVO_EMOJI, "Эволюция")]
     if can_repair(item):
         legend.append((REPAIR_EMOJI, "Восстановить"))
     return text + (_legend(*legend, div=True) if legend else "")
@@ -774,32 +831,35 @@ def upgrade_html(user: dict, idx: int, with_image: bool) -> str:
     lines, lack = _cost_lines(user, upgrade_cost(item, lvl + 1))
     note = ("<i>Не хватает " + ", ".join(lack) + ".</i>") if lack else "<i>Всё готово, можно улучшать.</i>"
     gap = DIV + "<br>"
-    return text + (_stats_box(item, lvl, fuse_of(it))
+    return text + (_stats_box(item, lvl, evo_of(it))
                    + f"<p>{gap}<b>▸ Нужно</b><br>" + "<br>".join(lines) + f"<br>{note}</p>")
 
 
-def merge_html(user: dict, idx: int, with_image: bool) -> str:
+def evo_html(user: dict, idx: int, with_image: bool) -> str:
+    """Экран эволюции: этап, шанс, бонус и ресурсы (ресурсы рецепта крафта, умноженные на множитель этапа)."""
     it, item = inv_item(user, idx)
-    text = _img(with_image) + _head(item["name"].upper(), item["emoji"], "Слияние двух одинаковых предметов.")
+    lvl, evo = level_of(it), evo_of(it)
+    chance, bonus, mult = EVO_STAGES[evo]
+    text = _img(with_image) + _head(item["name"].upper(), item["emoji"], "Эволюция предмета.")
     gap = DIV + "<br>"
-    stage = fuse_of(it)
-    chance, bonus = MERGE_STAGES[stage]
-    text += (f"<p>{gap}<b>🧬 Этап:</b> <code>{stage + 1} / {MAX_FUSE}</code><br>"
+    boost = D.custom_emoji(BOOST_EMOJI)
+    lines, lack = _cost_lines(user, evo_cost(item, evo + 1))
+    note = (("<i>Не хватает " + ", ".join(lack) + ".</i>") if lack else "<i>Всё готово, можно пробовать.</i>")
+    text += (f"<p>{gap}<b>{_em(EVO_EMOJI)} Этап:</b> <code>{evo + 1} / {MAX_EVO}</code><br>"
              f"<b>🎲 Шанс успеха:</b> <code>{chance * 100:g}%</code><br>"
-             f"<b>✅ Успех:</b> <code>+{bonus}%</code> к бонусу, прочность полная<br>"
-             f"<b>💥 Провал:</b> оба предмета пропадут</p>"
-             f"<p>{gap}<i>Слить можно только одинаковые предметы с одним уровнем и числом слияний. Выбери второй предмет.</i></p>")
+             f"<b>{boost} Бонус:</b> <code>{_pct(bonus_pct(item, lvl, evo))}</code> → "
+             f"<code>{_pct(bonus_pct(item, lvl, evo + 1))}</code> <code>(+{bonus}%)</code><br>"
+             f"<b>✅ Успех:</b> этап растёт, прочность полная<br>"
+             f"<b>💥 Провал:</b> ресурсы сгорают, предмет остаётся</p>"
+             f"<p>{gap}<b>▸ Нужно</b> <i>({mult}х от рецепта крафта)</i><br>" + "<br>".join(lines) + f"<br>{note}</p>")
     return text
 
 
-def merge_kb(user: dict, idx: int) -> InlineKeyboardMarkup:
-    it, item = inv_item(user, idx)
-    btns = []
-    for j in merge_partners(user, idx)[:MAX_ITEM_BUTTONS]:
-        o = items_of(user)[j]
-        btns.append(_btn(f"№{j + 1} · {min(_int(o.get('dur')), max_dur(item, level_of(o))) * 100 // max_dur(item, level_of(o))}%",
-                         f"ws:mgo:{idx}:{j}", item["emoji"], ButtonStyle.DANGER))
-    return InlineKeyboardMarkup(inline_keyboard=_rows(btns, 2) + [_back(f"ws:it:{idx}")])
+def evo_kb(idx: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [_btn("Эволюция", f"ws:evgo:{idx}", EVO_EMOJI, ButtonStyle.SUCCESS)],
+        _back(f"ws:it:{idx}"),
+    ])
 
 
 def upgrade_kb(idx: int) -> InlineKeyboardMarkup:
@@ -815,7 +875,7 @@ def item_kb(user: dict, idx: int) -> InlineKeyboardMarkup:
     acts = [_ebtn(f"ws:use:{idx}", USE_EMOJI, ButtonStyle.PRIMARY)]
     if can_upgrade(item):
         acts.append(_ebtn(f"ws:up:{idx}", UPGRADE_EMOJI, ButtonStyle.SUCCESS))
-        acts.append(_ebtn(f"ws:mg:{idx}", MERGE_EMOJI, ButtonStyle.PRIMARY))
+        acts.append(_ebtn(f"ws:ev:{idx}", EVO_EMOJI, ButtonStyle.PRIMARY))
     if can_repair(item):
         acts.append(_ebtn(f"ws:rp:{idx}", REPAIR_EMOJI, ButtonStyle.SUCCESS))
     rows = [acts] if acts else []
@@ -910,7 +970,9 @@ def recipe_html(user: dict, key: str, slot: int, with_image: bool) -> str:
         lines.append(f"{ok if got >= n else no} | {em} <b>{escape(name)}</b> — "
                      f"<code>{_n(got)}</code> / <code>{_n(n)}</code>")
     gap = "⠀<br>"   # невидимый символ: пустая строка видна и на ПК (как в _craft_status)
-    if lack:
+    if owned_count(user, key) >= STACK_MAX:
+        note = f"<i>У тебя уже {STACK_MAX} таких предметов: больше иметь нельзя.</i>"
+    elif lack:
         note = "<i>Не хватает " + ", ".join(lack) + ".</i>"
     else:
         note = "<i>Всё готово, можно создавать.</i>"
@@ -987,7 +1049,7 @@ async def on_category(callback: CallbackQuery):
     await callback.answer()
     if settle(user):
         D.save_users()
-    page = min(max(page, 0), _pages(len(cat_indices(user, key))) - 1)
+    page = min(max(page, 0), _pages(len(stacks_of(user, key))) - 1)
     kb = InlineKeyboardMarkup(inline_keyboard=[_back("ws:open")]) if key == "res" else category_kb(user, key, page)
     await D.show_rich_card(callback, "workshop", lambda wi: category_html(user, key, wi, page), kb)
 
@@ -1214,9 +1276,9 @@ async def on_use(callback: CallbackQuery):
     await callback.answer("🚧 Использование предметов скоро появится.", show_alert=True)
 
 
-@router.callback_query(F.data.startswith("ws:mg:"))
-async def on_merge(callback: CallbackQuery):
-    """Кнопка «Слияние»: экран выбора второго предмета."""
+@router.callback_query(F.data.startswith("ws:ev:"))
+async def on_evo(callback: CallbackQuery):
+    """Кнопка «Эволюция» на карточке: экран с этапом, шансом и ресурсами."""
     user = await _user_or_alert(callback)
     if user is None:
         return
@@ -1226,40 +1288,37 @@ async def on_merge(callback: CallbackQuery):
         await callback.answer("Предмет не найден.", show_alert=True)
         return
     if not can_upgrade(found[1]):
-        await callback.answer("Этот предмет нельзя слить.", show_alert=True)
+        await callback.answer("Этот предмет нельзя эволюционировать.", show_alert=True)
         return
-    if fuse_of(found[0]) >= MAX_FUSE:
-        await callback.answer(f"Достигнут максимум слияний: {MAX_FUSE} из {MAX_FUSE}.", show_alert=True)
-        return
-    if not merge_partners(user, idx):
-        await callback.answer("Нужен второй такой же предмет: тот же уровень и число слияний.", show_alert=True)
+    if evo_of(found[0]) >= MAX_EVO:
+        await callback.answer(f"Достигнут максимум эволюции: {MAX_EVO} из {MAX_EVO}.", show_alert=True)
         return
     await callback.answer()
-    await D.show_rich_card(callback, "workshop", lambda wi: merge_html(user, idx, wi), merge_kb(user, idx))
+    await D.show_rich_card(callback, "workshop", lambda wi: evo_html(user, idx, wi), evo_kb(idx))
 
 
-@router.callback_query(F.data.startswith("ws:mgo:"))
-async def on_merge_do(callback: CallbackQuery):
-    """Выбор второго предмета: сразу делает бросок на слияние."""
+@router.callback_query(F.data.startswith("ws:evgo:"))
+async def on_evo_do(callback: CallbackQuery):
+    """Подтверждение эволюции: списывает ресурсы и делает бросок на успех."""
     user = await _user_or_alert(callback)
     if user is None:
         return
-    try:
-        a, b = int(callback.data.split(":")[2]), int(callback.data.split(":")[3])
-    except (ValueError, IndexError):
+    idx = _idx_arg(callback.data)
+    if idx is None:
         await callback.answer()
         return
-    found = inv_item(user, a)
-    category = found[1]["category"] if found else "items"
-    err, success, new_idx = merge_items(user, a, b)
+    err, success = evolve_item(user, idx)
     if err:
         await callback.answer(err, show_alert=True)
         return
     D.save_users()
+    it = inv_item(user, idx)[0]
     if success:
-        await callback.answer(f"Слияние удалось! Бонус от слияний: +{fuse_bonus(fuse_of(inv_item(user, new_idx)[0]))}%.", show_alert=True)
-        await D.show_rich_card(callback, "workshop", lambda wi: item_html(user, new_idx, wi), item_kb(user, new_idx))
+        await callback.answer(f"Эволюция удалась! Бонус эволюции: +{evo_bonus(evo_of(it))}%.", show_alert=True)
+        await D.show_rich_card(callback, "workshop", lambda wi: item_html(user, idx, wi), item_kb(user, idx))
+        return
+    await callback.answer("Эволюция не удалась: ресурсы потрачены, предмет остался.", show_alert=True)
+    if evo_of(it) >= MAX_EVO:   # на всякий случай
+        await D.show_rich_card(callback, "workshop", lambda wi: item_html(user, idx, wi), item_kb(user, idx))
     else:
-        await callback.answer("Слияние не удалось: оба предмета пропали.", show_alert=True)
-        await D.show_rich_card(callback, "workshop", lambda wi: category_html(user, category, wi),
-                               category_kb(user, category))
+        await D.show_rich_card(callback, "workshop", lambda wi: evo_html(user, idx, wi), evo_kb(idx))
