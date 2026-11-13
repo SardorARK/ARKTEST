@@ -766,9 +766,6 @@ def category_html(user: dict, key: str, with_image: bool, page: int = 0) -> str:
     mine = list(groups)
     if mine:
         pages = _pages(len(mine))
-        text += (f"<p>{DIV}<br><b>В инвентаре: {sum(groups.values())}</b><br>"
-                 "Предметы одного вида собраны вместе, независимо от уровня и эволюции. "
-                 "Нажми, чтобы увидеть их по уровням.</p>")
         if pages > 1:
             text += f"<p><i>Страница {min(max(page, 0), pages - 1) + 1} из {pages}.</i></p>"
     elif any(i["category"] == key for i in ITEMS.values()):
@@ -802,9 +799,6 @@ def group_html(user: dict, key: str, with_image: bool, page: int = 0) -> str:
     sts = group_stacks(user, key)
     text = _img(with_image) + _head(item["name"].upper(), item["emoji"], item.get("desc") or "Предмет из инвентаря.")
     pages = _pages(len(sts))
-    text += (f"<p>{DIV}<br><b>Всего: {sum(len(st) for st in sts)}</b><br>"
-             f"Предметы с одинаковым уровнем и эволюцией лежат стопкой, в стопке до {STACK_MAX}. "
-             "Нажми на стопку: состояние, улучшение, эволюция, реконструкция и восстановление.</p>")
     if pages > 1:
         text += f"<p><i>Страница {min(max(page, 0), pages - 1) + 1} из {pages}.</i></p>"
     return text
@@ -818,11 +812,14 @@ def group_kb(user: dict, key: str, page: int = 0) -> InlineKeyboardMarkup:
     btns = []
     for st in sts[page * per:(page + 1) * per]:
         it = items_of(user)[st[0]]
-        label = f"| {len(st)}х"
+        parts = []
+        if len(st) > 1:   # «1х» не пишем: и так понятно, что предмет один
+            parts.append(f"{len(st)}х")
         if level_of(it):
-            label += f" · ур.{level_of(it)}"
+            parts.append(f"ур.{level_of(it)}")
         if evo_of(it):
-            label += f" · {EVO_EMOJI[1]}{evo_of(it)}"
+            parts.append(f"{EVO_EMOJI[1]}{evo_of(it)}")
+        label = "| " + " · ".join(parts or ["ур.0"])
         btns.append(_btn(label, f"ws:it:{st[0]}", ITEMS[key]["emoji"]))
     rows = _rows(btns, ITEMS_PER_ROW)
     if pages > 1:
