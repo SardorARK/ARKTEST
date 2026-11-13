@@ -8,7 +8,8 @@
     user["ws_craft"] = [{"item": ключ, "slot": номер_слота, "start": время, "end": время}, ...]
     user["ws_items"] = [{"key": ключ_предмета, "dur": прочность_или_остаток_использований, "lvl": уровень, "evo": этап_эволюции}, ...]
 
-Одинаковые предметы (ключ + уровень + этап эволюции) показываются в разделе одной стопкой «⛏️ | 5х».
+В разделе предметы одного вида показываются одной кнопкой «⛏️ | 4х» независимо от уровня и эволюции;
+по нажатию открываются стопки по уровню и этапу эволюции (ключ + уровень + этап).
 Иметь можно не больше STACK_MAX одинаковых предметов. Внутри это обычные записи, каждая со своей прочностью.
 
 Крафт идёт по времени и не требует, чтобы игрок ждал в боте: готовый предмет сам попадает
@@ -59,6 +60,7 @@ REPAIR_EMOJI = ("", "🔧")                      # кнопка «Восстан
 UPGRADE_EMOJI = ("", "✨")                     # кнопка «Улучшить» (впиши id кастомного)
 REFRESH_EMOJI = ("", "🔄")                     # кнопка «Обновить»
 EVO_EMOJI = ("", "🌱")                          # кнопка «Эволюция»
+RECON_EMOJI = ("", "♻️")                        # кнопка «Реконструкция» (впиши id кастомного)
 USE_EMOJI = ("", "⚡")                         # кнопка «Использовать» (пока заглушка)
 SLOT_TITLE_EMOJI = ("5350434966163443737", "🔥")   # заголовок «СЛОТ N» внутри слота
 
@@ -185,6 +187,7 @@ EVO_STAGES = (
     (0.01, 500, 50),   # этап 3: 50x ресурсов рецепта, шанс 1%, +500%
 )
 MAX_EVO = len(EVO_STAGES)   # больше этапов эволюции нет
+RECON_SHARE = 0.5          # реконструкция: возвращается 50% вложенных ресурсов (крафт + улучшения + эволюция)
 STACK_MAX = 5               # сколько одинаковых предметов (ключ + уровень + этап) можно иметь
 
 DIVIDER_LEN = 18       # длина линии-разделителя из тире
@@ -340,6 +343,72 @@ def stacks_of(user: dict, category: str) -> list[list[int]]:
         idxs.sort(key=lambda i: (_int(lst[i].get("dur")), i))
         out += [idxs[j:j + STACK_MAX] for j in range(0, len(idxs), STACK_MAX)]   # старые сохранения с >5 делятся на стопки
     return out
+
+
+def groups_of(user: dict, category: str) -> dict:
+    """Предметы раздела, сгруппированные только по ключу (кирки любых уровней и эволюций - одна группа): {ключ: сколько всего}."""
+    out: dict = {}
+    for it in items_of(user):
+        if ITEMS.get(it.get("key"), {}).get("category") == category:
+            out[it["key"]] = out.get(it["key"], 0) + 1
+    return out
+
+
+def group_stacks(user: dict, key: str) -> list[list[int]]:
+    """Стопки одного предмета (по уровню и этапу эволюции) внутри группы."""
+    lst = items_of(user)
+    return [st for st in stacks_of(user, ITEMS[key]["category"]) if lst[st[0]].get("key") == key]
+
+
+def group_page(user: dict, key: str) -> int:
+    """На какой странице раздела лежит группа key."""
+    keys = list(groups_of(user, ITEMS[key]["category"]))
+    n = keys.index(key) if key in keys else 0
+    return n // (ITEMS_PER_ROW * ROWS_PER_PAGE)
+
+
+def stack_page(user: dict, idx: int) -> int:
+    """На какой странице группы лежит стопка с предметом idx."""
+    found = inv_item(user, idx)
+    if found is None:
+        return 0
+    for n, st in enumerate(group_stacks(user, found[0]["key"])):
+        if idx in st:
+            return n // (ITEMS_PER_ROW * ROWS_PER_PAGE)
+    return 0
+
+
+def invested_cost(item: dict, lvl: int, evo: int) -> dict:
+    """Сколько ресурсов вложено в предмет: крафт + улучшения до lvl + успешные этапы эволюции до evo (сгоревшие попытки не считаются)."""
+    total = dict(item["cost"])
+    if can_upgrade(item):
+        for l in range(1, lvl + 1):
+            for k, n in upgrade_cost(item, l).items():
+                total[k] = total.get(k, 0) + n
+        for st in range(1, evo + 1):
+            for k, n in evo_cost(item, st).items():
+                total[k] = total.get(k, 0) + n
+    return total
+
+
+def recon_refund(item: dict, lvl: int, evo: int) -> dict:
+    """Что вернёт реконструкция: RECON_SHARE от вложенного (округляем вверх, чтобы редкие ресурсы не пропадали)."""
+    return {k: max(1, math.ceil(n * RECON_SHARE)) for k, n in invested_cost(item, lvl, evo).items()}
+
+
+def reconstruct_item(user: dict, idx: int, key: str, lvl: int, evo: int) -> tuple[str | None, dict]:
+    """Обмен предмета на 50% ресурсов. Возвращает (причина отказа или None, выданные ресурсы)."""
+    found = inv_item(user, idx)
+    if found is None:
+        return "Предмет не найден.", {}
+    it, item = found
+    if it.get("key") != key or level_of(it) != lvl or evo_of(it) != evo:
+        return "Инвентарь изменился: открой предмет заново.", {}
+    refund = recon_refund(item, lvl, evo)
+    items_of(user).pop(idx)
+    for k, n in refund.items():
+        give_resource(user, k, n)
+    return None, refund
 
 
 def stack_of(user: dict, idx: int) -> list[int]:
@@ -666,6 +735,11 @@ def _pages(total: int) -> int:
     return max(1, -(-total // (ITEMS_PER_ROW * ROWS_PER_PAGE)))
 
 
+def group_page_after(user: dict, category: str) -> int:
+    """После удаления последней группы возвращаем на последнюю страницу раздела."""
+    return max(0, _pages(len(groups_of(user, category))) - 1)
+
+
 def page_of(user: dict, idx: int) -> int:
     """На какой странице раздела лежит стопка с предметом idx (чтобы «Назад» возвращал на ту же страницу)."""
     found = inv_item(user, idx)
@@ -688,12 +762,13 @@ def category_html(user: dict, key: str, with_image: bool, page: int = 0) -> str:
                            "Добывай их, и они появятся здесь.</p>")
         lines = [f"{e} <b>{escape(n)}</b> — <code>{_f(c)}</code>" for _, n, e, c in owned]
         return text + "<p>⠀<br>" + "<br>".join(lines) + "</p>"
-    mine = stacks_of(user, key)
+    groups = groups_of(user, key)
+    mine = list(groups)
     if mine:
         pages = _pages(len(mine))
-        text += (f"<p>{DIV}<br><b>В инвентаре: {sum(len(st) for st in mine)}</b><br>"
-                 f"Одинаковые предметы лежат стопками, в стопке до {STACK_MAX}. "
-                 "Нажми на стопку: состояние, улучшение, эволюция и восстановление.</p>")
+        text += (f"<p>{DIV}<br><b>В инвентаре: {sum(groups.values())}</b><br>"
+                 "Предметы одного вида собраны вместе, независимо от уровня и эволюции. "
+                 "Нажми, чтобы увидеть их по уровням.</p>")
         if pages > 1:
             text += f"<p><i>Страница {min(max(page, 0), pages - 1) + 1} из {pages}.</i></p>"
     elif any(i["category"] == key for i in ITEMS.values()):
@@ -705,19 +780,12 @@ def category_html(user: dict, key: str, with_image: bool, page: int = 0) -> str:
 
 def category_kb(user: dict, key: str, page: int = 0) -> InlineKeyboardMarkup:
     """Раздел: стопки предметов кнопками «значок | 5х», по 3 в ряд, 3 ряда на странице; дальше листание страниц."""
-    mine = stacks_of(user, key)
+    mine = list(groups_of(user, key).items())
     per = ITEMS_PER_ROW * ROWS_PER_PAGE
     pages = _pages(len(mine))
     page = min(max(page, 0), pages - 1)
-    btns = []
-    for st in mine[page * per:(page + 1) * per]:
-        it = items_of(user)[st[0]]
-        label = f"| {len(st)}х"   # например: ⛏️ | 5х
-        if level_of(it):
-            label += f" · ур.{level_of(it)}"
-        if evo_of(it):
-            label += f" · {EVO_EMOJI[1]}{evo_of(it)}"
-        btns.append(_btn(label, f"ws:it:{st[0]}", ITEMS[it["key"]]["emoji"]))
+    btns = [_btn(f"| {cnt}х", f"ws:grp:{k}:0", ITEMS[k]["emoji"])   # например: ⛏️ | 4х (все уровни вместе)
+            for k, cnt in mine[page * per:(page + 1) * per]]
     rows = _rows(btns, ITEMS_PER_ROW)
     if pages > 1:
         rows.append([
@@ -726,6 +794,44 @@ def category_kb(user: dict, key: str, page: int = 0) -> InlineKeyboardMarkup:
             _ebtn(f"ws:cat:{key}:{(page + 1) % pages}", PAGE_NEXT_EMOJI),
         ])
     return InlineKeyboardMarkup(inline_keyboard=rows + [_back("ws:open")])
+
+
+def group_html(user: dict, key: str, with_image: bool, page: int = 0) -> str:
+    """Экран группы: все предметы одного вида, разложенные по уровню и этапу эволюции."""
+    item = ITEMS[key]
+    sts = group_stacks(user, key)
+    text = _img(with_image) + _head(item["name"].upper(), item["emoji"], item.get("desc") or "Предмет из инвентаря.")
+    pages = _pages(len(sts))
+    text += (f"<p>{DIV}<br><b>Всего: {sum(len(st) for st in sts)}</b><br>"
+             f"Предметы с одинаковым уровнем и эволюцией лежат стопкой, в стопке до {STACK_MAX}. "
+             "Нажми на стопку: состояние, улучшение, эволюция, реконструкция и восстановление.</p>")
+    if pages > 1:
+        text += f"<p><i>Страница {min(max(page, 0), pages - 1) + 1} из {pages}.</i></p>"
+    return text
+
+
+def group_kb(user: dict, key: str, page: int = 0) -> InlineKeyboardMarkup:
+    sts = group_stacks(user, key)
+    per = ITEMS_PER_ROW * ROWS_PER_PAGE
+    pages = _pages(len(sts))
+    page = min(max(page, 0), pages - 1)
+    btns = []
+    for st in sts[page * per:(page + 1) * per]:
+        it = items_of(user)[st[0]]
+        label = f"| {len(st)}х"
+        if level_of(it):
+            label += f" · ур.{level_of(it)}"
+        if evo_of(it):
+            label += f" · {EVO_EMOJI[1]}{evo_of(it)}"
+        btns.append(_btn(label, f"ws:it:{st[0]}", ITEMS[key]["emoji"]))
+    rows = _rows(btns, ITEMS_PER_ROW)
+    if pages > 1:
+        rows.append([
+            _ebtn(f"ws:grp:{key}:{(page - 1) % pages}", PAGE_PREV_EMOJI),
+            InlineKeyboardButton(text=f"{page + 1} / {pages}", callback_data="ws:noop", style=ButtonStyle.PRIMARY),
+            _ebtn(f"ws:grp:{key}:{(page + 1) % pages}", PAGE_NEXT_EMOJI),
+        ])
+    return InlineKeyboardMarkup(inline_keyboard=rows + [_back(f"ws:cat:{ITEMS[key]['category']}:{group_page(user, key)}")])
 
 
 def _bar(cur: int, mx: int, width: int = 10) -> str:
@@ -793,11 +899,12 @@ def item_html(user: dict, idx: int, with_image: bool) -> str:
     else:
         text += f"<p>{gap}<b>❤️ Осталось использований:</b> <code>{dur} / {mx}</code><br>{_bar(dur, mx)}</p>"
 
-    legend = [(USE_EMOJI, "Использовать")]
+    legend = []
     if can_upgrade(item):
         legend += [(UPGRADE_EMOJI, "Улучшить"), (EVO_EMOJI, "Эволюция")]
+    legend += [(USE_EMOJI, "Использовать"), (RECON_EMOJI, "Реконструкция (50% ресурсов)")]
     if can_repair(item):
-        legend.append((REPAIR_EMOJI, "Восстановить"))
+        legend.append((REPAIR_EMOJI, "Починить"))
     return text + (_legend(*legend, div=True) if legend else "")
 
 
@@ -849,10 +956,35 @@ def evo_html(user: dict, idx: int, with_image: bool) -> str:
              f"<b>🎲 Шанс успеха:</b> <code>{chance * 100:g}%</code><br>"
              f"<b>{boost} Бонус:</b> <code>{_pct(bonus_pct(item, lvl, evo))}</code> → "
              f"<code>{_pct(bonus_pct(item, lvl, evo + 1))}</code> <code>(+{bonus}%)</code><br>"
-             f"<b>✅ Успех:</b> этап растёт, прочность полная<br>"
-             f"<b>💥 Провал:</b> ресурсы сгорают, предмет остаётся</p>"
+             f"<i>✅ Успех: этап растёт, прочность полная</i><br>"
+             f"<i>💥 Провал: ресурсы сгорают, предмет остаётся</i></p>"
              f"<p>{gap}<b>▸ Нужно</b> <i>({mult}х от рецепта крафта)</i><br>" + "<br>".join(lines) + f"<br>{note}</p>")
     return text
+
+
+def recon_html(user: dict, idx: int, with_image: bool) -> str:
+    """Экран реконструкции: что вернётся за предмет (50% от вложенного с учётом уровня и эволюции)."""
+    it, item = inv_item(user, idx)
+    lvl, evo = level_of(it), evo_of(it)
+    text = _img(with_image) + _head(item["name"].upper(), item["emoji"], "Реконструкция предмета.")
+    lines = [f"{RESOURCES[k][1]} <b>{escape(RESOURCES[k][0])}</b> — <code>+{_n(n)}</code>"
+             for k, n in recon_refund(item, lvl, evo).items()]
+    info = []
+    if can_upgrade(item):
+        info.append(f"<b>✨ Уровень:</b> <code>{lvl} / {MAX_LEVEL}</code>")
+        info.append(f"<b>{_em(EVO_EMOJI)} Эволюция:</b> <code>{evo} / {MAX_EVO}</code>")
+    gap = DIV + "<br>"
+    return text + ((f"<p>{DIV}<br>" + "<br>".join(info) + "</p>") if info else "") + (
+        f"<p>{gap}<b>▸ Ты получишь</b> <i>({RECON_SHARE * 100:g}% от вложенного)</i><br>" + "<br>".join(lines) + "</p>"
+        "<p><i>⚠️ Предмет будет разобран и исчезнет из инвентаря.</i></p>")
+
+
+def recon_kb(user: dict, idx: int) -> InlineKeyboardMarkup:
+    it = inv_item(user, idx)[0]
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [_btn("Реконструкция", f"ws:rcgo:{idx}:{it['key']}:{level_of(it)}:{evo_of(it)}", RECON_EMOJI, ButtonStyle.SUCCESS)],
+        _back(f"ws:it:{idx}"),
+    ])
 
 
 def evo_kb(idx: int) -> InlineKeyboardMarkup:
@@ -872,14 +1004,17 @@ def upgrade_kb(idx: int) -> InlineKeyboardMarkup:
 def item_kb(user: dict, idx: int) -> InlineKeyboardMarkup:
     """Кнопки-значки показываются всегда; если действие недоступно, ответ придёт при нажатии."""
     it, item = inv_item(user, idx)
-    acts = [_ebtn(f"ws:use:{idx}", USE_EMOJI, ButtonStyle.PRIMARY)]
+    # порядок: 1 улучшить, 2 эволюция, 3 использовать (посередине, зелёная), 4 реконструкция, 5 починить; остальные синие
+    acts = []
     if can_upgrade(item):
-        acts.append(_ebtn(f"ws:up:{idx}", UPGRADE_EMOJI, ButtonStyle.SUCCESS))
+        acts.append(_ebtn(f"ws:up:{idx}", UPGRADE_EMOJI, ButtonStyle.PRIMARY))
         acts.append(_ebtn(f"ws:ev:{idx}", EVO_EMOJI, ButtonStyle.PRIMARY))
+    acts.append(_ebtn(f"ws:use:{idx}", USE_EMOJI, ButtonStyle.SUCCESS))
+    acts.append(_ebtn(f"ws:rc:{idx}", RECON_EMOJI, ButtonStyle.PRIMARY))
     if can_repair(item):
-        acts.append(_ebtn(f"ws:rp:{idx}", REPAIR_EMOJI, ButtonStyle.SUCCESS))
-    rows = [acts] if acts else []
-    rows.append(_back(f"ws:cat:{item['category']}:{page_of(user, idx)}"))
+        acts.append(_ebtn(f"ws:rp:{idx}", REPAIR_EMOJI, ButtonStyle.PRIMARY))
+    rows = [acts]
+    rows.append(_back(f"ws:grp:{it['key']}:{stack_page(user, idx)}"))
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -1049,9 +1184,36 @@ async def on_category(callback: CallbackQuery):
     await callback.answer()
     if settle(user):
         D.save_users()
-    page = min(max(page, 0), _pages(len(stacks_of(user, key))) - 1)
+    page = min(max(page, 0), _pages(len(groups_of(user, key))) - 1)
     kb = InlineKeyboardMarkup(inline_keyboard=[_back("ws:open")]) if key == "res" else category_kb(user, key, page)
     await D.show_rich_card(callback, "workshop", lambda wi: category_html(user, key, wi, page), kb)
+
+
+@router.callback_query(F.data.startswith("ws:grp:"))
+async def on_group(callback: CallbackQuery):
+    """Нажатие на «⛏️ | 4х»: все предметы этого вида по уровням и эволюциям."""
+    user = await _user_or_alert(callback)
+    if user is None:
+        return
+    parts = callback.data.split(":")
+    key = parts[2] if len(parts) > 2 else ""
+    try:
+        page = int(parts[3]) if len(parts) > 3 else 0
+    except ValueError:
+        page = 0
+    if key not in ITEMS:
+        await callback.answer()
+        return
+    if settle(user):
+        D.save_users()
+    if not group_stacks(user, key):
+        await callback.answer("Таких предметов больше нет.", show_alert=True)
+        cat = ITEMS[key]["category"]
+        await D.show_rich_card(callback, "workshop", lambda wi: category_html(user, cat, wi, 0), category_kb(user, cat, 0))
+        return
+    await callback.answer()
+    page = min(max(page, 0), _pages(len(group_stacks(user, key))) - 1)
+    await D.show_rich_card(callback, "workshop", lambda wi: group_html(user, key, wi, page), group_kb(user, key, page))
 
 
 def _slot_arg(data: str, idx: int = 2) -> int | None:
@@ -1261,6 +1423,47 @@ async def on_upgrade_do(callback: CallbackQuery):
     D.save_users()
     await callback.answer(f"Уровень повышен: {level_of(inv_item(user, idx)[0])}/{MAX_LEVEL}.")
     await D.show_rich_card(callback, "workshop", lambda wi: item_html(user, idx, wi), item_kb(user, idx))
+
+
+@router.callback_query(F.data.startswith("ws:rc:"))
+async def on_recon_screen(callback: CallbackQuery):
+    """Кнопка «Реконструкция» на карточке: экран с тем, что вернётся."""
+    user = await _user_or_alert(callback)
+    if user is None:
+        return
+    idx = _idx_arg(callback.data)
+    if idx is None or inv_item(user, idx) is None:
+        await callback.answer("Предмет не найден.", show_alert=True)
+        return
+    await callback.answer()
+    await D.show_rich_card(callback, "workshop", lambda wi: recon_html(user, idx, wi), recon_kb(user, idx))
+
+
+@router.callback_query(F.data.startswith("ws:rcgo:"))
+async def on_recon_do(callback: CallbackQuery):
+    """Подтверждение реконструкции: предмет разбирается, игрок получает 50% ресурсов."""
+    user = await _user_or_alert(callback)
+    if user is None:
+        return
+    parts = callback.data.split(":")
+    try:
+        idx, key, lvl, evo = int(parts[2]), parts[3], int(parts[4]), int(parts[5])
+    except (ValueError, IndexError):
+        await callback.answer()
+        return
+    err, refund = reconstruct_item(user, idx, key, lvl, evo)
+    if err:
+        await callback.answer(err, show_alert=True)
+        return
+    D.save_users()
+    got = ", ".join(f"{RESOURCES[k][1]}{n}" for k, n in refund.items())
+    await callback.answer(f"Реконструкция выполнена: {got}", show_alert=True)
+    if group_stacks(user, key):
+        await D.show_rich_card(callback, "workshop", lambda wi: group_html(user, key, wi, 0), group_kb(user, key, 0))
+    else:
+        cat = ITEMS[key]["category"]
+        pg = min(group_page_after(user, cat), _pages(len(groups_of(user, cat))) - 1)
+        await D.show_rich_card(callback, "workshop", lambda wi: category_html(user, cat, wi, pg), category_kb(user, cat, pg))
 
 
 @router.callback_query(F.data.startswith("ws:use:"))
