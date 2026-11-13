@@ -183,6 +183,9 @@ MERGE_STAGES = (
 )
 MAX_FUSE = len(MERGE_STAGES)   # больше слияний сделать нельзя
 
+DIVIDER_LEN = 18       # длина линии-разделителя из тире
+DIV = "<code>" + "—" * DIVIDER_LEN + "</code>"   # линия моно, разделяет блоки текста в разделе «Предметы»
+
 MAX_SLOTS = 4          # слотов в кузнице; сначала открыт только первый
 # Цена открытия слота (монеты). Слоты открываются строго по порядку: 2, потом 3, потом 4.
 SLOT_PRICES = {2: 50_000, 3: 150_000, 4: 400_000}
@@ -531,10 +534,10 @@ def _em(emoji: "str | tuple[str, str]") -> str:
     return emoji
 
 
-def _legend(*pairs) -> str:
+def _legend(*pairs, div: bool = False) -> str:
     """Подсказка к кнопкам-значкам: «эмодзи - Действие»."""
     lines = [f"{_em(e)} - {escape(t)}" for e, t in pairs]
-    return "<p>⠀</p><blockquote expandable><b>Кнопки</b><br>" + "<br>".join(lines) + "</blockquote>"
+    return f"<p>{DIV if div else '⠀'}</p><blockquote expandable><b>Кнопки</b><br>" + "<br>".join(lines) + "</blockquote>"
 
 
 def _head(title: str, emoji: tuple[str, str] | str, quote: str) -> str:
@@ -642,14 +645,14 @@ def category_html(user: dict, key: str, with_image: bool, page: int = 0) -> str:
     mine = cat_indices(user, key)
     if mine:
         pages = _pages(len(mine))
-        text += (f"<p>⠀<br><b>В инвентаре: {len(mine)}</b><br>"
+        text += (f"<p>{DIV}<br><b>В инвентаре: {len(mine)}</b><br>"
                  "Нажми на предмет: состояние, улучшение и восстановление.</p>")
         if pages > 1:
             text += f"<p><i>Страница {min(max(page, 0), pages - 1) + 1} из {pages}.</i></p>"
     elif any(i["category"] == key for i in ITEMS.values()):
-        text += "<p><b>Пока пусто</b><br>Предметов нет. Создай что-нибудь в «Кузнице».</p>"
+        text += f"<p>{DIV}<br><b>Пока пусто</b><br>Предметов нет. Создай что-нибудь в «Кузнице».</p>"
     else:
-        text += "<p><b>Пока пусто</b><br>Рецептов в этом разделе ещё нет. Скоро здесь появятся новые.</p>"
+        text += f"<p>{DIV}<br><b>Пока пусто</b><br>Рецептов в этом разделе ещё нет. Скоро здесь появятся новые.</p>"
     return text
 
 
@@ -714,7 +717,7 @@ def _stats_box(item: dict, lvl: int, fuse: int = 0) -> str:
         lines.append(f"<b>🧬 Слияний:</b> <code>{fuse} / {MAX_FUSE}</code> <code>(+{fuse_bonus(fuse)}%)</code>")
     if item.get("note"):
         lines.append(f"<b>📌 {escape(item['note'])}</b>")
-    return "<p>⠀<br>" + "<br>".join(lines) + "</p>"
+    return f"<p>{DIV}<br>" + "<br>".join(lines) + "</p>"
 
 
 def item_html(user: dict, idx: int, with_image: bool) -> str:
@@ -723,7 +726,7 @@ def item_html(user: dict, idx: int, with_image: bool) -> str:
     lvl = level_of(it)
     mx = max_dur(item, lvl)
     dur = min(_int(it.get("dur")), mx)
-    gap = "⠀<br>"
+    gap = DIV + "<br>"
     text = _img(with_image) + _head(item["name"].upper(), item["emoji"], item.get("desc") or "Предмет из инвентаря.")
     text += _stats_box(item, lvl, fuse_of(it))
 
@@ -738,7 +741,7 @@ def item_html(user: dict, idx: int, with_image: bool) -> str:
         legend += [(UPGRADE_EMOJI, "Улучшить"), (MERGE_EMOJI, "Слияние")]
     if can_repair(item):
         legend.append((REPAIR_EMOJI, "Восстановить"))
-    return text + (_legend(*legend) if legend else "")
+    return text + (_legend(*legend, div=True) if legend else "")
 
 
 def repair_html(user: dict, idx: int, with_image: bool) -> str:
@@ -750,7 +753,7 @@ def repair_html(user: dict, idx: int, with_image: bool) -> str:
     text = _img(with_image) + _head(item["name"].upper(), item["emoji"], "Восстановление предмета.")
     lines, lack = _cost_lines(user, repair_cost(item, dur, lvl))
     note = ("<i>Не хватает " + ", ".join(lack) + ".</i>") if lack else "<i>Всё готово, можно восстанавливать.</i>"
-    gap = "⠀<br>"
+    gap = DIV + "<br>"
     return text + (f"<p>{gap}<b>❤️ Прочность</b><br>{_bar(dur, mx)} "
                    f"<code>{dur * 100 // mx}%</code> · <code>{dur} / {mx}</code></p>"
                    f"<p>{gap}<b>▸ Нужно</b><br>" + "<br>".join(lines) + f"<br>{note}</p>")
@@ -770,7 +773,7 @@ def upgrade_html(user: dict, idx: int, with_image: bool) -> str:
     text = _img(with_image) + _head(item["name"].upper(), item["emoji"], "Улучшение предмета.")
     lines, lack = _cost_lines(user, upgrade_cost(item, lvl + 1))
     note = ("<i>Не хватает " + ", ".join(lack) + ".</i>") if lack else "<i>Всё готово, можно улучшать.</i>"
-    gap = "⠀<br>"
+    gap = DIV + "<br>"
     return text + (_stats_box(item, lvl, fuse_of(it))
                    + f"<p>{gap}<b>▸ Нужно</b><br>" + "<br>".join(lines) + f"<br>{note}</p>")
 
@@ -778,7 +781,7 @@ def upgrade_html(user: dict, idx: int, with_image: bool) -> str:
 def merge_html(user: dict, idx: int, with_image: bool) -> str:
     it, item = inv_item(user, idx)
     text = _img(with_image) + _head(item["name"].upper(), item["emoji"], "Слияние двух одинаковых предметов.")
-    gap = "⠀<br>"
+    gap = DIV + "<br>"
     stage = fuse_of(it)
     chance, bonus = MERGE_STAGES[stage]
     text += (f"<p>{gap}<b>🧬 Этап:</b> <code>{stage + 1} / {MAX_FUSE}</code><br>"
