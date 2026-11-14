@@ -334,12 +334,14 @@ def _loot_line(emoji, name: str, n: int) -> str:
 def loot_html(user: dict, key: str, opened: int, loot: dict, note: str, with_image: bool) -> str:
     s = SETS[key]
     lines = [_loot_line(W.RESOURCES[k][1], W.RESOURCES[k][0], n) for k, n in loot["res"].items()]
-    lines += [_loot_line(W._em(W.ITEMS[k]["emoji"]), W.ITEMS[k]["name"], n) for k, n in loot["ammo"].items()]
+    # боезапас: количество через «х» (х20); число с точкой (50.0) только у ресурсов
+    lines += [f"{W._em(W.ITEMS[k]['emoji'])} <b>{escape(W.ITEMS[k]['name'])}</b> <code>х{n}</code>"
+              for k, n in loot["ammo"].items()]
     # предметы: каждый в своём блоке-цитате и без числа (число видно только если одинаковых несколько)
     quotes = []
     for k, n in loot["items"].items():
         it = W.ITEMS[k]
-        tail = f" — <code>{float(n):.1f}</code>" if n > 1 else ""
+        tail = f" <code>х{n}</code>" if n > 1 else ""
         quotes.append(f"<blockquote>{W._em(it['emoji'])} <b>{escape(it['name'])}</b>{tail}</blockquote>")
     text = W._img(with_image) + W._head(s["name"].upper(), s["emoji"], f"Открыто наборов: {opened}")
     text += "<p><i>Выпало:</i>" + ("<br>" + "<br>".join(lines) if lines else "") + "</p>" + "".join(quotes)
@@ -447,8 +449,8 @@ def _plain(cmd: tuple, user: dict, result: tuple | None = None) -> str:
     if cmd[0] == "open" and result is not None:
         key, opened, loot, note = result
         lines = [f"{W.RESOURCES[k][1]} {W.RESOURCES[k][0]} — {float(n):.1f}" for k, n in loot["res"].items()]
-        lines += [f"{W.ITEMS[k]['name']} — {float(n):.1f}" for k, n in loot["items"].items()]
-        lines += [f"{W.ITEMS[k]['name']} — {float(n):.1f}" for k, n in loot["ammo"].items()]
+        lines += [f"{W.ITEMS[k]['name']} х{n}" for k, n in loot["items"].items()]
+        lines += [f"{W.ITEMS[k]['name']} х{n}" for k, n in loot["ammo"].items()]
         text = f"{SETS[key]['name']}: открыто {opened}\nВыпало:\n" + "\n".join(lines)
         return text + (f"\n{note}" if note else "")
     if cmd[0] == "list":
