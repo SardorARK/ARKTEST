@@ -53,6 +53,7 @@ import exrn
 import settings
 import mine
 import workshop          # «Мастерская»: ресурсы, предметы, крафт (workshop.py)
+import workshop_sets     # наборы-кейсы, открываются командой «н-наборы-набор» (workshop_sets.py)
 import underground       # «Шахта» (underground.py): открывается из «Заработать»
 import quick_cmds
 import friends
@@ -1904,6 +1905,8 @@ workshop.setup(
     BACK_EMOJI_ID=BACK_EMOJI_ID,
 )
 dp.include_router(workshop.router)
+workshop_sets.setup(ADMIN_IDS=ADMIN_IDS)   # админам в списке наборов - кнопка «Выдать по 1 каждого»
+dp.include_router(workshop_sets.router)
 dp.include_router(achives.router)
 settings.install_name_book(boss.STATS)   # топ бойцов босса показывает никнеймы, а не юзернеймы
 
