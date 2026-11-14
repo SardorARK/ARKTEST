@@ -293,6 +293,94 @@ ITEMS = {
     },
 }
 
+# ---------------------------------------------------------------------------
+# Боезапас (против боссов). Все заряды одноразовые: выстрел тратит 1 заряд.
+# Хранится счётчиком user["ws_ammo"] = {ключ: сколько}, а не отдельными предметами, поэтому лимита в 5 штук нет.
+#   batch  - сколько зарядов даёт один крафт (дешёвые - пачками, сильные - по 2-3 штуки)
+#   effect - описание для игрока
+#   fx     - данные для боя с боссом (читает код босса); множители и числа ходов, подогнать под боссов
+# ---------------------------------------------------------------------------
+AMMO_CAP = 500   # больше зарядов одного вида (с учётом тех, что куются) иметь нельзя
+
+AMMO = {
+    "stone_shot": {
+        "name": "Каменная дробь", "emoji": "🪨", "rarity": "Базовый",
+        "desc": "Простая дробь из обожжённой глины и камня. Бьёт без затей, зато стоит копейки.",
+        "cost": {"clay": 8, "bone": 4, "wood": 6}, "batch": 10, "seconds": 5 * 60,
+        "effect": "Обычный урон",
+        "fx": {"damage": 1.0},
+    },
+    "bone_arrow": {
+        "name": "Костяная стрела", "emoji": "🏹", "rarity": "Базовый",
+        "desc": "Лёгкая стрела с костяным наконечником. Находит щели в чешуе.",
+        "cost": {"bone": 10, "feather": 8, "thread": 6}, "batch": 10, "seconds": 8 * 60,
+        "effect": "Урон выше дроби, игнорирует 20% брони босса",
+        "fx": {"damage": 1.2, "armor_pierce": 0.2},
+    },
+    "tar_bomb": {
+        "name": "Смоляная бомба", "emoji": "💣", "rarity": "Базовый",
+        "desc": "Горшок с горячей смолой. Липнет к шкуре и не даёт боссу двигаться быстро.",
+        "cost": {"resin": 14, "fiber": 12, "straw": 10}, "batch": 10, "seconds": 10 * 60,
+        "effect": "Снижает скорость босса на 2 хода, усиливает горение",
+        "fx": {"damage": 0.8, "slow_turns": 2, "burn_boost": 0.25},
+    },
+    "smoke_grenade": {
+        "name": "Дымовая граната", "emoji": "💨", "rarity": "Базовый",
+        "desc": "Густой едкий дым из листвы и смолы. В нём враг не видит, куда бить.",
+        "cost": {"leaves": 10, "straw": 10, "resin": 6}, "batch": 10, "seconds": 8 * 60,
+        "effect": "Босс чаще промахивается 2 хода",
+        "fx": {"damage": 0.0, "miss_turns": 2, "miss_chance": 0.4},
+    },
+    "fire_charge": {
+        "name": "Огненный заряд", "emoji": "🔥", "rarity": "Редкий",
+        "desc": "Заряд с огненным ядром внутри. Взрывается жаром и поджигает цель.",
+        "cost": {"fire_core": 2, "resin": 10, "clay": 8}, "batch": 5, "seconds": 20 * 60,
+        "effect": "Урон и горение на 3 хода",
+        "fx": {"damage": 1.3, "burn_turns": 3, "burn_damage": 0.3},
+    },
+    "ice_shot": {
+        "name": "Ледяной снаряд", "emoji": "❄️", "rarity": "Редкий",
+        "desc": "Снаряд с осколком вечного льда. Мороз сковывает даже самых свирепых.",
+        "cost": {"ice_shard": 2, "feather": 10, "thread": 8}, "batch": 5, "seconds": 20 * 60,
+        "effect": "Замедляет босса на 1 ход и снижает его урон",
+        "fx": {"damage": 1.1, "slow_turns": 1, "enemy_damage_down": 0.25},
+    },
+    "iron_piercer": {
+        "name": "Бронебойный снаряд", "emoji": "🔩", "rarity": "Редкий",
+        "desc": "Тяжёлый железный наконечник. Для боссов, одетых в броню как в крепость.",
+        "cost": {"iron": 12, "leather": 6, "thread": 8}, "batch": 5, "seconds": 25 * 60,
+        "effect": "Игнорирует 50% брони босса",
+        "fx": {"damage": 1.4, "armor_pierce": 0.5},
+    },
+    "spike_net": {
+        "name": "Шипастая сеть", "emoji": "🕸️", "rarity": "Редкий",
+        "desc": "Сеть с железными шипами. Босс запутывается и ранит себя при каждом рывке.",
+        "cost": {"vine": 12, "thread": 10, "bone": 8, "iron": 6}, "batch": 3, "seconds": 30 * 60,
+        "effect": "Удерживает босса и наносит урон каждый ход, пока он в сети",
+        "fx": {"damage": 0.5, "hold_turns": 2, "hold_damage": 0.4},
+    },
+    "light_arrow": {
+        "name": "Световая стрела", "emoji": "✨", "rarity": "Эпический",
+        "desc": "Стрела, залитая эссенцией света. Сама находит уязвимые места.",
+        "cost": {"light_essence": 3, "feather": 8, "iron": 6}, "batch": 3, "seconds": 30 * 60,
+        "effect": "Повышенный шанс критического урона",
+        "fx": {"damage": 1.5, "crit_chance": 0.35, "crit_mult": 2.0},
+    },
+    "thunder_charge": {
+        "name": "Громовой заряд", "emoji": "⚡", "rarity": "Эпический",
+        "desc": "Заряд, в котором заперта настоящая гроза. Один раскат способен остановить босса.",
+        "cost": {"fire_core": 3, "light_essence": 4, "iron": 10}, "batch": 2, "seconds": 60 * 60,
+        "effect": "Оглушает босса на 1 ход",
+        "fx": {"damage": 1.6, "stun_turns": 1},
+    },
+}
+for _k, _a in AMMO.items():
+    ITEMS[_k] = {**_a, "category": "ammo", "ammo": True}   # крафтятся через общую кузницу, но хранятся счётчиком
+
+
+def is_ammo(item: dict) -> bool:
+    return bool(item.get("ammo"))
+
 # Уровни предметов (только где стоит "upgradable": True - кирка и верёвка)
 # Во сколько раз каждое улучшение увеличивает бонус (диапазон 1.3-1.5, перемножаются). Первые уровни дают больше.
 # Если у предмета задан "max_bonus" (бонус на 10 уровне, %), кривая подгоняется так, чтобы на 10 уровне было ровно столько.
@@ -367,6 +455,40 @@ def items_of(user: dict) -> list:
         lst = []
         user["ws_items"] = lst
     return lst
+
+
+def ammo_of(user: dict) -> dict:
+    a = user.get("ws_ammo")
+    if not isinstance(a, dict):
+        a = {}
+        user["ws_ammo"] = a
+    return a
+
+
+def ammo_count(user: dict, key: str) -> int:
+    """Сколько зарядов этого вида у игрока (для боя с боссом)."""
+    return _int(ammo_of(user).get(key))
+
+
+def give_ammo(user: dict, key: str, amount: int = 1) -> None:
+    """Выдаёт заряды игроку (награды, события)."""
+    if key in AMMO and amount > 0:
+        a = ammo_of(user)
+        a[key] = min(AMMO_CAP, _int(a.get(key)) + int(amount))
+
+
+def spend_ammo(user: dict, key: str, amount: int = 1) -> bool:
+    """Тратит заряды (выстрел по боссу). False, если зарядов не хватает: тогда ничего не списывается.
+    После вызова не забудь D.save_users()."""
+    if key not in AMMO or amount <= 0 or ammo_count(user, key) < amount:
+        return False
+    ammo_of(user)[key] = ammo_count(user, key) - amount
+    return True
+
+
+def ammo_pending(user: dict, key: str) -> int:
+    """Сколько зарядов этого вида ещё куётся (сумма пачек в слотах)."""
+    return sum(AMMO[key]["batch"] for j in jobs_of(user) if j.get("item") == key) if key in AMMO else 0
 
 
 def can_afford(user: dict, item_key: str) -> bool:
@@ -821,8 +943,13 @@ def settle(user: dict, now: float | None = None) -> list[str]:
         if now < job["end"]:
             left.append(job)
             continue
-        items_of(user).append({"key": job["item"], "dur": max_dur(ITEMS[job["item"]])})
-        done.append(ITEMS[job["item"]]["name"])
+        item = ITEMS[job["item"]]
+        if is_ammo(item):
+            give_ammo(user, job["item"], item["batch"])
+            done.append(f"{item['name']} ×{item['batch']}")
+            continue
+        items_of(user).append({"key": job["item"], "dur": max_dur(item)})
+        done.append(item["name"])
     user["ws_craft"] = left
     return done
 
@@ -836,9 +963,12 @@ def start_craft(user: dict, item_key: str, slot: int, now: float | None = None) 
         return "Этот слот закрыт."
     if job_at(user, slot):
         return "Слот занят: дождись окончания крафта."
-    if len(items_of(user)) >= INVENTORY_CAP:
+    if is_ammo(item):
+        if ammo_count(user, item_key) + ammo_pending(user, item_key) + item["batch"] > AMMO_CAP:
+            return f"Боезапас этого вида уже почти полон (максимум {AMMO_CAP})."
+    elif len(items_of(user)) >= INVENTORY_CAP:
         return "Инвентарь мастерской переполнен."
-    if owned_count(user, item_key) >= STACK_MAX:
+    elif owned_count(user, item_key) >= STACK_MAX:
         return f"У тебя уже {STACK_MAX} таких предметов (с учётом тех, что куются): больше иметь нельзя."
     if not can_afford(user, item_key):
         return "Не хватает ресурсов."
@@ -952,7 +1082,7 @@ def _done_note(done: list[str] | None) -> str:
     names = ", ".join(escape(d) for d in done)
     title = "Крафт завершён" if len(done) == 1 else "Крафты завершены"
     return (f"<p><b>✅ {title}</b><br>{names} уже в твоём инвентаре. "
-            f"Загляни в раздел «Предметы».</p>")
+            f"Загляни в раздел «Предметы» или «Боезапас».</p>")
 
 
 def root_html(user: dict, with_image: bool, done: list[str] | None = None) -> str:
@@ -1004,6 +1134,14 @@ def category_html(user: dict, key: str, with_image: bool, page: int = 0) -> str:
                            "Добывай их, и они появятся здесь.</p>")
         lines = [f"{e} <b>{escape(n)}</b> — <code>{_f(c)}</code>" for _, n, e, c in owned]
         return text + "<p>⠀<br>" + "<br>".join(lines) + "</p>"
+    if key == "ammo":
+        owned = [(k, a) for k, a in AMMO.items() if ammo_count(user, k) > 0]
+        if not owned:
+            return text + (f"<p>{DIV}<br><b>Пока пусто</b><br>Зарядов нет. Создай их в «Кузнице»: "
+                           "они пригодятся против боссов.</p>")
+        lines = [f"{_em(a['emoji'])} <b>{escape(a['name'])}</b> — <code>{ammo_count(user, k)}</code>"
+                 f"<br><i>{escape(a['effect'])}</i>" for k, a in owned]
+        return text + "<p>⠀<br>" + "<br><br>".join(lines) + "</p>"
     groups = groups_of(user, key)
     mine = list(groups)
     if mine:
@@ -1301,8 +1439,10 @@ def slot_pick_html(user: dict, slot: int, with_image: bool) -> str:
 
 
 def slot_pick_kb(slot: int) -> InlineKeyboardMarkup:
-    btns = [_ebtn(f"ws:r:{slot}:{k}", i["emoji"], None) for k, i in ITEMS.items()]   # без цвета
-    return InlineKeyboardMarkup(inline_keyboard=_rows(btns) + [_back("ws:forge")])
+    # без цвета; предметы и боезапас отдельными рядами
+    gear = [_ebtn(f"ws:r:{slot}:{k}", i["emoji"], None) for k, i in ITEMS.items() if not is_ammo(i)]
+    ammo = [_ebtn(f"ws:r:{slot}:{k}", i["emoji"], None) for k, i in ITEMS.items() if is_ammo(i)]
+    return InlineKeyboardMarkup(inline_keyboard=_rows(gear) + _rows(ammo) + [_back("ws:forge")])
 
 
 def slot_busy_html(job: dict, slot: int, with_image: bool) -> str:
@@ -1341,8 +1481,8 @@ def recipe_html(user: dict, key: str, slot: int, with_image: bool) -> str:
     item = ITEMS[key]
     desc = item.get("desc") or f"Рецепт для слота {slot}."
     text = _img(with_image) + _head(item["name"].upper(), item["emoji"], desc)
-    bonus_name = item["bonus"][0]
-    bonus = _pct(bonus_pct(item, 0))
+    ammo = is_ammo(item)
+    bonus_name, bonus = ("", "") if ammo else (item["bonus"][0], _pct(bonus_pct(item, 0)))
     ok, no, clock = D.custom_emoji(OK_EMOJI), D.custom_emoji(NO_EMOJI), D.custom_emoji(TIME_EMOJI)
     boost = D.custom_emoji(BOOST_EMOJI)
     lines, lack = [], []
@@ -1354,16 +1494,24 @@ def recipe_html(user: dict, key: str, slot: int, with_image: bool) -> str:
         lines.append(f"{ok if got >= n else no} | {em} <b>{escape(name)}</b> — "
                      f"<code>{_n(got)}</code> / <code>{_n(n)}</code>")
     gap = "⠀<br>"   # невидимый символ: пустая строка видна и на ПК (как в _craft_status)
-    if owned_count(user, key) >= STACK_MAX:
+    if ammo and ammo_count(user, key) + ammo_pending(user, key) + item["batch"] > AMMO_CAP:
+        note = f"<i>Боезапас этого вида почти полон (максимум {AMMO_CAP}).</i>"
+    elif not ammo and owned_count(user, key) >= STACK_MAX:
         note = f"<i>У тебя уже {STACK_MAX} таких предметов: больше иметь нельзя.</i>"
     elif lack:
         note = "<i>Не хватает " + ", ".join(lack) + ".</i>"
     else:
         note = "<i>Всё готово, можно создавать.</i>"
-    text += (f"<p>{gap}<b>▸ Характеристики</b><br>"
-             f"<b>Редкость: {escape(item['rarity'])} · {clock} {fmt_time(item['seconds'])}</b><br>"
-             f"<b>{boost} {escape(bonus_name)}: {bonus}</b>"
-             + (f"<br><b>{escape(item['note'])}</b>" if item.get("note") else "") + "</p>"
+    if ammo:
+        stats = (f"<b>Редкость: {escape(item['rarity'])} · {clock} {fmt_time(item['seconds'])}</b><br>"
+                 f"<b>Выпуск: ×{item['batch']} (одноразовые)</b><br>"
+                 f"<b>У тебя: {ammo_count(user, key)}</b><br>"
+                 f"<b>{boost} {escape(item['effect'])}</b>")
+    else:
+        stats = (f"<b>Редкость: {escape(item['rarity'])} · {clock} {fmt_time(item['seconds'])}</b><br>"
+                 f"<b>{boost} {escape(bonus_name)}: {bonus}</b>"
+                 + (f"<br><b>{escape(item['note'])}</b>" if item.get("note") else ""))
+    text += (f"<p>{gap}<b>▸ Характеристики</b><br>" + stats + "</p>"
              f"<p>{gap}<b>▸ Нужно</b><br>" + "<br>".join(lines) + f"<br>{note}</p>")
     return text
 
@@ -1434,7 +1582,7 @@ async def on_category(callback: CallbackQuery):
     if settle(user):
         D.save_users()
     page = min(max(page, 0), _pages(len(groups_of(user, key))) - 1)
-    kb = InlineKeyboardMarkup(inline_keyboard=[_back("ws:open")]) if key == "res" else category_kb(user, key, page)
+    kb = InlineKeyboardMarkup(inline_keyboard=[_back("ws:open")]) if key in ("res", "ammo") else category_kb(user, key, page)
     await D.show_rich_card(callback, "workshop", lambda wi: category_html(user, key, wi, page), kb)
 
 
