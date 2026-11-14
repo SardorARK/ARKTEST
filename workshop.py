@@ -353,20 +353,8 @@ def mine_item_label(entry: dict) -> tuple[str, str]:
     item = ITEMS.get(entry.get("key"))
     if not item:
         return "Предмет", ""
-    emoji = _em(item["emoji"])
-    name = f"{emoji} {item['name']}"
-    lvl, evo, b = entry.get("lvl", 0), entry.get("evo", 0), entry.get("bonus", 0)
-    kind = MINE_ITEMS.get(entry.get("key"))
-    if kind == "gold":
-        eff = f"золото +{b:g}%"
-    elif kind == "time":
-        eff = f"время +{b:g}%"
-    else:
-        eff = f"добыча +{b:g}%"
-    head = f"{lvl} ур." if can_upgrade(item) else ""
-    if can_upgrade(item) and evo:
-        head += f", эвол. {evo}"
-    return name, (f"{head} · {eff}" if head else eff)
+    name = f"{_em(item['emoji'])} {item['name']}"
+    return name, f"+{entry.get('bonus', 0):g}%"   # только название и сам бонус
 
 
 def _pct(v: float) -> str:
@@ -968,7 +956,7 @@ def item_html(user: dict, idx: int, with_image: bool) -> str:
         text += f"<p>{gap}<b>❤️ Осталось использований:</b> <code>{dur} / {mx}</code><br>{_bar(dur, mx)}</p>"
 
     if it.get("use") and it.get("key") in MINE_ITEMS:
-        text += f"<p>{gap}<b>✅ Включён для шахты</b><br><i>Сработает при запуске. Нажми «Использовать» ещё раз, чтобы выключить.</i></p>"
+        text += f"<p>{gap}</p><blockquote>✅ Используется</blockquote>"
 
     legend = []
     if can_upgrade(item):
@@ -1568,7 +1556,7 @@ async def on_use(callback: CallbackQuery):
         return
     if it.get("use"):
         it.pop("use", None)
-        msg = "Предмет выключен: в шахте он работать не будет."
+        msg = "Предмет не используется."
     elif _int(it.get("dur")) <= 0:
         await callback.answer("Предмет сломан или использования кончились: в шахте он не сработает.", show_alert=True)
         return
@@ -1577,7 +1565,7 @@ async def on_use(callback: CallbackQuery):
             if o.get("key") == key:
                 o.pop("use", None)   # из одного вида включён только один предмет
         it["use"] = True
-        msg = "Предмет включён: сработает при следующем запуске шахты."
+        msg = "Предмет используется."
     D.save_users()
     await callback.answer(msg, show_alert=True)
     await D.show_rich_card(callback, "workshop", lambda wi: item_html(user, idx, wi), item_kb(user, idx))
