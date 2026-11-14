@@ -294,9 +294,9 @@ def upgrade_lack(user: dict) -> list[str]:
     need_meat, need_fruit = upgrade_cost(level)
     lack = []
     if user["meat"] < need_meat:
-        lack.append(f"мяса: {need_meat - user['meat']}")
+        lack.append(f"мяса: {_fmt(need_meat - user['meat'])}")
     if user["fruit"] < need_fruit:
-        lack.append(f"фруктов: {need_fruit - user['fruit']}")
+        lack.append(f"фруктов: {_fmt(need_fruit - user['fruit'])}")
     need_coins = evo_coin_cost(level)
     if need_coins and user["coins"] < need_coins:
         lack.append(f"монет: {_fmt(need_coins - user['coins'])}")
@@ -969,9 +969,9 @@ def stock_html(user_id: int | None = None, with_image: bool = False) -> str:
         f'<td align="center"><b>{value}</b></td>'
         "</tr>"
         for label, value in (
-            (f"{custom_emoji(COIN_EMOJI)} Монеты", user["coins"]),
-            (f"{MEAT_EMOJI} Мясо", user["meat"]),
-            (f"{FRUIT_EMOJI} Фрукты", user["fruit"]),
+            (f"{custom_emoji(COIN_EMOJI)} Монеты", _fmt(user["coins"])),
+            (f"{MEAT_EMOJI} Мясо", _fmt(user["meat"])),
+            (f"{FRUIT_EMOJI} Фрукты", _fmt(user["fruit"])),
         )
     )
 
