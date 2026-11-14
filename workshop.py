@@ -1433,16 +1433,39 @@ def forge_kb(user: dict) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def slot_pick_html(user: dict, slot: int, with_image: bool) -> str:
-    return _img(with_image) + _head(
-        f"СЛОТ {slot}", SLOT_TITLE_EMOJI, "Выбери предмет, чтобы посмотреть рецепт и начать ковку.")
+def craft_sections() -> list[str]:
+    """Разделы, в которых есть рецепты (в порядке CATEGORIES): их кнопки идут внизу выбора рецепта."""
+    have_recipes = {i["category"] for i in ITEMS.values()}
+    return [k for k in CATEGORIES if k in have_recipes]
 
 
-def slot_pick_kb(slot: int) -> InlineKeyboardMarkup:
-    # без цвета; предметы и боезапас отдельными рядами
-    gear = [_ebtn(f"ws:r:{slot}:{k}", i["emoji"], None) for k, i in ITEMS.items() if not is_ammo(i)]
-    ammo = [_ebtn(f"ws:r:{slot}:{k}", i["emoji"], None) for k, i in ITEMS.items() if is_ammo(i)]
-    return InlineKeyboardMarkup(inline_keyboard=_rows(gear) + _rows(ammo) + [_back("ws:forge")])
+def _section(cat: str) -> str:
+    secs = craft_sections()
+    return cat if cat in secs else secs[0]
+
+
+def slot_pick_html(user: dict, slot: int, with_image: bool, cat: str = "items") -> str:
+    cat = _section(cat)
+    hint = {"ammo": "Выбери боезапас, чтобы посмотреть рецепт и начать ковку."}.get(
+        cat, "Выбери предмет, чтобы посмотреть рецепт и начать ковку.")
+    return _img(with_image) + _head(f"СЛОТ {slot}", SLOT_TITLE_EMOJI, hint)
+
+
+def slot_pick_kb(slot: int, cat: str = "items") -> InlineKeyboardMarkup:
+    """Рецепты выбранного раздела (только он) и внизу кнопки разделов: только значки, без текста."""
+    cat = _section(cat)
+    recipes = [_ebtn(f"ws:r:{slot}:{k}", i["emoji"], None) for k, i in ITEMS.items() if i["category"] == cat]   # без цвета
+    tabs = []
+    for k in craft_sections():
+        emoji = CATEGORIES[k][1]
+        if k == cat:   # текущий раздел: выделен, нажатие ничего не делает
+            tabs.append(_ebtn("ws:noop", emoji, ButtonStyle.PRIMARY))
+        else:
+            tabs.append(_ebtn(f"ws:slot:{slot}:{k}", emoji, None))
+    rows = _rows(recipes)
+    if len(tabs) > 1:
+        rows.append(tabs)
+    return InlineKeyboardMarkup(inline_keyboard=rows + [_back("ws:forge")])
 
 
 def slot_busy_html(job: dict, slot: int, with_image: bool) -> str:
@@ -1519,7 +1542,7 @@ def recipe_html(user: dict, key: str, slot: int, with_image: bool) -> str:
 def recipe_kb(key: str, slot: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [_btn("Создать", f"ws:make:{slot}:{key}", MAKE_EMOJI, ButtonStyle.SUCCESS)],
-        _back(f"ws:slot:{slot}"),
+        _back(f"ws:slot:{slot}:{ITEMS[key]['category']}"),
     ])
 
 
@@ -1669,7 +1692,9 @@ async def on_slot(callback: CallbackQuery):
     elif st == "buy":
         await D.show_rich_card(callback, "workshop", lambda wi: slot_buy_html(user, slot, wi), slot_buy_kb(slot))
     else:
-        await D.show_rich_card(callback, "workshop", lambda wi: slot_pick_html(user, slot, wi), slot_pick_kb(slot))
+        parts = callback.data.split(":")
+        cat = parts[3] if len(parts) > 3 else "items"
+        await D.show_rich_card(callback, "workshop", lambda wi: slot_pick_html(user, slot, wi, cat), slot_pick_kb(slot, cat))
 
 
 @router.callback_query(F.data.startswith("ws:buy:"))
