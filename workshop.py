@@ -1434,9 +1434,9 @@ def forge_kb(user: dict) -> InlineKeyboardMarkup:
 
 
 def craft_sections() -> list[str]:
-    """Разделы, в которых есть рецепты (в порядке CATEGORIES): их кнопки идут внизу выбора рецепта."""
-    have_recipes = {i["category"] for i in ITEMS.values()}
-    return [k for k in CATEGORIES if k in have_recipes]
+    """Разделы кузницы (кнопки внизу выбора рецепта): предметы, боезапас, снаряжение, дополнительно.
+    Раздел «Ресурсы» сюда не входит. Пустые разделы тоже показываются."""
+    return [k for k in CATEGORIES if k != "res"]
 
 
 def _section(cat: str) -> str:
@@ -1446,26 +1446,28 @@ def _section(cat: str) -> str:
 
 def slot_pick_html(user: dict, slot: int, with_image: bool, cat: str = "items") -> str:
     cat = _section(cat)
-    hint = {"ammo": "Выбери боезапас, чтобы посмотреть рецепт и начать ковку."}.get(
-        cat, "Выбери предмет, чтобы посмотреть рецепт и начать ковку.")
+    if not any(i["category"] == cat for i in ITEMS.values()):
+        hint = "В этом разделе пока пусто."
+    elif cat == "ammo":
+        hint = "Выбери боезапас, чтобы посмотреть рецепт и начать ковку."
+    else:
+        hint = "Выбери предмет, чтобы посмотреть рецепт и начать ковку."
     return _img(with_image) + _head(f"СЛОТ {slot}", SLOT_TITLE_EMOJI, hint)
 
 
 def slot_pick_kb(slot: int, cat: str = "items") -> InlineKeyboardMarkup:
-    """Рецепты выбранного раздела (только он) и внизу кнопки разделов: только значки, без текста."""
+    """Рецепты выбранного раздела (только он) и внизу кнопки разделов: только значки, без текста.
+    Перед текущим разделом стоит точка, цвета у кнопок нет."""
     cat = _section(cat)
     recipes = [_ebtn(f"ws:r:{slot}:{k}", i["emoji"], None) for k, i in ITEMS.items() if i["category"] == cat]   # без цвета
     tabs = []
     for k in craft_sections():
         emoji = CATEGORIES[k][1]
-        if k == cat:   # текущий раздел: выделен, нажатие ничего не делает
-            tabs.append(_ebtn("ws:noop", emoji, ButtonStyle.PRIMARY))
+        if k == cat:   # текущий раздел: точка перед значком, нажатие ничего не делает
+            tabs.append(InlineKeyboardButton(text=f"• {emoji}", callback_data="ws:noop"))
         else:
-            tabs.append(_ebtn(f"ws:slot:{slot}:{k}", emoji, None))
-    rows = _rows(recipes)
-    if len(tabs) > 1:
-        rows.append(tabs)
-    return InlineKeyboardMarkup(inline_keyboard=rows + [_back("ws:forge")])
+            tabs.append(InlineKeyboardButton(text=emoji, callback_data=f"ws:slot:{slot}:{k}"))
+    return InlineKeyboardMarkup(inline_keyboard=_rows(recipes) + [tabs] + [_back("ws:forge")])
 
 
 def slot_busy_html(job: dict, slot: int, with_image: bool) -> str:
