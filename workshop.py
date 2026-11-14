@@ -138,7 +138,7 @@ ITEMS = {
                     ("fiber", 4, 12, 70, 4), ("leather", 6, 8, 50, 6)],
         # Бонус верёвки - прибавка к шансу золота в процентных пунктах (к базовым 1% шахты).
         # 0 ур.: +0.2%; 10 ур.: +1.17%; эволюция х2 / х3 / х6 (этап 1 / 2 / 3).
-        # Максимум (10 ур. + 3 этап): 1.17 * 6 = +7%, итого 1% + 7% = 8% золота. Больше 8% не бывает.
+        # Максимум (10 ур. + 3 этап): 1.17 * 6 = +7%, итого 1% + 7% = 8% золота (с талисманом удачи +1% - 9%, это потолок).
         "bonus": ("Шанс найти золото", 1.002),
         "max_bonus": 7 / 6,
         "bonus_abs": True,   # бонус считается в пунктах шанса, а не в процентах от добычи
@@ -179,6 +179,117 @@ ITEMS = {
         "uses": 1,            # работает 1 раз (не восстанавливается)
         "note": "Работает 1 раз",
         "bonus": ("Награды экспедиции", 1.10),
+    },
+    "helmet": {
+        "name": "Шахтёрская каска",
+        "emoji": "⛑️",
+        "category": "items",
+        "rarity": "Базовый",
+        "desc": "Крепкая каска с ремнём. Под ней работается спокойнее, и смена тянется дольше.",
+        "cost": {"leather": 15, "iron": 10, "fiber": 12, "clay": 6},
+        "seconds": 10 * 60,
+        "durability": 100,
+        "bonus": ("Время работы шахты", 1.05),
+    },
+    "dynamite": {
+        "name": "Динамитная шашка",
+        "emoji": "🧨",
+        "category": "items",
+        "rarity": "Редкий",
+        "desc": "Один хороший взрыв раскрывает сразу несколько жил. Берегись осыпи!",
+        "cost": {"resin": 10, "fiber": 15, "fire_core": 2, "clay": 8},
+        "seconds": 20 * 60,
+        "uses": 1,
+        "note": "Работает 1 раз",
+        "bonus": ("Добыча", 1.25),
+    },
+    "compass": {
+        "name": "Компас",
+        "emoji": "🧭",
+        "category": "items",
+        "rarity": "Базовый",
+        "desc": "Стрелка тянется к металлу. С ним в породе чаще попадаются медь и железо.",
+        "cost": {"iron": 8, "shell": 6, "thread": 10, "light_essence": 1},
+        "seconds": 10 * 60,
+        "durability": 100,
+        "bonus": ("Шанс железа и меди", 1.03),   # пункты шанса: забираются у камня
+    },
+    "cart": {
+        "name": "Тележка",
+        "emoji": "🛒",
+        "category": "items",
+        "rarity": "Редкий",
+        "desc": "Вместительная тележка на крепких колёсах. Вывозит больше, чем можно унести в руках.",
+        "cost": {"wood": 40, "iron": 15, "leather": 12, "bone": 10},
+        "seconds": 40 * 60,
+        "uses": 6,
+        "note": "Сработает 6 раз",
+        "bonus": ("Добыча", 1.10),
+    },
+    "firefly_lamp": {
+        "name": "Лампа-светлячок",
+        "emoji": "🪔",
+        "category": "items",
+        "rarity": "Эпический",
+        "desc": "В стекле живёт настоящий светлячок. Его свет находит минералы там, где другие их не видят.",
+        "cost": {"light_essence": 5, "resin": 15, "shell": 10, "thread": 20},
+        "seconds": 60 * 60,
+        "uses": 2,
+        "note": "Сработает 2 раза",
+        "bonus": ("Минералы шахты", 1.20),
+    },
+    "crystal_pickaxe": {
+        "name": "Кристальная кирка",
+        "emoji": "💎",
+        "category": "items",
+        "rarity": "Эпический",
+        "desc": "Лезвие из горного хрусталя. Режет породу почти без усилий.",
+        "cost": {"iron": 40, "light_essence": 8, "ice_shard": 6, "resin": 20},
+        "seconds": 2 * 60 * 60,
+        "durability": 150,
+        "max_durability": 700,
+        "upgradable": True,
+        "no_evo": True,       # эволюции нет: бонус ограничен потолком в 400%
+        "max_bonus": 400,     # бонус добычи на 10 уровне: +400% (максимум)
+        "upgrade": [("iron", 2, 20, 150, 1), ("light_essence", 2, 2, 30, 1), ("ice_shard", 2, 2, 25, 1),
+                    ("fire_core", 4, 2, 20, 4), ("bone", 6, 10, 60, 6)],
+        "bonus": ("Добыча", 1.10),
+    },
+    "flask": {
+        "name": "Фляга с водой",
+        "emoji": "💧",
+        "category": "items",
+        "rarity": "Базовый",
+        "desc": "Глоток воды и немного смазки: инструмент после смены выглядит как новый.",
+        "cost": {"leather": 12, "resin": 8, "bark": 10, "thread": 8},
+        "seconds": 15 * 60,
+        "uses": 3,
+        "note": "Сработает 3 раза",
+        "bonus": ("Восстановление прочности", 1.20),
+    },
+    "talisman": {
+        "name": "Талисман удачи",
+        "emoji": "🧿",
+        "category": "items",
+        "rarity": "Эпический",
+        "desc": "Старый оберег шахтёров. Говорят, золото само идёт в руки тому, кто его носит.",
+        "cost": {"light_essence": 8, "bone": 20, "feather": 25, "ice_shard": 3},
+        "seconds": 90 * 60,
+        "uses": 1,
+        "note": "Работает 1 раз",
+        "bonus": ("Шанс найти золото", 1.01),   # +1 пункт шанса золота (с верёвкой максимум 9%)
+    },
+    "banner": {
+        "name": "Знамя экспедиции",
+        "emoji": "🚩",
+        "category": "items",
+        "rarity": "Редкий",
+        "desc": "Яркое знамя собирает отряд вместе. Экспедиция возвращается с добычей побогаче.",
+        "cost": {"wood": 20, "leather": 15, "feather": 20, "thread": 20},
+        "seconds": 40 * 60,
+        "uses": 1,
+        "note": "Работает 1 раз",
+        "bonus": ("Награды экспедиции", 1.15),
     },
 }
 
@@ -295,6 +406,11 @@ def can_upgrade(item: dict) -> bool:
     return bool(item.get("upgradable"))
 
 
+def can_evolve(item: dict) -> bool:
+    """Эволюция доступна улучшаемым предметам, кроме тех, у кого стоит "no_evo" (у них потолок бонуса уже задан)."""
+    return can_upgrade(item) and not item.get("no_evo")
+
+
 def level_of(it: dict) -> int:
     return min(MAX_LEVEL, _int(it.get("lvl")))
 
@@ -324,38 +440,93 @@ def bonus_pct(item: dict, lvl: int = 0, evo: int = 0) -> float:
 # ---------------------------------------------------------------------------
 # Предметы в шахте (вызывается из underground.py при запуске шахты)
 # ---------------------------------------------------------------------------
-GOLD_CHANCE_CAP = 8.0   # итоговый шанс золота в шахте не может быть выше (%), чтобы не ломать экономику
+GOLD_CHANCE_CAP = 8.0   # максимум прибавки к шансу золота от предметов (пункты): к базовым 1% даёт потолок 9%
+                        # (верёвка с эволюцией до +7% и талисман +1%)
 
-# Сколько прочности предмет теряет за один запуск шахты. Предметы «на n использований» тратят 1 использование.
-MINE_WEAR = {"pickaxe": 5, "rope": 5}
+# Износ предметов с прочностью (кирка, верёвка) за запуск шахты: от 50% до 80% максимальной прочности
+# при запуске на 8 часов и дольше; на более коротких запусках пропорционально меньше (4 часа = 25-40% и т.д.).
+# Предметы «на n использований» (аптечка, фонарь) тратят 1 использование за запуск.
+WEAR_FULL_MINUTES = 480
+WEAR_MIN_PCT, WEAR_MAX_PCT = 50, 80
+BROKEN_PCT = 1   # прочность на этом уровне и ниже (%): предмет не используется, его надо починить
+
+
+def is_broken(it: dict) -> bool:
+    """Предмет нельзя использовать: прочность 1% и ниже, либо кончились использования."""
+    item = ITEMS.get(it.get("key"))
+    if not item:
+        return True
+    dur = _int(it.get("dur"))
+    if "durability" not in item:
+        return dur <= 0
+    mx = max_dur(item, level_of(it))
+    return dur <= max(1, round(mx * BROKEN_PCT / 100))
 # Какие предметы работают в шахте и какой эффект дают: ключ -> тип эффекта
-MINE_ITEMS = {"pickaxe": "ore", "rope": "gold", "medkit": "time", "lantern": "mineral"}
+MINE_ITEMS = {"pickaxe": "ore", "crystal_pickaxe": "ore", "dynamite": "ore", "cart": "ore",
+              "rope": "gold", "talisman": "gold",
+              "medkit": "time", "helmet": "time",
+              "lantern": "mineral", "firefly_lamp": "mineral",
+              "compass": "compass",
+              "flask": "repair"}   # фляга обрабатывается последней: чинит предметы, сработавшие в этом запуске
 
 
-def mine_items_apply(user: dict) -> dict:
+# Предметы одной группы взаимозаменяемы: включить можно только один из них (две кирки сразу не бывает)
+EXCLUSIVE_GROUPS = (("pickaxe", "crystal_pickaxe"),)
+
+
+def use_group(key: str) -> tuple:
+    for g in EXCLUSIVE_GROUPS:
+        if key in g:
+            return g
+    return (key,)
+
+
+def mine_items_apply(user: dict, minutes: float = WEAR_FULL_MINUTES) -> dict:
     """Применяет в шахте только те предметы, которые игрок сам включил кнопкой «Использовать» (флаг "use"),
     и списывает износ. Сам по себе ничего не берётся.
-    Возвращает {"ore": %, "gold": пункты, "time": %, "mineral": %, "used": [{"key", "lvl", "evo", "bonus"}]}.
+    Возвращает {"ore": %, "gold": пункты, "time": %, "mineral": %, "compass": пункты,
+                "used": [{"key", "lvl", "evo", "bonus"}]}.
     Если подходящих предметов нет, used пустой, а бонусы нулевые."""
-    res = {"ore": 0.0, "gold": 0.0, "time": 0.0, "mineral": 0.0, "used": []}
+    res = {"ore": 0.0, "gold": 0.0, "time": 0.0, "mineral": 0.0, "compass": 0.0, "used": []}
     lst = items_of(user)
+    worn = []   # предметы с прочностью, сработавшие в этом запуске (их может подлатать фляга)
     for key, kind in MINE_ITEMS.items():
         item = ITEMS.get(key)
-        if not item:
+        if not item or kind == "repair":
             continue
         it = next((o for o in lst if o.get("key") == key and o.get("use")), None)
         if it is None:
             continue   # игрок этот предмет не включал
-        if _int(it.get("dur")) <= 0:
+        if is_broken(it):
             it.pop("use", None)   # сломан / использования кончились: включение сбрасывается
             continue
         b = bonus_pct(item, level_of(it), evo_of(it))
-        wear = 1 if "uses" in item else MINE_WEAR.get(key, 5)
+        if "uses" in item:
+            wear = 1
+        else:
+            share = random.uniform(WEAR_MIN_PCT, WEAR_MAX_PCT) / 100 * min(1.0, minutes / WEAR_FULL_MINUTES)
+            wear = max(1, round(max_dur(item, level_of(it)) * share))
+            worn.append((it, item))
         it["dur"] = max(0, _int(it.get("dur")) - wear)
-        if it["dur"] <= 0:
-            it.pop("use", None)
+        if is_broken(it):
+            it.pop("use", None)   # износился на этом запуске: дальше нужен ремонт
         res[kind] += b
         res["used"].append({"key": key, "lvl": level_of(it), "evo": evo_of(it), "bonus": b})
+
+    # Фляга: возвращает часть прочности предметам, которые только что отработали. Без таких предметов не тратится.
+    fkey = next((k for k, v in MINE_ITEMS.items() if v == "repair"), None)
+    flask = next((o for o in lst if o.get("key") == fkey and o.get("use")), None) if fkey else None
+    if flask is not None and worn and not is_broken(flask):
+        b = bonus_pct(ITEMS[fkey], 0, 0)
+        for it, item in worn:
+            mx = max_dur(item, level_of(it))
+            it["dur"] = min(mx, _int(it.get("dur")) + round(mx * b / 100))
+            if not is_broken(it):
+                it["use"] = True   # подлатанный предмет остаётся включённым
+        flask["dur"] = max(0, _int(flask.get("dur")) - 1)
+        if is_broken(flask):
+            flask.pop("use", None)
+        res["used"].append({"key": fkey, "lvl": 0, "evo": 0, "bonus": b})
     res["gold"] = min(res["gold"], GOLD_CHANCE_CAP)
     return res
 
@@ -503,7 +674,7 @@ def evolve_item(user: dict, idx: int) -> tuple[str | None, bool]:
     if found is None:
         return "Предмет не найден.", False
     it, item = found
-    if not can_upgrade(item):
+    if not can_evolve(item):
         return "Этот предмет нельзя эволюционировать.", False
     evo = evo_of(it)
     if evo >= MAX_EVO:
@@ -972,7 +1143,9 @@ def item_html(user: dict, idx: int, with_image: bool) -> str:
 
     legend = []
     if can_upgrade(item):
-        legend += [(UPGRADE_EMOJI, "Улучшить"), (EVO_EMOJI, "Эволюция")]
+        legend += [(UPGRADE_EMOJI, "Улучшить")]
+        if can_evolve(item):
+            legend += [(EVO_EMOJI, "Эволюция")]
     legend += [(USE_EMOJI, "Использовать"), (RECON_EMOJI, "Реконструкция")]
     if can_repair(item):
         legend.append((REPAIR_EMOJI, "Починить"))
@@ -1043,7 +1216,8 @@ def recon_html(user: dict, idx: int, with_image: bool) -> str:
     info = []
     if can_upgrade(item):
         info.append(f"<b>✨ Уровень:</b> <code>{lvl} / {MAX_LEVEL}</code>")
-        info.append(f"<b>{_em(EVO_EMOJI)} Эволюция:</b> <code>{evo} / {MAX_EVO}</code>")
+        if can_evolve(item):
+            info.append(f"<b>{_em(EVO_EMOJI)} Эволюция:</b> <code>{evo} / {MAX_EVO}</code>")
     gap = DIV + "<br>"
     return text + ((f"<p>{DIV}<br>" + "<br>".join(info) + "</p>") if info else "") + (
         f"<p>{gap}<b>▸ Ты получишь</b> <i>({RECON_SHARE * 100:g}% от вложенного)</i><br>" + "<br>".join(lines) + "</p>"
@@ -1079,7 +1253,8 @@ def item_kb(user: dict, idx: int) -> InlineKeyboardMarkup:
     acts = []
     if can_upgrade(item):
         acts.append(_ebtn(f"ws:up:{idx}", UPGRADE_EMOJI, ButtonStyle.PRIMARY))
-        acts.append(_ebtn(f"ws:ev:{idx}", EVO_EMOJI, ButtonStyle.PRIMARY))
+        if can_evolve(item):
+            acts.append(_ebtn(f"ws:ev:{idx}", EVO_EMOJI, ButtonStyle.PRIMARY))
     acts.append(_ebtn(f"ws:use:{idx}", USE_EMOJI, ButtonStyle.SUCCESS))
     acts.append(_ebtn(f"ws:rc:{idx}", RECON_EMOJI, ButtonStyle.PRIMARY))
     if can_repair(item):
@@ -1569,12 +1744,16 @@ async def on_use(callback: CallbackQuery):
     if it.get("use"):
         it.pop("use", None)
         msg = "Предмет не используется."
-    elif _int(it.get("dur")) <= 0:
-        await callback.answer("Предмет сломан или использования кончились: в шахте он не сработает.", show_alert=True)
+    elif is_broken(it):
+        if "durability" in item:
+            await callback.answer("Предмет изношен. Почини его, чтобы использовать.", show_alert=True)
+        else:
+            await callback.answer("Использования кончились.", show_alert=True)
         return
     else:
+        grp = use_group(key)
         for o in items_of(user):
-            if o.get("key") == key:
+            if o.get("key") in grp:
                 o.pop("use", None)   # из одного вида включён только один предмет
         it["use"] = True
         msg = "Предмет используется."
@@ -1594,7 +1773,7 @@ async def on_evo(callback: CallbackQuery):
     if found is None:
         await callback.answer("Предмет не найден.", show_alert=True)
         return
-    if not can_upgrade(found[1]):
+    if not can_evolve(found[1]):
         await callback.answer("Этот предмет нельзя эволюционировать.", show_alert=True)
         return
     if evo_of(found[0]) >= MAX_EVO:
