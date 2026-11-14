@@ -282,11 +282,12 @@ def _help_block() -> str:
 def list_html(user: dict, with_image: bool) -> str:
     text = W._img(with_image) + W._head("НАБОРЫ", SETS_EMOJI, "Твои наборы. Открывай их командами: список команд ниже.")
     own = owned_sets(user)
+    gap = "<p>⠀</p>"   # пустая строка из невидимого символа: одинаково на телефоне и на ПК
     if own:
-        text += "<p>" + "<br>".join(f"<b>{SETS[k]['emoji']} {escape(SETS[k]['name'])}</b> {_qty(set_count(user, k))}"
-                                    for k in own) + "</p>"
+        text += gap + "<p>" + "<br>".join(f"<b>{SETS[k]['emoji']} {escape(SETS[k]['name'])}:</b> {_qty(set_count(user, k))}"
+                                          for k in own) + "</p>" + gap
     else:
-        text += "<p>У тебя пока нет наборов.</p>"
+        text += gap + "<p>У тебя пока нет наборов.</p>" + gap
     return text + _help_block()
 
 
