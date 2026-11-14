@@ -12,9 +12,10 @@
 
 Выдавать наборы из других разделов (награды, события, донат): workshop_sets.give_set(user, "basic", 1).
 
-Подключение (main.py), после workshop.setup(...):
+Подключение (main.py):
     import workshop_sets
-    workshop_sets.setup(ADMIN_IDS=ADMIN_IDS)
+    workshop_sets.install(dp)                  # ДО quick_cmds.install(dp)
+    workshop_sets.setup(ADMIN_IDS=ADMIN_IDS)   # после workshop.setup(...)
     dp.include_router(workshop_sets.router)
 Отдельный setup для get_user / send_rich_card и т.д. не нужен: модуль берёт их у workshop.
 
@@ -43,6 +44,13 @@ _ADMINS: set = set()
 
 def setup(ADMIN_IDS=()) -> None:
     _ADMINS.update(int(x) for x in ADMIN_IDS)
+
+
+def install(dp) -> None:
+    """Ставит команды наборов на сам диспетчер, РАНЬШЕ остальных роутеров и quick_cmds:
+    так ни один общий обработчик текста не перехватит «н-наборы-набор» и «отк бн 3».
+    Вызывать в main.py до quick_cmds.install(dp)."""
+    dp.message.register(on_command, _is_command)
 
 
 # ---------------------------------------------------------------------------
