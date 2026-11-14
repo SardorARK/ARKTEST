@@ -315,7 +315,7 @@ def list_html(user: dict, with_image: bool) -> str:
         text += gap + "<p>" + "<br>".join(f"<b>{SETS[k]['emoji']} {escape(SETS[k]['name'])}:</b> {_qty(set_count(user, k))}"
                                           for k in own) + "</p>" + gap
     else:
-        text += gap + "<p>Пусто</p>" + gap
+        text += gap + "<p><i>📭 Пусто.</i></p>" + gap
     return text + _help_block()
 
 
@@ -449,7 +449,7 @@ def _plain(cmd: tuple, user: dict, result: tuple | None = None) -> str:
     if cmd[0] == "list":
         own = owned_sets(user)
         return "Твои наборы:\n" + "\n".join(f"{SETS[k]['name']}: {set_count(user, k):.1f} шт" for k in own) \
-            if own else "Пусто"
+            if own else "📭 Пусто."
     return "Готово."
 
 
