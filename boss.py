@@ -1307,13 +1307,24 @@ def _weapon(user: dict):
         return None
 
 
+def _gear_crit(user: dict) -> float:
+    """Шанс крита от надетых вещей мастерской (Амулет охотника: fx.boss_crit). Сломанное не считается."""
+    ws = _ws()
+    if ws is None:
+        return 0.0
+    try:
+        return sum(float(item.get("fx", {}).get("boss_crit", 0.0)) for _, item in ws.equipped(user).values())
+    except Exception:
+        return 0.0
+
+
 def strike_damage(user: dict, bid: str, raw: float, pierce: float = 0.0,
                   crit_chance: float = 0.0, crit_mult: float = CRIT_MULT) -> tuple[int, bool]:
     """Урон удара/выстрела: прибавка привилегий, защита босса (с учётом пробивания), крит."""
     dmg = raw * (1 + _damage_pct(user) / 100)
     if STRIKE_USE_DEFENSE:
         dmg *= 100 / (100 + cfg(bid)["def"] * (1 - max(0.0, min(1.0, pierce))))
-    crit = random.random() < crit_chance
+    crit = random.random() < min(1.0, crit_chance + _gear_crit(user))
     if crit:
         dmg *= crit_mult
     return max(1, round(dmg)), crit
