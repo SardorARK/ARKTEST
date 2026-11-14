@@ -374,8 +374,117 @@ AMMO = {
         "fx": {"damage": 1.6, "stun_turns": 1},
     },
 }
+AMMO_BASE_DMG = (900, 1400)   # урон каменной дроби за выстрел; остальные заряды: этот диапазон * fx["damage"]
+
+
+def _round10(x: float) -> int:
+    return int(round(x / 10.0)) * 10
+
+
 for _k, _a in AMMO.items():
-    ITEMS[_k] = {**_a, "category": "ammo", "ammo": True}   # крафтятся через общую кузницу, но хранятся счётчиком
+    _m = _a["fx"].get("damage", 0)
+    _d = {"dmg": (_round10(AMMO_BASE_DMG[0] * _m), _round10(AMMO_BASE_DMG[1] * _m)),
+          "dmg_unit": "за ход" if _k == "spike_net" else "за выстрел"} if _m > 0 else {}
+    ITEMS[_k] = {**_a, **_d, "category": "ammo", "ammo": True}   # крафтятся через общую кузницу, но хранятся счётчиком
+
+# ---------------------------------------------------------------------------
+# Снаряжение питомца: оружие, броня, аксессуары. Надевается кнопкой «Использовать» (по одному на слот).
+#   dmg   - диапазон урона за удар (у оружия)
+#   stats - строки эффектов для карточки и рецепта
+#   fx    - данные для боя с боссом (читает код босса)
+# Прочность тратится так же, как у других предметов, чинится кнопкой «Починить».
+# ---------------------------------------------------------------------------
+SLOT_NAMES = {"weapon": "Оружие", "armor": "Броня", "accessory": "Аксессуар"}
+
+GEAR = {
+    "bone_blade": {
+        "name": "Костяной клинок", "emoji": "🗡️", "rarity": "Базовый", "slot": "weapon",
+        "desc": "Лёгкий клинок из кости и кожи. Для первых боёв хватит.",
+        "cost": {"bone": 20, "leather": 8, "thread": 8, "wood": 6}, "seconds": 20 * 60, "durability": 100,
+        "dmg": (700, 1100), "dmg_unit": "за удар", "stats": [],
+        "fx": {"armor_pierce": 0.0},
+    },
+    "iron_claw": {
+        "name": "Железный коготь", "emoji": "🐾", "rarity": "Редкий", "slot": "weapon",
+        "desc": "Стальные накладки на когти питомца. Рвут шкуру и находят щели в броне.",
+        "cost": {"iron": 25, "leather": 10, "thread": 12, "bone": 10}, "seconds": 45 * 60, "durability": 150,
+        "dmg": (1567, 2564), "dmg_unit": "за удар", "stats": ["Игнорирует 15% брони босса"],
+        "fx": {"armor_pierce": 0.15},
+    },
+    "fire_fang": {
+        "name": "Огненный клык", "emoji": "🦷", "rarity": "Эпический", "slot": "weapon",
+        "desc": "Клык с ядром огня внутри. Каждый укус оставляет ожог.",
+        "cost": {"fire_core": 4, "iron": 20, "bone": 20, "resin": 15}, "seconds": 90 * 60, "durability": 200,
+        "dmg": (2900, 4400), "dmg_unit": "за удар", "stats": ["Поджигает босса на 2 хода"],
+        "fx": {"burn_turns": 2, "burn_damage": 0.3},
+    },
+    "ice_spike": {
+        "name": "Ледяной шип", "emoji": "🧊", "rarity": "Эпический", "slot": "weapon",
+        "desc": "Шип из вечного льда. Враг, которого он задел, двигается как в густом киселе.",
+        "cost": {"ice_shard": 5, "iron": 18, "bone": 15, "thread": 15}, "seconds": 90 * 60, "durability": 200,
+        "dmg": (2600, 4100), "dmg_unit": "за удар", "stats": ["Замедляет босса на 1 ход"],
+        "fx": {"slow_turns": 1},
+    },
+    "leather_vest": {
+        "name": "Кожаный нагрудник", "emoji": "🦺", "rarity": "Базовый", "slot": "armor",
+        "desc": "Лёгкая защита из выделанной кожи. Не стесняет движений.",
+        "cost": {"leather": 25, "thread": 12, "fiber": 15}, "seconds": 20 * 60, "durability": 120,
+        "stats": ["Снижает получаемый урон на 8%"],
+        "fx": {"damage_taken": 0.92},
+    },
+    "iron_plate": {
+        "name": "Железный панцирь", "emoji": "🛡️", "rarity": "Редкий", "slot": "armor",
+        "desc": "Тяжёлая броня из железных пластин. Держит удар, но замедляет хозяина.",
+        "cost": {"iron": 40, "leather": 15, "thread": 15, "clay": 10}, "seconds": 60 * 60, "durability": 250,
+        "stats": ["Снижает получаемый урон на 22%", "Скорость питомца −10%"],
+        "fx": {"damage_taken": 0.78, "speed": 0.9},
+    },
+    "scale_cloak": {
+        "name": "Чешуйчатая накидка", "emoji": "🧥", "rarity": "Редкий", "slot": "armor",
+        "desc": "Накидка из плотной чешуи. Огонь по ней скользит, а не жжёт.",
+        "cost": {"leather": 20, "shell": 15, "fiber": 15, "thread": 12, "resin": 8}, "seconds": 50 * 60,
+        "durability": 180,
+        "stats": ["Снижает получаемый урон на 14%", "Сопротивление огню 30%"],
+        "fx": {"damage_taken": 0.86, "fire_resist": 0.3},
+    },
+    "crystal_helm": {
+        "name": "Кристальный шлем", "emoji": "💠", "rarity": "Эпический", "slot": "armor",
+        "desc": "Шлем из горного хрусталя. Звон в ушах от громовых ударов ему не страшен.",
+        "cost": {"ice_shard": 6, "light_essence": 6, "iron": 20, "leather": 10}, "seconds": 120 * 60,
+        "durability": 250,
+        "stats": ["Снижает получаемый урон на 10%", "Защита от оглушения 60%"],
+        "fx": {"damage_taken": 0.9, "stun_resist": 0.6},
+    },
+    "feather_cloak": {
+        "name": "Перьевой плащ", "emoji": "🪶", "rarity": "Базовый", "slot": "accessory",
+        "desc": "Невесомый плащ из перьев. В нём проще увернуться от удара.",
+        "cost": {"feather": 30, "thread": 15, "fiber": 10}, "seconds": 25 * 60, "durability": 100,
+        "stats": ["Шанс уклонения +8%"],
+        "fx": {"dodge": 0.08},
+    },
+    "hunter_amulet": {
+        "name": "Амулет охотника", "emoji": "📿", "rarity": "Редкий", "slot": "accessory",
+        "desc": "Оберег опытных охотников. Помогает бить точно в слабое место.",
+        "cost": {"bone": 15, "light_essence": 3, "thread": 12, "feather": 10}, "seconds": 45 * 60,
+        "durability": 100,
+        "stats": ["Шанс крита против боссов +10%"],
+        "fx": {"boss_crit": 0.10},
+    },
+}
+for _k, _g in GEAR.items():
+    ITEMS[_k] = {**_g, "category": "gear"}
+
+
+def dmg_text(item: dict) -> str:
+    """Строка урона для характеристик: «1567-2564 за удар». Пусто, если у предмета нет урона."""
+    d = item.get("dmg")
+    return f"{d[0]}-{d[1]} {item.get('dmg_unit', 'за удар')}" if d else ""
+
+
+def roll_damage(item: dict) -> int:
+    """Бросок урона оружия или заряда в его диапазоне (для боя с боссом). 0, если урона нет."""
+    d = item.get("dmg")
+    return random.randint(d[0], d[1]) if d else 0
 
 
 def is_ammo(item: dict) -> bool:
@@ -455,6 +564,17 @@ def items_of(user: dict) -> list:
         lst = []
         user["ws_items"] = lst
     return lst
+
+
+def equipped(user: dict) -> dict:
+    """Надетое снаряжение: {"weapon": (предмет, описание), "armor": ..., "accessory": ...}.
+    Сломанное (прочность 1% и ниже) не считается надетым. Для боя с боссом."""
+    out = {}
+    for it in items_of(user):
+        item = ITEMS.get(it.get("key"))
+        if item and item.get("slot") and it.get("use") and not is_broken(it):
+            out[item["slot"]] = (it, item)
+    return out
 
 
 def ammo_of(user: dict) -> dict:
@@ -597,6 +717,9 @@ EXCLUSIVE_GROUPS = (("pickaxe", "crystal_pickaxe"),)
 
 
 def use_group(key: str) -> tuple:
+    slot = ITEMS.get(key, {}).get("slot")
+    if slot:   # снаряжение: в одном слоте надет только один предмет
+        return tuple(k for k, v in ITEMS.items() if v.get("slot") == slot)
     for g in EXCLUSIVE_GROUPS:
         if key in g:
             return g
@@ -1241,10 +1364,16 @@ def _stats_box(item: dict, lvl: int, evo: int = 0, stack: int = 0) -> str:
     lines = []
     if can_upgrade(item):
         lines.append(f"<b>✨ Уровень:</b> <code>{lvl} / {MAX_LEVEL}</code>")
-    bonus = f"<b>{boost} {escape(item['bonus'][0])}:</b> <code>{_pct(bonus_pct(item, lvl, evo))}</code>"
-    if can_upgrade(item) and lvl < MAX_LEVEL:
-        bonus += f" → <code>{_pct(bonus_pct(item, lvl + 1, evo))}</code>"
-    lines.append(bonus)
+    if item.get("slot"):   # снаряжение: слот, урон и эффекты вместо бонуса
+        lines.append(f"<b>🎽 Слот:</b> <code>{SLOT_NAMES[item['slot']]}</code>")
+        if item.get("dmg"):
+            lines.append(f"<b>⚔️ Урон:</b> <code>{dmg_text(item)}</code>")
+        lines += [f"<b>{boost} {escape(t)}</b>" for t in item.get("stats", [])]
+    else:
+        bonus = f"<b>{boost} {escape(item['bonus'][0])}:</b> <code>{_pct(bonus_pct(item, lvl, evo))}</code>"
+        if can_upgrade(item) and lvl < MAX_LEVEL:
+            bonus += f" → <code>{_pct(bonus_pct(item, lvl + 1, evo))}</code>"
+        lines.append(bonus)
     lines.append(f"<b>💎 Редкость:</b> <code>{escape(item['rarity'])}</code>")
     if can_upgrade(item) and can_repair(item):
         dur_line = f"<b>🛡 Прочность:</b> <code>{max_dur(item, lvl)}</code>"
@@ -1276,7 +1405,7 @@ def item_html(user: dict, idx: int, with_image: bool) -> str:
     else:
         text += f"<p>{gap}<b>❤️ Осталось использований:</b> <code>{dur} / {mx}</code><br>{_bar(dur, mx)}</p>"
 
-    if it.get("use") and it.get("key") in MINE_ITEMS:
+    if it.get("use") and (it.get("key") in MINE_ITEMS or item.get("slot")):
         text += f"<p>{gap}</p><blockquote><i>✅ Используется</i></blockquote>"
 
     legend = []
@@ -1457,16 +1586,16 @@ def slot_pick_html(user: dict, slot: int, with_image: bool, cat: str = "items") 
 
 def slot_pick_kb(slot: int, cat: str = "items") -> InlineKeyboardMarkup:
     """Рецепты выбранного раздела (только он) и внизу кнопки разделов: только значки, без текста.
-    Перед текущим разделом стоит точка, цвета у кнопок нет."""
+    Кнопки разделов синие, перед текущим стоит точка."""
     cat = _section(cat)
     recipes = [_ebtn(f"ws:r:{slot}:{k}", i["emoji"], None) for k, i in ITEMS.items() if i["category"] == cat]   # без цвета
     tabs = []
     for k in craft_sections():
         emoji = CATEGORIES[k][1]
         if k == cat:   # текущий раздел: точка перед значком, нажатие ничего не делает
-            tabs.append(InlineKeyboardButton(text=f"• {emoji}", callback_data="ws:noop"))
+            tabs.append(InlineKeyboardButton(text=f"• {emoji}", callback_data="ws:noop", style=ButtonStyle.PRIMARY))
         else:
-            tabs.append(InlineKeyboardButton(text=emoji, callback_data=f"ws:slot:{slot}:{k}"))
+            tabs.append(InlineKeyboardButton(text=emoji, callback_data=f"ws:slot:{slot}:{k}", style=ButtonStyle.PRIMARY))
     return InlineKeyboardMarkup(inline_keyboard=_rows(recipes) + [tabs] + [_back("ws:forge")])
 
 
@@ -1507,7 +1636,8 @@ def recipe_html(user: dict, key: str, slot: int, with_image: bool) -> str:
     desc = item.get("desc") or f"Рецепт для слота {slot}."
     text = _img(with_image) + _head(item["name"].upper(), item["emoji"], desc)
     ammo = is_ammo(item)
-    bonus_name, bonus = ("", "") if ammo else (item["bonus"][0], _pct(bonus_pct(item, 0)))
+    gear = bool(item.get("slot"))
+    bonus_name, bonus = ("", "") if (ammo or gear) else (item["bonus"][0], _pct(bonus_pct(item, 0)))
     ok, no, clock = D.custom_emoji(OK_EMOJI), D.custom_emoji(NO_EMOJI), D.custom_emoji(TIME_EMOJI)
     boost = D.custom_emoji(BOOST_EMOJI)
     lines, lack = [], []
@@ -1531,7 +1661,13 @@ def recipe_html(user: dict, key: str, slot: int, with_image: bool) -> str:
         stats = (f"<b>Редкость: {escape(item['rarity'])} · {clock} {fmt_time(item['seconds'])}</b><br>"
                  f"<b>Выпуск: ×{item['batch']} (одноразовые)</b><br>"
                  f"<b>У тебя: {ammo_count(user, key)}</b><br>"
-                 f"<b>{boost} {escape(item['effect'])}</b>")
+                 + (f"<b>⚔️ Урон: {dmg_text(item)}</b><br>" if item.get("dmg") else "")
+                 + f"<b>{boost} {escape(item['effect'])}</b>")
+    elif gear:
+        stats = (f"<b>Редкость: {escape(item['rarity'])} · {clock} {fmt_time(item['seconds'])}</b><br>"
+                 f"<b>Слот: {SLOT_NAMES[item['slot']]}</b>"
+                 + (f"<br><b>⚔️ Урон: {dmg_text(item)}</b>" if item.get("dmg") else "")
+                 + "".join(f"<br><b>{boost} {escape(t)}</b>" for t in item.get("stats", [])))
     else:
         stats = (f"<b>Редкость: {escape(item['rarity'])} · {clock} {fmt_time(item['seconds'])}</b><br>"
                  f"<b>{boost} {escape(bonus_name)}: {bonus}</b>"
@@ -1913,12 +2049,13 @@ async def on_use(callback: CallbackQuery):
         return
     it, item = found
     key = it.get("key")
-    if key not in MINE_ITEMS:
+    gear = bool(item.get("slot"))
+    if key not in MINE_ITEMS and not gear:
         await callback.answer("🚧 Использование этого предмета скоро появится.", show_alert=True)
         return
     if it.get("use"):
         it.pop("use", None)
-        msg = "Предмет не используется."
+        msg = "Предмет снят." if gear else "Предмет не используется."
     elif is_broken(it):
         if "durability" in item:
             await callback.answer("Предмет изношен. Почини его, чтобы использовать.", show_alert=True)
@@ -1931,7 +2068,7 @@ async def on_use(callback: CallbackQuery):
             if o.get("key") in grp:
                 o.pop("use", None)   # из одного вида включён только один предмет
         it["use"] = True
-        msg = "Предмет используется."
+        msg = "Предмет надет." if gear else "Предмет используется."
     D.save_users()
     await callback.answer(msg, show_alert=True)
     await D.show_rich_card(callback, "workshop", lambda wi: item_html(user, idx, wi), item_kb(user, idx))
