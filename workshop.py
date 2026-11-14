@@ -751,7 +751,7 @@ def _back(data: str) -> list[InlineKeyboardButton]:
 
 
 def _ebtn(data: str, emoji: "str | tuple[str, str]",
-          style: ButtonStyle = ButtonStyle.PRIMARY) -> InlineKeyboardButton:
+          style: "ButtonStyle | None" = ButtonStyle.PRIMARY) -> InlineKeyboardButton:
     """Кнопка только со значком. С кастомным эмодзи текст - невидимый символ (пустой текст Telegram не принимает)."""
     if isinstance(emoji, tuple):
         cid, fallback = emoji
@@ -1126,7 +1126,7 @@ def slot_pick_html(user: dict, slot: int, with_image: bool) -> str:
 
 
 def slot_pick_kb(slot: int) -> InlineKeyboardMarkup:
-    btns = [_ebtn(f"ws:r:{slot}:{k}", i["emoji"], ButtonStyle.SUCCESS) for k, i in ITEMS.items()]
+    btns = [_ebtn(f"ws:r:{slot}:{k}", i["emoji"], None) for k, i in ITEMS.items()]   # без цвета
     return InlineKeyboardMarkup(inline_keyboard=_rows(btns) + [_back("ws:forge")])
 
 
@@ -1190,12 +1190,12 @@ def recipe_html(user: dict, key: str, slot: int, with_image: bool) -> str:
              f"<b>{boost} {escape(bonus_name)}: {bonus}</b>"
              + (f"<br><b>{escape(item['note'])}</b>" if item.get("note") else "") + "</p>"
              f"<p>{gap}<b>▸ Нужно</b><br>" + "<br>".join(lines) + f"<br>{note}</p>")
-    return text + _legend((MAKE_EMOJI, "Создать"))
+    return text
 
 
 def recipe_kb(key: str, slot: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
-        [_ebtn(f"ws:make:{slot}:{key}", MAKE_EMOJI, ButtonStyle.SUCCESS)],
+        [_btn("Создать", f"ws:make:{slot}:{key}", MAKE_EMOJI, ButtonStyle.SUCCESS)],
         _back(f"ws:slot:{slot}"),
     ])
 
