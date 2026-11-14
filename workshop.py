@@ -22,6 +22,7 @@
 """
 import logging
 import math
+import re
 import random
 import time
 from html import escape
@@ -488,7 +489,41 @@ GEAR = {
         "fx": {"boss_crit": 0.10},
     },
 }
+# Улучшение снаряжения (10 уровней, кнопка «Улучшить», как у кирки; эволюции нет).
+# Значение на 10 уровне; на 0 уровне остаётся то, что записано в GEAR выше. Между ними рост плавный.
+#   dmg          - диапазон урона за удар на 10 уровне (у оружия)
+#   damage_taken - множитель получаемого урона на 10 уровне (0.70 = урон снижен на 30%)
+#   dodge        - шанс уклонения на 10 уровне (0.30 = 30%)
+GEAR_SCALE = {
+    "bone_blade":    {"dmg": (6400, 10000)},       # Костяной клинок: до 10 000 за удар
+    "iron_claw":     {"dmg": (9200, 15000)},       # Железный коготь: до 15 000 за удар
+    "ice_spike":     {"dmg": (11400, 18000)},      # Ледяной шип: до 18 000 за удар
+    "leather_vest":  {"damage_taken": 0.70},       # Кожаный нагрудник: снижение урона до 30%
+    "iron_plate":    {"damage_taken": 0.50},       # Железный панцирь (редкий): до 50%
+    "scale_cloak":   {"damage_taken": 0.50},       # Чешуйчатая накидка (редкая): до 50%
+    "feather_cloak": {"dodge": 0.30},              # Перьевой плащ: уклонение до 30%
+}
+# Цена улучшения: (ресурс, уровень-образец, сколько на нём, сколько на 10 уровне, с какого уровня нужен), как у кирки.
+GEAR_UPGRADE = {
+    "bone_blade":    [("bone", 2, 12, 120, 1), ("leather", 2, 5, 50, 1), ("thread", 2, 5, 50, 1),
+                      ("wood", 2, 4, 40, 1), ("iron", 4, 8, 70, 4)],
+    "iron_claw":     [("iron", 2, 15, 160, 1), ("leather", 2, 6, 60, 1), ("thread", 2, 8, 80, 1),
+                      ("bone", 2, 6, 70, 1), ("clay", 4, 6, 60, 4)],
+    "ice_spike":     [("iron", 2, 12, 130, 1), ("bone", 2, 8, 90, 1), ("thread", 2, 8, 90, 1),
+                      ("ice_shard", 3, 1, 20, 3)],
+    "leather_vest":  [("leather", 2, 12, 120, 1), ("thread", 2, 6, 60, 1), ("fiber", 2, 8, 80, 1)],
+    "iron_plate":    [("iron", 2, 20, 200, 1), ("leather", 2, 8, 80, 1), ("thread", 2, 8, 80, 1),
+                      ("clay", 2, 6, 60, 1)],
+    "scale_cloak":   [("leather", 2, 10, 100, 1), ("shell", 2, 8, 90, 1), ("fiber", 2, 8, 80, 1),
+                      ("thread", 2, 6, 60, 1), ("resin", 4, 4, 40, 4)],
+    "feather_cloak": [("feather", 2, 15, 150, 1), ("thread", 2, 8, 80, 1), ("fiber", 2, 5, 50, 1)],
+}
 for _k, _g in GEAR.items():
+    if _k in GEAR_SCALE:
+        _g["upgradable"] = True
+        _g["no_evo"] = True            # эволюции у снаряжения нет: потолок задан в GEAR_SCALE
+        _g["scale"] = GEAR_SCALE[_k]
+        _g["upgrade"] = GEAR_UPGRADE[_k]
     ITEMS[_k] = {**_g, "category": "gear"}
 
 # ---------------------------------------------------------------------------
@@ -629,9 +664,10 @@ def dmg_text(item: dict) -> str:
     return f"{d[0]}-{d[1]} {item.get('dmg_unit', 'за удар')}" if d else ""
 
 
-def roll_damage(item: dict) -> int:
-    """Бросок урона оружия или заряда в его диапазоне (для боя с боссом). 0, если урона нет."""
-    d = item.get("dmg")
+def roll_damage(item: dict, lvl: int = 0) -> int:
+    """Бросок урона оружия или заряда в его диапазоне (для боя с боссом). 0, если урона нет.
+    lvl - уровень оружия игрока (level_of(запись)); без него считается базовый урон."""
+    d = gear_dmg_at(item, lvl) if item.get("slot") else item.get("dmg")
     return random.randint(d[0], d[1]) if d else 0
 
 
@@ -718,6 +754,7 @@ def equipped(user: dict) -> dict:
     """Надетое снаряжение: {"weapon": (предмет, описание), "armor": ..., "accessory": ...}.
     Сломанное (прочность 1% и ниже) не считается надетым. Для боя с боссом."""
     out = {}
+    enforce_exclusive(user)
     for it in items_of(user):
         item = ITEMS.get(it.get("key"))
         if item and item.get("slot") and it.get("use") and not is_broken(it):
@@ -982,6 +1019,54 @@ def bonus_pct(item: dict, lvl: int = 0, evo: int = 0) -> float:
     return round(val * (1 + evo_bonus(evo) / 100), 1)
 
 
+def _gear_t(lvl: int) -> float:
+    """Доля пути от 0 до 10 уровня (0..1): та же кривая, что у бонуса предметов и урона зарядов."""
+    return _LOGS[max(0, min(int(lvl), MAX_LEVEL))] / _LOGS[MAX_LEVEL]
+
+
+def gear_dmg_at(item: dict, lvl: int = 0) -> tuple[int, int] | None:
+    """Диапазон урона оружия на уровне lvl (от базового до значения GEAR_SCALE на 10 уровне)."""
+    base = item.get("dmg")
+    if not base:
+        return None
+    top = item.get("scale", {}).get("dmg")
+    if not top:
+        return base
+    t = _gear_t(lvl)
+    return tuple(_round10(a * (b / a) ** t) for a, b in zip(base, top))
+
+
+def gear_fx(item: dict, lvl: int = 0) -> dict:
+    """Эффекты снаряжения для боя на уровне lvl: fx из GEAR, где damage_taken и dodge выросли с уровнем."""
+    fx = dict(item.get("fx", {}))
+    sc = item.get("scale", {})
+    t = _gear_t(lvl)
+    if "damage_taken" in sc and "damage_taken" in fx:
+        r0, r1 = 1 - fx["damage_taken"], 1 - sc["damage_taken"]     # доли СНИЖЕНИЯ урона: растут с уровнем
+        fx["damage_taken"] = round(1 - (r0 + (r1 - r0) * t), 4)
+    if "dodge" in sc and "dodge" in fx:
+        fx["dodge"] = round(fx["dodge"] + (sc["dodge"] - fx["dodge"]) * t, 4)
+    return fx
+
+
+def gear_dmg_text(item: dict, lvl: int = 0) -> str:
+    d = gear_dmg_at(item, lvl)
+    return f"{d[0]}-{d[1]} {item.get('dmg_unit', 'за удар')}" if d else ""
+
+
+def gear_stats(item: dict, lvl: int = 0) -> list[str]:
+    """Строки эффектов снаряжения для карточки: числа защиты и уклонения подставляются по уровню."""
+    fx = gear_fx(item, lvl)
+    out = []
+    for t in item.get("stats", []):
+        if t.startswith("Снижает получаемый урон") and "damage_taken" in fx:
+            t = f"Снижает получаемый урон на {round((1 - fx['damage_taken']) * 100, 1):g}%"
+        elif t.startswith("Шанс уклонения") and "dodge" in fx:
+            t = f"Шанс уклонения +{round(fx['dodge'] * 100, 1):g}%"
+        out.append(t)
+    return out
+
+
 # ---------------------------------------------------------------------------
 # Предметы в шахте (вызывается из underground.py при запуске шахты)
 # ---------------------------------------------------------------------------
@@ -1035,6 +1120,22 @@ def use_group(key: str) -> tuple:
     return (key,)
 
 
+def enforce_exclusive(user: dict) -> bool:
+    """Оставляет включённым только один предмет из группы (одна кирка; один предмет на слот: оружие, броня,
+    аксессуар; костёр или знамя). Нужна для старых сохранений, где включено лишнее. True, если что-то снято."""
+    seen, changed = set(), False
+    for it in items_of(user):
+        if not it.get("use"):
+            continue
+        grp = use_group(it.get("key"))
+        if grp in seen:
+            it.pop("use", None)
+            changed = True
+        else:
+            seen.add(grp)
+    return changed
+
+
 def mine_items_apply(user: dict, minutes: float = WEAR_FULL_MINUTES) -> dict:
     """Применяет в шахте только те предметы, которые игрок сам включил кнопкой «Использовать» (флаг "use"),
     и списывает износ. Сам по себе ничего не берётся.
@@ -1042,6 +1143,7 @@ def mine_items_apply(user: dict, minutes: float = WEAR_FULL_MINUTES) -> dict:
                 "used": [{"key", "lvl", "evo", "bonus"}]}.
     Если подходящих предметов нет, used пустой, а бонусы нулевые."""
     res = {"ore": 0.0, "gold": 0.0, "time": 0.0, "mineral": 0.0, "compass": 0.0, "used": []}
+    enforce_exclusive(user)
     lst = items_of(user)
     worn = []   # предметы с прочностью, сработавшие в этом запуске (их может подлатать фляга)
     for key, kind in MINE_ITEMS.items():
@@ -1087,6 +1189,7 @@ def mine_items_apply(user: dict, minutes: float = WEAR_FULL_MINUTES) -> dict:
 
 def exped_armed(user: dict) -> dict | None:
     """Включённый и годный предмет для экспедиции (костёр / знамя) или None. Ничего не списывает."""
+    enforce_exclusive(user)
     for key in EXPED_ITEMS:
         it = next((o for o in items_of(user) if o.get("key") == key and o.get("use")), None)
         if it is None or key not in ITEMS:
@@ -1942,9 +2045,21 @@ def _stats_box(item: dict, lvl: int, evo: int = 0, stack: int = 0, cap: int = ST
         lines += [f"<b>{boost} {escape(t)}</b>" for t in item.get("stats", [])]
     elif item.get("slot"):   # снаряжение: слот, урон и эффекты вместо бонуса
         lines.append(f"<b>🎽 Слот:</b> <code>{SLOT_NAMES[item['slot']]}</code>")
+        up = can_upgrade(item) and lvl < MAX_LEVEL
         if item.get("dmg"):
-            lines.append(f"<b>⚔️ Урон:</b> <code>{dmg_text(item)}</code>")
-        lines += [f"<b>{boost} {escape(t)}</b>" for t in item.get("stats", [])]
+            dl = f"<b>⚔️ Урон:</b> <code>{gear_dmg_text(item, lvl)}</code>"
+            if up:
+                dl += f" → <code>{gear_dmg_text(item, lvl + 1)}</code>"
+            lines.append(dl)
+        now_st = gear_stats(item, lvl)
+        nxt_st = gear_stats(item, lvl + 1) if up else now_st
+        for a, b in zip(now_st, nxt_st):
+            line = f"<b>{boost} {escape(a)}</b>"
+            if b != a:
+                m = re.search(r"[\d.]+%", b)
+                if m:
+                    line += f" → <code>{m.group(0)}</code>"
+            lines.append(line)
     else:
         bonus = f"<b>{boost} {escape(item['bonus'][0])}:</b> <code>{_pct(bonus_pct(item, lvl, evo))}</code>"
         if can_upgrade(item) and lvl < MAX_LEVEL:
@@ -1953,7 +2068,7 @@ def _stats_box(item: dict, lvl: int, evo: int = 0, stack: int = 0, cap: int = ST
     lines.append(f"<b>💎 Редкость:</b> <code>{escape(item['rarity'])}</code>")
     if can_upgrade(item) and can_repair(item):
         dur_line = f"<b>🛡 Прочность:</b> <code>{max_dur(item, lvl)}</code>"
-        if lvl < MAX_LEVEL:
+        if lvl < MAX_LEVEL and max_dur(item, lvl + 1) != max_dur(item, lvl):
             dur_line += f" → <code>{max_dur(item, lvl + 1)}</code>"
         lines.append(dur_line)
     if evo:
