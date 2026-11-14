@@ -106,19 +106,23 @@ ORES: dict[str, dict] = {
 # Игрок находит наборы (workshop_sets) прямо при добыче. Они попадают в «Добыто» и забираются кнопкой «Забрать».
 # Всё считается по МИНУТАМ работы шахты, а не по числу запусков: перезапускать шахту ради наборов не выгодно.
 #
-# 1) СТАРТ: в первые SET_START_HOURS часов работы шахты (суммарно, не по календарю) игрок гарантированно находит
-#    набранное число наборов. Число бросается один раз на игрока, время находок случайное; первая находка
-#    приходит в первые часы. Остановка запуска не теряет находки: незабранные вернутся в следующий запуск.
+# 1) СТАРТ: пока игрок суммарно отработал в шахте меньше SET_START_HOURS часов, находки идут по «этапам» ниже.
+#    Числа бросаются один раз на игрока, время каждой находки случайное внутри своего окна. Часы считаются
+#    по работе шахты (все запуски подряд), а не по календарю. Остановка запуска не теряет находки.
 # 2) ПОТОМ: обычные шансы в час работы, зависят от номера шахты (1-30, 31-60, 61-90).
 #    Мягкий лимит: после SET_DAILY_FULL находок за календарный день шанс умножается на SET_DAILY_AFTER.
 SETS_ENABLED = True
-SET_START_HOURS = 24                       # сколько часов работы шахты длится стартовая схема
-SET_START = {                              # ключ набора: (от, до) штук за стартовые часы
-    "basic": (5, 8),                       # Базовый набор
-    "elite": (1, 3),                       # Элитный набор
-}
+# Этапы старта: (к какому часу работы шахты, {ключ набора: (от, до) ВСЕГО штук к этому часу}).
+# Числа накопительные: «basic (2, 4)» на 1 часе значит «всего 2-4 Базовых к концу первого часа»
+# (те 2, что пришли за первые 10 минут, уже входят). Последний этап задаёт длину старта.
+SET_START_STAGES = (
+    (1 / 6, {"basic": (2, 2)}),                       # первые 10 минут: 2 Базовых
+    (1,     {"basic": (2, 4)}),                       # первый час: всего 2-4 Базовых
+    (4,     {"basic": (4, 7), "elite": (1, 1)}),      # первые 4 часа: всего 4-7 Базовых и 1 Элитный
+    (24,    {"basic": (10, 14), "elite": (2, 4)}),    # первые 24 часа: всего 10-14 Базовых и 2-4 Элитных
+)
+SET_START_HOURS = SET_START_STAGES[-1][0]  # сколько часов работы шахты длится стартовая схема
 SET_START_EXTRA = {"items": 0.40}          # необязательные: шанс (0-1), что за стартовые часы найдётся 1 такой набор
-SET_START_FIRST = (0.3, 2.0)               # первая находка Базового набора: между этими часами работы
 SET_CHUNK_H = 0.25                         # шаг броска обычного шанса: раз в 15 минут работы
 
 # шансы набора за ЧАС работы шахты: (шахты 1-30, 31-60, 61-90). Ключи = ключи SETS в workshop_sets.py
@@ -529,28 +533,31 @@ def _set_state(ug: dict) -> dict:
     return st
 
 
-def _spread(n: int) -> list[float]:
-    """n случайных моментов (в часах работы) на стартовые SET_START_HOURS: первый рано, остальные ровно по отрезку."""
-    lo, hi = SET_START_FIRST
-    times = [random.uniform(lo, min(hi, SET_START_HOURS))]
-    rest = n - 1
-    if rest > 0:
-        width = (SET_START_HOURS - hi) / rest
-        times += [hi + (i + random.random()) * width for i in range(rest)]
-    return [round(t, 3) for t in times]
-
-
 def _make_plan() -> dict:
-    """Стартовый план: {ключ набора: [часы работы шахты, когда он найдётся]}. Бросается один раз на игрока."""
+    """Стартовый план: {ключ набора: [часы работы шахты, когда он найдётся]}. Бросается один раз на игрока.
+    Идёт по этапам SET_START_STAGES: на каждом этапе добирается нужное число находок в окне (прошлый этап, этот]."""
     plan: dict = {}
-    for key, (lo, hi) in SET_START.items():
-        n = random.randint(lo, hi)
-        if n > 0:
-            plan[key] = _spread(n) if key == "basic" else sorted(
-                max(0.01, round((i + random.random()) * SET_START_HOURS / n, 3)) for i in range(n))
+    prev_h = 0.0
+    prev_n: dict = {}
+    for hour, limits in SET_START_STAGES:
+        for key, (lo, hi) in limits.items():
+            before = prev_n.get(key, 0)
+            lo2 = max(lo, before)
+            total = random.randint(lo2, hi) if lo2 <= hi else before
+            k = total - before
+            if k > 0:
+                width = (hour - prev_h) / k
+                for i in range(k):
+                    t = prev_h + (i + random.random()) * width     # по одной находке в своей доле окна
+                    t = math.floor(t * 1000) / 1000                  # округляем вниз: не выходим за границу окна
+                    plan.setdefault(key, []).append(min(hour, max(0.02, prev_h + 0.001, t)))
+            prev_n[key] = total
+        prev_h = hour
+    for key in plan:
+        plan[key].sort()
     for key, chance in SET_START_EXTRA.items():
         if random.random() < chance:
-            plan[key] = [round(random.uniform(SET_START_HOURS / 6, SET_START_HOURS), 3)]
+            plan.setdefault(key, []).append(round(random.uniform(SET_START_HOURS / 6, SET_START_HOURS), 3))
     return plan
 
 
