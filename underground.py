@@ -125,11 +125,16 @@ SET_START_HOURS = SET_START_STAGES[-1][0]  # сколько часов рабо�
 SET_START_EXTRA = {"items": 0.40}          # необязательные: шанс (0-1), что за стартовые часы найдётся 1 такой набор
 SET_CHUNK_H = 0.25                         # шаг броска обычного шанса: раз в 15 минут работы
 
-# шансы набора за ЧАС работы шахты: (шахты 1-30, 31-60, 61-90). Ключи = ключи SETS в workshop_sets.py
+# шансы набора за ЧАС работы шахты. Ступень растёт каждые SET_TIER_SIZE шахт: чем глубже шахта, тем выше шанс.
+# Ступени: шахты 1-15, 16-30, 31-45, 46-60, 61-75, 76-90. Ключи = ключи SETS в workshop_sets.py
+SET_TIER_SIZE = 15
 SET_RATES = (
-    {"basic": 0.45, "elite": 0.02, "legend": 0.00, "items": 0.02, "gear": 0.02, "ammo": 0.02, "wonder": 0.02},
-    {"basic": 0.30, "elite": 0.08, "legend": 0.01, "items": 0.03, "gear": 0.03, "ammo": 0.03, "wonder": 0.03},
-    {"basic": 0.18, "elite": 0.12, "legend": 0.03, "items": 0.04, "gear": 0.04, "ammo": 0.04, "wonder": 0.04},
+    {"basic": 0.45, "elite": 0.03, "legend": 0.000, "items": 0.020, "gear": 0.020, "ammo": 0.020, "wonder": 0.020},   # 1-15
+    {"basic": 0.48, "elite": 0.05, "legend": 0.005, "items": 0.025, "gear": 0.025, "ammo": 0.025, "wonder": 0.025},  # 16-30
+    {"basic": 0.51, "elite": 0.07, "legend": 0.010, "items": 0.030, "gear": 0.030, "ammo": 0.030, "wonder": 0.030},  # 31-45
+    {"basic": 0.54, "elite": 0.09, "legend": 0.015, "items": 0.035, "gear": 0.035, "ammo": 0.035, "wonder": 0.035},  # 46-60
+    {"basic": 0.57, "elite": 0.11, "legend": 0.020, "items": 0.040, "gear": 0.040, "ammo": 0.040, "wonder": 0.040},  # 61-75
+    {"basic": 0.60, "elite": 0.13, "legend": 0.030, "items": 0.045, "gear": 0.045, "ammo": 0.045, "wonder": 0.045},  # 76-90
 )
 SET_DAILY_FULL = 3                         # столько находок в день с полным шансом
 SET_DAILY_AFTER = 0.5                      # дальше шанс умножается на это число (1 = лимита нет)
@@ -563,7 +568,7 @@ def _make_plan() -> dict:
 
 def _set_tier(pick: dict) -> int:
     n = int(pick["n"])
-    return 0 if n <= 30 else 1 if n <= 60 else 2
+    return max(0, min(len(SET_RATES) - 1, (n - 1) // SET_TIER_SIZE))
 
 
 def _day_of(ts: float) -> str:
