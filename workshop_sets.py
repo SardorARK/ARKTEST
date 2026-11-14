@@ -1,7 +1,11 @@
-"""«Наборы»: кейсы с наградами для мастерской.
+"""«Наборы»: кейсы с наградами для мастерской. Работают только командами, без кнопок.
 
-Открываются ТОЛЬКО командой  н-наборы-набор  (текст сообщения, регистр не важен).
-Команда показывает все наборы игрока; по нажатию на набор видны шансы и кнопка «Открыть».
+Команды (регистр не важен):
+    н-наборы-набор          показать наборы игрока (только те, что есть; также «н-набор-наборы», «наборы»)
+    отк бн 3                открыть 3 штуки Базового набора («открыть бн 3» то же; без числа - один; «все» - все)
+    инфо бн                 содержимое и шансы набора
+    выдать бн 5 / выдать все 5    (только админам) выдать наборы себе для проверки
+Код набора - первые буквы двух слов названия: Базовый набор = бн, Набор предметов = нп и т.д. (см. CODES).
 
 Данные игрока:
     user["ws_sets"] = {ключ_набора: сколько_штук}
@@ -10,27 +14,30 @@
 
 Подключение (main.py), после workshop.setup(...):
     import workshop_sets
-    workshop_sets.setup(ADMIN_IDS=ADMIN_IDS)          # необязательно: админам появится кнопка «Выдать по 1»
+    workshop_sets.setup(ADMIN_IDS=ADMIN_IDS)
     dp.include_router(workshop_sets.router)
-Отдельный setup для get_user / show_rich_card и т.д. не нужен: модуль берёт их у workshop.
+Отдельный setup для get_user / send_rich_card и т.д. не нужен: модуль берёт их у workshop.
 
-Чтобы добавить предмет в наборы с шансами, просто допиши его в ITEMS / GEAR / EXTRA в workshop.py:
+Чтобы добавить предмет в наборы с шансами, допиши его в ITEMS / GEAR / EXTRA в workshop.py:
 наборы берут предметы из раздела сами, по редкости. Чтобы поменять шансы или количества, правь SETS ниже.
 """
 import logging
 import random
+import re
+from collections import Counter
 from html import escape
 
-from aiogram import F, Router
-from aiogram.enums import ButtonStyle
-from aiogram.types import CallbackQuery, InlineKeyboardMarkup, Message
+from aiogram import Router
+from aiogram.types import Message
 
 import workshop as W
 
 log = logging.getLogger(__name__)
 router = Router()
 
-COMMANDS = {"н-наборы-набор"}   # тексты, которые открывают раздел (в нижнем регистре)
+# Команда открывается любым из написаний: «н-наборы-набор», «н-набор-наборы», «н наборы», «/наборы», «наборы»,
+# с любыми тире и пробелами, в любом регистре. Слова команды: н, набор, наборы.
+COMMAND_WORDS = {"н", "набор", "наборы"}
 _ADMINS: set = set()
 
 
@@ -71,20 +78,20 @@ SETS = {
         "rare": (2, 8, 15),
     },
     "items": {
-        "name": "Набор предметов", "emoji": "🎒",
+        "name": "Набор предметов", "emoji": "🧳",
         "desc": "Один готовый предмет из раздела «Предметы».",
         "kind": "item", "cat": "items",
         "weights": {"Базовый": 60, "Редкий": 32, "Эпический": 8},
     },
     "ammo": {
-        "name": "Набор боезапасов", "emoji": "🎯",
+        "name": "Набор боезапасов", "emoji": "🧰",
         "desc": "Два вида боезапаса по 20 зарядов.",
         "kind": "ammo", "kinds": 2, "amount": 20,
         # эпические заряды (громовой, световая стрела) по 20 штук очень сильны, поэтому шанс у них низкий
         "weights": {"Базовый": 60, "Редкий": 32, "Эпический": 8},
     },
     "gear": {
-        "name": "Набор снаряжения", "emoji": "🛡",
+        "name": "Набор снаряжения", "emoji": "👜",
         "desc": "Одна вещь из раздела «Снаряжение».",
         "kind": "item", "cat": "gear",
         "weights": {"Базовый": 62, "Редкий": 30, "Эпический": 8},
@@ -98,6 +105,11 @@ SETS = {
     },
 }
 ORDER = tuple(SETS)   # порядок в списке: как записано выше
+
+# Код набора: первая буква первого слова + первая буква второго слова названия (Базовый набор -> бн).
+CODES = {k: "".join(w[0] for w in v["name"].lower().split()[:2]) for k, v in SETS.items()}
+assert len(set(CODES.values())) == len(CODES), "коды наборов совпали: поменяй названия"
+BY_CODE = {c: k for k, c in CODES.items()}
 
 
 # ---------------------------------------------------------------------------
@@ -121,6 +133,11 @@ def give_set(user: dict, key: str, amount: int = 1) -> None:
     if key in SETS and amount > 0:
         s = sets_of(user)
         s[key] = W._int(s.get(key)) + int(amount)
+
+
+def owned_sets(user: dict) -> list[str]:
+    """Ключи наборов, которые есть у игрока (в порядке ORDER)."""
+    return [k for k in ORDER if set_count(user, k) > 0]
 
 
 def _pool(cat: str) -> dict:
@@ -210,12 +227,15 @@ def open_set(user: dict, key: str) -> tuple[str | None, dict]:
 # Оформление
 # ---------------------------------------------------------------------------
 SETS_EMOJI = ("", "🎁")
-OPEN_EMOJI = ("", "🔓")
 
 
 def _res_line(k: str, n: int) -> str:
     name, em = W.RESOURCES[k]
     return f"{em} {escape(name)} ×{n}"
+
+
+def _qty(n: int) -> str:
+    return f"<code>{n:.1f} шт</code>"   # 50 -> «50.0 шт»
 
 
 def _what_inside(s: dict) -> str:
@@ -248,129 +268,142 @@ def _chance_block(key: str) -> str:
     return "<blockquote expandable><b>Шансы</b><br>" + "<br><br>".join(lines) + "</blockquote>"
 
 
-def list_html(user: dict, with_image: bool, note: str = "") -> str:
-    text = W._img(with_image) + W._head("НАБОРЫ", SETS_EMOJI, "Открывай наборы и забирай награды. Выбери набор, чтобы посмотреть шансы.")
-    rows = [f"{SETS[k]['emoji']} {escape(SETS[k]['name'])} — <b>{set_count(user, k)}</b>" for k in ORDER]
-    text += "<p>" + "<br>".join(rows) + "</p>"
-    return text + (f"<p>{note}</p>" if note else "")
+def _help_block() -> str:
+    """Сворачиваемый блок со всеми командами."""
+    codes = "<br>".join(f"<code>{CODES[k]}</code> — {SETS[k]['emoji']} {escape(SETS[k]['name'])}" for k in ORDER)
+    return ("<blockquote expandable><b>Команды</b><br>"
+            "<code>отк бн 3</code> — открыть 3 базовых набора<br>"
+            "<code>открыть эн</code> — открыть один элитный набор<br>"
+            "<code>отк лн все</code> — открыть все легендарные наборы<br>"
+            "<code>инфо бн</code> — что внутри и какие шансы<br><br>"
+            "<b>Коды наборов</b><br>" + codes + "</blockquote>")
 
 
-def list_kb(user: dict) -> InlineKeyboardMarkup:
-    rows = [[W._btn(f"{SETS[k]['name']} | {set_count(user, k)}", f"st:v:{k}", SETS[k]["emoji"], None)] for k in ORDER]
-    if user.get("_admin_ui"):
-        rows.append([W._btn("Выдать по 1 каждого", "st:adm", "🧪", ButtonStyle.SUCCESS)])
-    return InlineKeyboardMarkup(inline_keyboard=rows)
+def list_html(user: dict, with_image: bool) -> str:
+    text = W._img(with_image) + W._head("НАБОРЫ", SETS_EMOJI, "Твои наборы. Открывай их командами: список команд ниже.")
+    own = owned_sets(user)
+    if own:
+        text += "<p>" + "<br>".join(f"<b>{SETS[k]['emoji']} {escape(SETS[k]['name'])}</b> {_qty(set_count(user, k))}"
+                                    for k in own) + "</p>"
+    else:
+        text += "<p>У тебя пока нет наборов.</p>"
+    return text + _help_block()
 
 
-def view_html(user: dict, key: str, with_image: bool) -> str:
+def info_html(key: str, with_image: bool) -> str:
     s = SETS[key]
     text = W._img(with_image) + W._head(s["name"].upper(), s["emoji"], s["desc"])
-    text += f"<p><b>Внутри</b><br>{_what_inside(s)}</p>"
-    text += _chance_block(key)
-    return text + f"<p>У тебя: <b>{set_count(user, key)}</b> шт.</p>"
+    text += f"<p><b>Внутри</b><br>{_what_inside(s)}</p>" + _chance_block(key)
+    return text + f"<p>Открыть: <code>отк {CODES[key]}</code></p>"
 
 
-def view_kb(user: dict, key: str) -> InlineKeyboardMarkup:
-    rows = []
-    if set_count(user, key) > 0:
-        rows.append([W._btn("Открыть", f"st:o:{key}", OPEN_EMOJI, ButtonStyle.SUCCESS)])
-    rows.append(W._back("st:l"))
-    return InlineKeyboardMarkup(inline_keyboard=rows)
-
-
-def loot_html(user: dict, key: str, loot: dict, with_image: bool) -> str:
+def loot_html(user: dict, key: str, opened: int, loot: dict, note: str, with_image: bool) -> str:
     s = SETS[key]
-    lines = [_res_line(k, n) for k, n in loot.get("res", {}).items()]
-    lines += [f"{W._em(W.ITEMS[k]['emoji'])} {escape(W.ITEMS[k]['name'])} <i>({escape(W.ITEMS[k].get('rarity', ''))})</i>"
-              for k in loot.get("items", [])]
-    lines += [f"{W._em(W.ITEMS[k]['emoji'])} {escape(W.ITEMS[k]['name'])} ×{n}" for k, n in loot.get("ammo", {}).items()]
-    text = W._img(with_image) + W._head(s["name"].upper(), s["emoji"], "Набор открыт. Вот что внутри:")
+    lines = [_res_line(k, n) for k, n in loot["res"].items()]
+    lines += [f"{W._em(W.ITEMS[k]['emoji'])} {escape(W.ITEMS[k]['name'])} ×{n}" for k, n in loot["items"].items()]
+    lines += [f"{W._em(W.ITEMS[k]['emoji'])} {escape(W.ITEMS[k]['name'])} ×{n}" for k, n in loot["ammo"].items()]
+    text = W._img(with_image) + W._head(s["name"].upper(), s["emoji"], f"Открыто наборов: {opened}")
     text += "<p><b>Выпало</b><br>" + "<br>".join(lines) + "</p>"
-    return text + f"<p>Осталось наборов: <b>{set_count(user, key)}</b></p>"
+    if note:
+        text += f"<p>{escape(note)}</p>"
+    return text + f"<p>Осталось: {_qty(set_count(user, key))}</p>"
 
 
 # ---------------------------------------------------------------------------
-# Telegram
+# Команды
 # ---------------------------------------------------------------------------
+LIST_WORDS = {"н", "набор", "наборы"}
+OPEN_WORDS = {"отк", "открыть"}
+
+
+def _words(text: str) -> list[str]:
+    return [w for w in re.split(r"[\s\-_\u2010-\u2015\u2212/!.]+", text.strip().lower().replace("ё", "е")) if w]
+
+
+def _parse(message: Message):
+    """Разбор команды: ("list",) | ("open", ключ, число или None=все) | ("info", ключ) | ("give", ключ или None, число)
+    либо None, если это не команда наборов."""
+    if not message.text:
+        return None
+    w = _words(message.text)
+    if not w:
+        return None
+    # список наборов: н-наборы-набор, н-набор-наборы, наборы ...
+    if len(w) <= 3 and len(set(w)) == len(w) and set(w) <= LIST_WORDS and ("наборы" in w or ("н" in w and "набор" in w)):
+        return ("list",)
+    if w[0] in OPEN_WORDS and 2 <= len(w) <= 3 and w[1] in BY_CODE:
+        if len(w) == 2:
+            return ("open", BY_CODE[w[1]], 1)
+        if w[2] == "все":
+            return ("open", BY_CODE[w[1]], None)
+        if w[2].isdigit():
+            return ("open", BY_CODE[w[1]], int(w[2]))
+        return None
+    if w[0] == "инфо" and len(w) == 2 and w[1] in BY_CODE:
+        return ("info", BY_CODE[w[1]])
+    if w[0] == "выдать" and 2 <= len(w) <= 3 and (w[1] in BY_CODE or w[1] == "все"):
+        n = int(w[2]) if len(w) == 3 and w[2].isdigit() else 1
+        return ("give", BY_CODE.get(w[1]), n)
+    return None
+
 
 def _is_command(message: Message) -> bool:
-    return bool(message.text) and message.text.strip().lower() in COMMANDS
+    cmd = _parse(message)
+    if cmd is None:
+        return False
+    return cmd[0] != "give" or message.from_user.id in _ADMINS   # «выдать» видят только админы
 
 
-def _mark(user: dict, uid: int) -> None:
-    """Админская кнопка живёт в клавиатуре только на время показа, в сохранение не попадает."""
-    user.pop("_admin_ui", None)
-    if uid in _ADMINS:
-        user["_admin_ui"] = True
+def open_many(user: dict, key: str, n: int | None) -> tuple[str | None, int, dict, str]:
+    """Открывает n наборов (None - все). Возвращает (отказ или None, сколько открыто, итог, пояснение).
+    Если место кончилось на середине, открытое остаётся, остальные наборы не тратятся."""
+    have = set_count(user, key)
+    if have <= 0:
+        return f"У тебя нет набора «{SETS[key]['name']}».", 0, {}, ""
+    n = have if n is None else n
+    if n < 1:
+        return "Количество должно быть не меньше 1.", 0, {}, ""
+    if n > have:
+        return f"У тебя только {have} шт. набора «{SETS[key]['name']}».", 0, {}, ""
+    total = {"res": Counter(), "items": Counter(), "ammo": Counter()}
+    opened, note = 0, ""
+    for _ in range(n):
+        err, loot = open_set(user, key)
+        if err:
+            note = f"Открыто {opened} из {n}: {err}"
+            break
+        opened += 1
+        total["res"].update(loot["res"])
+        total["items"].update(loot["items"])
+        total["ammo"].update(loot["ammo"])
+    if opened == 0:
+        return note.split(": ", 1)[-1], 0, {}, ""
+    return None, opened, total, note
 
 
 @router.message(_is_command)
-async def open_sets(message: Message):
+async def on_command(message: Message):
     user = W.D.get_user(message.from_user.id)
     if user is None:
         await message.answer("Сначала выбери питомца: /start")
         return
-    kb_user = {**user}   # копия только для кнопок: служебный флаг не попадёт в сохранение
-    _mark(kb_user, message.from_user.id)
-    await W.D.send_rich_card(message.bot, message.chat.id, "workshop",
-                             lambda wi: list_html(user, wi), list_kb(kb_user))
+    cmd = _parse(message)
+    send = lambda html: W.D.send_rich_card(message.bot, message.chat.id, "workshop", html, None)
 
-
-async def _show(callback: CallbackQuery, user: dict, html, kb) -> None:
-    await W.D.show_rich_card(callback, "workshop", html, kb)
-
-
-@router.callback_query(F.data == "st:l")
-async def on_list(callback: CallbackQuery):
-    user = await W._user_or_alert(callback)
-    if user is None:
-        return
-    await callback.answer()
-    kb_user = {**user}
-    _mark(kb_user, callback.from_user.id)
-    await _show(callback, user, lambda wi: list_html(user, wi), list_kb(kb_user))
-
-
-@router.callback_query(F.data.startswith("st:v:"))
-async def on_view(callback: CallbackQuery):
-    user = await W._user_or_alert(callback)
-    key = callback.data.split(":", 2)[2]
-    if user is None:
-        return
-    if key not in SETS:
-        await callback.answer("Такого набора нет.", show_alert=True)
-        return
-    await callback.answer()
-    await _show(callback, user, lambda wi: view_html(user, key, wi), view_kb(user, key))
-
-
-@router.callback_query(F.data.startswith("st:o:"))
-async def on_open_set(callback: CallbackQuery):
-    user = await W._user_or_alert(callback)
-    key = callback.data.split(":", 2)[2]
-    if user is None:
-        return
-    err, loot = open_set(user, key)
-    if err:
-        await callback.answer(err, show_alert=True)
-        return
-    W.D.save_users()
-    await callback.answer()
-    await _show(callback, user, lambda wi: loot_html(user, key, loot, wi), view_kb(user, key))
-
-
-@router.callback_query(F.data == "st:adm")
-async def on_admin_give(callback: CallbackQuery):
-    if callback.from_user.id not in _ADMINS:
-        await callback.answer("Недоступно.", show_alert=True)
-        return
-    user = await W._user_or_alert(callback)
-    if user is None:
-        return
-    for k in ORDER:
-        give_set(user, k, 1)
-    W.D.save_users()
-    await callback.answer("Выдано по 1 каждого набора.")
-    kb_user = {**user}
-    _mark(kb_user, callback.from_user.id)
-    await _show(callback, user, lambda wi: list_html(user, wi), list_kb(kb_user))
+    if cmd[0] == "list":
+        await send(lambda wi: list_html(user, wi))
+    elif cmd[0] == "info":
+        await send(lambda wi: info_html(cmd[1], wi))
+    elif cmd[0] == "give":
+        for k in ([cmd[1]] if cmd[1] else ORDER):
+            give_set(user, k, cmd[2])
+        W.D.save_users()
+        await send(lambda wi: list_html(user, wi))
+    else:
+        key = cmd[1]
+        err, opened, loot, note = open_many(user, key, cmd[2])
+        if err:
+            await message.answer(err)
+            return
+        W.D.save_users()
+        await send(lambda wi: loot_html(user, key, opened, loot, note, wi))
