@@ -13,6 +13,8 @@
     он считается у каждого игрока отдельно.
   * Урон = атака питомца (с учётом уровня и здоровья) × множитель навыка, есть шанс
     крита. Часть навыков пробивает защиту босса.
+  * Под навыками кнопка «Ударить» (базово 30-50 урона, с надетым оружием урон как у оружия) и три кнопки
+    боезапаса (первая открыта, вторая за 50M монет, третья за 1B). См. блок «Удар и боезапас» ниже.
   * Когда босс падает, награду получают все, кто его бил, пропорционально
     нанесённому урону. Тот, кто добил, получает ещё и бонус.
   * Каждую минуту босс бьёт питомцев тех, кто бил именно его за последнюю минуту. Урон по питомцам у всех
@@ -197,6 +199,32 @@ TYPE_ORDER = list(BOSS_TYPES)
 
 CRIT_MULT = 2.0          # во сколько раз крит сильнее
 CRIT_MAX = 0.6           # шанс крита не выше
+
+# ---------- Удар и боезапас ----------
+# Под навыками: кнопка «Ударить» и три кнопки боезапаса (слоты). Данные игрока:
+#   user["boss_slots"]  - сколько слотов боезапаса открыто (1..AMMO_SLOTS, по умолчанию 1)
+#   user["boss_strike_ts"], user["boss_ammo_ts"] - время последнего удара / выстрела (откат)
+# «Ударить»: STRIKE_BASE_DMG урона; если надето оружие («Мастерская»), урон оружия (его диапазон dmg).
+# Кнопки боезапаса: слот 1 стреляет самым сильным зарядом из имеющихся, слот 2 следующим по силе, слот 3 третьим
+# (сила = средний урон заряда его лучшего уровня). Берётся заряд самого высокого уровня, 1 заряд за выстрел.
+# Заряды без урона (дым, сеть без урона и т.п.) в этих кнопках не участвуют.
+STRIKE_CD = 1.0                    # «Ударить» не чаще раза в столько секунд
+STRIKE_BASE_DMG = (30, 50)         # урон без оружия
+AMMO_CD = 3.0                      # боезапас не чаще раза в столько секунд
+AMMO_CD_SHARED = True              # True: откат общий на все три кнопки; False: у каждой кнопки свой
+AMMO_SLOTS = 3
+AMMO_SLOT_PRICES = {2: 50_000_000, 3: 1_000_000_000}   # цена открытия слота в монетах (слот 1 открыт сразу)
+AMMO_CONFIRM_SEC = 10              # покупка слота: второе нажатие в течение стольких секунд подтверждает её
+STRIKE_USE_DEFENSE = True          # защита босса (def) делит урон оружия и боезапаса; «пробивание» оружия/заряда её снижает
+STRIKE_BASE_USE_DEFENSE = False    # False: удар без оружия всегда наносит STRIKE_BASE_DMG (защита босса не режет)
+STRIKE_FEED = False                # писать обычные удары в ленту боя (выстрелы боезапасом пишутся всегда)
+STRIKE_FRAGMENTS = False           # давать фрагменты («Кейсы») за урон обычных ударов (за боезапас дают всегда)
+WEAPON_WEAR = 0                    # сколько прочности оружия тратит один удар (0 = оружие не изнашивается)
+STRIKE_EDIT_MIN = 2.0              # своё окно боя перерисовывается после ударов не чаще раза в столько секунд (в личке)
+STRIKE_EDIT_MIN_GROUP = 10.0       # ... в группах (там окно присылается заново)
+SAVE_MIN_GAP = 3.0                 # данные после ударов сохраняются не чаще раза в столько секунд
+LOCK_EMOJI_ID = "5296369303661067030"   # замок на закрытом слоте
+AMMO_EMPTY_ICON = "🎯"             # значок слота без боезапаса
 
 TOP_SIZE = 10
 
@@ -1199,6 +1227,125 @@ def _short_dur(seconds: float) -> str:
     return f"{secs}с"
 
 
+# ---------- Удар и боезапас: расчёты ----------
+
+def _ws():
+    """Модуль «Мастерской» (оружие и боезапас). Если его нет, остаются только навыки и обычный удар."""
+    try:
+        import workshop
+        return workshop
+    except Exception:
+        logging.getLogger(__name__).debug("Босс: мастерская недоступна", exc_info=True)
+        return None
+
+
+def _plain_emoji(e) -> str:
+    return e[1] if isinstance(e, tuple) else str(e)
+
+
+def _emoji_id(e) -> str | None:
+    return e[0] if isinstance(e, tuple) and e[0] else None
+
+
+def _short_num(n: int) -> str:
+    for div, suf in ((1_000_000_000, "B"), (1_000_000, "M"), (1_000, "K")):
+        if n >= div:
+            v = n / div
+            return f"{v:g}{suf}"
+    return str(n)
+
+
+def slots_open(user: dict) -> int:
+    try:
+        n = int(user.get("boss_slots", 1))
+    except (TypeError, ValueError):
+        n = 1
+    return max(1, min(AMMO_SLOTS, n))
+
+
+def strike_left(user: dict) -> float:
+    return max(0.0, float(user.get("boss_strike_ts", 0) or 0) + STRIKE_CD - time.time())
+
+
+def _ammo_ts_key(slot: int) -> str:
+    return "boss_ammo_ts" if AMMO_CD_SHARED else f"boss_ammo_ts{slot}"
+
+
+def ammo_left(user: dict, slot: int) -> float:
+    return max(0.0, float(user.get(_ammo_ts_key(slot), 0) or 0) + AMMO_CD - time.time())
+
+
+def ammo_ranking(user: dict) -> list[dict]:
+    """Заряды игрока с уроном, от сильного к слабому: [{key, lvl, count, name, emoji, avg}]."""
+    ws = _ws()
+    if ws is None:
+        return []
+    out = []
+    for key, item in ws.ITEMS.items():
+        if not item.get("ammo") or not item.get("dmg"):
+            continue
+        count = ws.ammo_count(user, key)
+        levels = ws.ammo_levels(user, key) if count > 0 else {}
+        if not levels:
+            continue
+        lvl = max(levels)                      # стреляем самым прокачанным зарядом
+        dmg = ws.ammo_dmg_at(key, lvl) or item["dmg"]
+        out.append({"key": key, "lvl": lvl, "count": count, "name": item["name"],
+                    "emoji": item.get("emoji", AMMO_EMPTY_ICON), "avg": (dmg[0] + dmg[1]) / 2})
+    out.sort(key=lambda x: -x["avg"])
+    return out
+
+
+def _weapon(user: dict):
+    """Надетое рабочее оружие: (запись игрока, описание предмета) или None."""
+    ws = _ws()
+    if ws is None:
+        return None
+    try:
+        return ws.equipped(user).get("weapon")
+    except Exception:
+        return None
+
+
+def strike_damage(user: dict, bid: str, raw: float, pierce: float = 0.0,
+                  crit_chance: float = 0.0, crit_mult: float = CRIT_MULT) -> tuple[int, bool]:
+    """Урон удара/выстрела: прибавка привилегий, защита босса (с учётом пробивания), крит."""
+    dmg = raw * (1 + _damage_pct(user) / 100)
+    if STRIKE_USE_DEFENSE:
+        dmg *= 100 / (100 + cfg(bid)["def"] * (1 - max(0.0, min(1.0, pierce))))
+    crit = random.random() < crit_chance
+    if crit:
+        dmg *= crit_mult
+    return max(1, round(dmg)), crit
+
+
+def _ammo_row(user: dict, bid: str) -> list[InlineKeyboardButton]:
+    """Три кнопки боезапаса. Открытая: значок заряда и сколько их (красная во время отката).
+    Следующая закрытая: монета и цена, без текста. Остальные закрытые: только замок."""
+    opened = slots_open(user)
+    ranking = ammo_ranking(user)
+    row = []
+    for slot in range(1, AMMO_SLOTS + 1):
+        data = f"boss:ammo:{bid}:{slot}"
+        if slot <= opened:
+            if slot - 1 < len(ranking):
+                a = ranking[slot - 1]
+                left = ammo_left(user, slot)
+                icon_id = _emoji_id(a["emoji"])
+                text = str(a["count"]) if icon_id else f"{_plain_emoji(a['emoji'])} {a['count']}"
+                if left > 0:
+                    row.append(_btn(f"{text} · {_short_dur(left)}", data, icon_id, ButtonStyle.DANGER))
+                else:
+                    row.append(_btn(text, data, icon_id, ButtonStyle.SUCCESS))
+            else:
+                row.append(_btn(f"{AMMO_EMPTY_ICON} 0", data, None, ButtonStyle.PRIMARY))
+        elif slot == opened + 1:
+            row.append(_btn(_short_num(AMMO_SLOT_PRICES[slot]), data, D.COIN_EMOJI[0], ButtonStyle.PRIMARY))
+        else:
+            row.append(_btn("\u2800", data, LOCK_EMOJI_ID, ButtonStyle.PRIMARY))
+    return row
+
+
 def skills_kb(user_id: int, ref: str = "") -> InlineKeyboardMarkup:
     """Три навыка в один ряд. Зелёная: готов (только эмодзи). Красная: перезарядка («🔥 · 7с»)."""
     bid = resolve(ref)
@@ -1214,6 +1361,8 @@ def skills_kb(user_id: int, ref: str = "") -> InlineKeyboardMarkup:
                 label, style = sk["icon"], ButtonStyle.SUCCESS
             row.append(_btn(label, f"boss:hit:{bid}:{i}", style=style))
         rows.append(row)
+        rows.append([_btn("Ударить", f"boss:strike:{bid}", ATTACK_EMOJI[0], ButtonStyle.SUCCESS)])
+        rows.append(_ammo_row(user, bid))
     rows.append(_back_row(f"boss:info:{bid}"))
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -1763,3 +1912,229 @@ async def on_hit(callback: CallbackQuery):
     await _edit_battle(callback.bot, callback.from_user.id,
                        VIEWERS[callback.from_user.id])
     _mark_dirty(callback.bot, bid)
+
+
+# ---------- Удар и боезапас: обработчики ----------
+
+_last_save = 0.0
+_save_task: asyncio.Task | None = None
+_edit_ts: dict[int, float] = {}
+_edit_tasks: dict[int, asyncio.Task] = {}
+
+
+def _do_save() -> None:
+    global _last_save
+    _last_save = time.time()
+    D.save_users()
+    save_boss()
+
+
+async def _save_later(delay: float) -> None:
+    await asyncio.sleep(delay)
+    _do_save()
+
+
+def _save_soon() -> None:
+    """Сохраняет не чаще раза в SAVE_MIN_GAP секунд: удары идут часто, а файлы большие."""
+    global _save_task
+    gap = time.time() - _last_save
+    if gap >= SAVE_MIN_GAP:
+        _do_save()
+    elif _save_task is None or _save_task.done():
+        _save_task = asyncio.create_task(_save_later(SAVE_MIN_GAP - gap))
+
+
+async def _edit_later(bot, uid: int, delay: float) -> None:
+    await asyncio.sleep(delay)
+    v = VIEWERS.get(uid)
+    if v is None:
+        return
+    _edit_ts[uid] = time.time()
+    if not await _edit_battle(bot, uid, v):
+        VIEWERS.pop(uid, None)
+
+
+async def _refresh_own(bot, uid: int) -> None:
+    """Перерисовывает своё окно боя после удара, но не чаще STRIKE_EDIT_MIN (лимиты Telegram):
+    лишние обновления откладываются и сливаются в одно."""
+    v = VIEWERS.get(uid)
+    if v is None:
+        return
+    gap = STRIKE_EDIT_MIN_GROUP if v["chat"] < 0 else STRIKE_EDIT_MIN
+    wait = gap - (time.time() - _edit_ts.get(uid, 0.0))
+    if wait > 0:
+        t = _edit_tasks.get(uid)
+        if t is None or t.done():
+            _edit_tasks[uid] = asyncio.create_task(_edit_later(bot, uid, wait))
+        return
+    _edit_ts[uid] = time.time()
+    await _edit_battle(bot, uid, v)
+
+
+async def _can_fight(callback: CallbackQuery, user: dict, bid: str) -> bool:
+    """Общие проверки удара и выстрела: босс жив, питомец не отдыхает."""
+    b = BOSSES[bid]
+    if is_dead(bid):
+        await callback.answer(
+            f"Босс повержен. Вернётся через {fmt_dur(b['dead_until'] - time.time())}.", show_alert=True)
+        return False
+    wait = pet_ready_in(user)
+    if wait > 0:
+        await callback.answer(
+            f"{D.PETS[user['pet']]['name']} отдыхает и не может атаковать. "
+            f"Вернётся в бой через {fmt_dur(wait)}.", show_alert=True)
+        return False
+    return True
+
+
+async def _deal(callback: CallbackQuery, user: dict, bid: str, total: int, label: str, *,
+                icon: str, crit: bool, feed: bool, fragments: bool, extra: str = "") -> None:
+    """Засчитывает урон удара или выстрела: здоровье босса, топ, лента, награда за убийство."""
+    b = BOSSES[bid]
+    dealt = min(total, b["hp"])
+    uid = str(callback.from_user.id)
+    b["hp"] -= dealt
+    b["dmg"][uid] = int(b["dmg"].get(uid, 0)) + dealt
+    b["names"][uid] = who_plain(uid, nick_of(callback.from_user))
+    b["last_uid"] = uid
+    b["last_hit"][uid] = time.time()
+    stat_add(uid, b["names"][uid], dmg=dealt)
+    award = getattr(D, "award_fragments", None)
+    got = award(user, dealt) if (award and fragments) else 0
+
+    text = f"{label} · {fmt(dealt)} урона"
+    if crit:
+        text += " · КРИТ"
+    if extra:
+        text += f" · {extra}"
+    if got:
+        text += f" · +{got} 🧩"
+    name = b["names"][uid]
+    if feed:
+        feed_push(bid, "hit", uid, name, icon=icon, skill=label, dmg=dealt, crit=crit)
+
+    if b["hp"] <= 0:
+        b["hp"] = 0
+        feed_push(bid, "kill", uid, name)
+        rewards = finish_boss(bid, name)
+        await callback.answer(text + ". Босс повержен!", show_alert=True)
+        asyncio.create_task(_notify_rewards(callback.bot, bid, rewards, who_html(uid, name)))
+    else:
+        _save_soon()
+        await callback.answer(text)
+
+    start_strikes(callback.bot)
+    uid_i = callback.from_user.id
+    old_sig = VIEWERS.get(uid_i, {}).get("sig")
+    _watch(uid_i, callback.message.chat.id, callback.message.message_id, bid)
+    if old_sig is not None and VIEWERS[uid_i]["bid"] == bid:
+        VIEWERS[uid_i]["sig"] = old_sig       # подпись кнопок не сбрасываем: цикл сам увидит смену откатов
+    await _refresh_own(callback.bot, uid_i)
+    _mark_dirty(callback.bot, bid)
+
+
+@router.callback_query(F.data.regexp(r"^boss:strike:\w+:\d+$"))
+async def on_strike(callback: CallbackQuery):
+    """«Ударить»: 30-50 урона, с надетым оружием урон оружия. Не чаще раза в STRIKE_CD секунд."""
+    user = await _require_user(callback)
+    if user is None:
+        return
+    bid = _bid_from(callback.data)
+    if bid is None:
+        await callback.answer("Такого босса нет", show_alert=True)
+        return
+    tick()
+    if strike_left(user) > 0:
+        await callback.answer()                    # слишком быстро: молча игнорируем
+        return
+    if not await _can_fight(callback, user, bid):
+        return
+    user["boss_strike_ts"] = time.time()           # откат ставим сразу: ниже есть await
+
+    weapon = _weapon(user)
+    if weapon is not None:
+        it, item = weapon
+        ws = _ws()
+        raw = ws.roll_damage(item) or random.randint(*STRIKE_BASE_DMG)
+        pierce = float(item.get("fx", {}).get("armor_pierce", 0.0))
+        label = item["name"]
+        if WEAPON_WEAR > 0:
+            it["dur"] = max(0, int(it.get("dur", 0)) - WEAPON_WEAR)
+    else:
+        raw, label = random.randint(*STRIKE_BASE_DMG), "Удар"
+        pierce = 0.0 if STRIKE_BASE_USE_DEFENSE else 1.0     # голый удар: ровно 30-50, защита босса его не режет
+    total, crit = strike_damage(user, bid, raw, pierce)
+    await _deal(callback, user, bid, total, label, icon=ATTACK_EMOJI[1], crit=crit,
+                feed=STRIKE_FEED, fragments=STRIKE_FRAGMENTS)
+
+
+async def _buy_slot(callback: CallbackQuery, user: dict, bid: str, slot: int) -> None:
+    """Нажатие на закрытый слот: следующий покупается вторым нажатием, остальные пока закрыты."""
+    opened = slots_open(user)
+    if slot != opened + 1:
+        await callback.answer("Сначала открой предыдущий слот боезапаса.", show_alert=True)
+        return
+    price = AMMO_SLOT_PRICES[slot]
+    if int(user.get("coins", 0)) < price:
+        await callback.answer(f"Не хватает монет: слот стоит {fmt(price)}.", show_alert=True)
+        return
+    pend = user.get("boss_buy")
+    now = time.time()
+    if isinstance(pend, dict) and pend.get("slot") == slot and now - float(pend.get("ts", 0)) <= AMMO_CONFIRM_SEC:
+        user["coins"] = int(user["coins"]) - price
+        user["boss_slots"] = slot
+        user.pop("boss_buy", None)
+        D.save_users()
+        await callback.answer(f"Слот {slot} открыт!", show_alert=True)
+        v = VIEWERS.get(callback.from_user.id)
+        if v is not None:
+            await _refresh_buttons(callback.bot, callback.from_user.id, v)
+        return
+    user["boss_buy"] = {"slot": slot, "ts": now}
+    await callback.answer(
+        f"Открыть слот {slot} за {fmt(price)} монет? Нажми ещё раз в течение {AMMO_CONFIRM_SEC} секунд.",
+        show_alert=True)
+
+
+@router.callback_query(F.data.regexp(r"^boss:ammo:\w+:\d+:\d+$"))
+async def on_ammo(callback: CallbackQuery):
+    """Кнопка боезапаса: выстрел зарядом своего слота (не чаще раза в AMMO_CD секунд)."""
+    user = await _require_user(callback)
+    if user is None:
+        return
+    bid = _bid_from(callback.data)
+    if bid is None:
+        await callback.answer("Такого босса нет", show_alert=True)
+        return
+    slot = int(callback.data.split(":")[4])
+    if not 1 <= slot <= AMMO_SLOTS:
+        await callback.answer()
+        return
+    if slot > slots_open(user):
+        await _buy_slot(callback, user, bid, slot)
+        return
+    tick()
+    left = ammo_left(user, slot)
+    if left > 0:
+        await callback.answer(f"Боезапас перезаряжается: {fmt_dur(left)}")
+        return
+    if not await _can_fight(callback, user, bid):
+        return
+    ranking = ammo_ranking(user)
+    if slot - 1 >= len(ranking):
+        await callback.answer(
+            "В этом слоте нет боезапаса. Создай заряды в Мастерской.", show_alert=True)
+        return
+    a = ranking[slot - 1]
+    ws = _ws()
+    if not ws.spend_ammo(user, a["key"], 1, a["lvl"]):
+        await callback.answer("Заряды закончились.", show_alert=True)
+        return
+    user[_ammo_ts_key(slot)] = time.time()
+    item = ws.ITEMS[a["key"]]
+    fx = item.get("fx", {})
+    raw = ws.roll_ammo_damage(a["key"], a["lvl"])
+    total, crit = strike_damage(user, bid, raw, float(fx.get("armor_pierce", 0.0)),
+                                float(fx.get("crit_chance", 0.0)), float(fx.get("crit_mult", CRIT_MULT)))
+    await _deal(callback, user, bid, total, a["name"], icon=_plain_emoji(a["emoji"]), crit=crit,
+                feed=True, fragments=True, extra=f"осталось {a['count'] - 1}")
