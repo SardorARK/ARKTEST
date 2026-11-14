@@ -1015,8 +1015,14 @@ MINE_ITEMS = {"pickaxe": "ore", "crystal_pickaxe": "ore", "dynamite": "ore", "ca
               "flask": "repair"}   # фляга обрабатывается последней: чинит предметы, сработавшие в этом запуске
 
 
-# Предметы одной группы взаимозаменяемы: включить можно только один из них (две кирки сразу не бывает)
-EXCLUSIVE_GROUPS = (("pickaxe", "crystal_pickaxe"),)
+# Предметы для экспедиций (раздел «Исследователи», exrn.py): ключ -> тип эффекта.
+# Они НЕ входят в MINE_ITEMS: шахта их не берёт и не тратит. Включаются кнопкой «Использовать»,
+# сгорают при отправке отряда в экспедицию (exped_take) и поднимают монеты, мясо и фрукты с этой экспедиции.
+EXPED_ITEMS = {"campfire": "loot", "banner": "loot"}
+
+# Предметы одной группы взаимозаменяемы: включить можно только один из них (две кирки сразу не бывает;
+# костёр и знамя: в одну экспедицию берётся один из них)
+EXCLUSIVE_GROUPS = (("pickaxe", "crystal_pickaxe"), ("campfire", "banner"))
 
 
 def use_group(key: str) -> tuple:
@@ -1077,6 +1083,41 @@ def mine_items_apply(user: dict, minutes: float = WEAR_FULL_MINUTES) -> dict:
         res["used"].append({"key": fkey, "lvl": 0, "evo": 0, "bonus": b})
     res["gold"] = min(res["gold"], GOLD_CHANCE_CAP)
     return res
+
+
+def exped_armed(user: dict) -> dict | None:
+    """Включённый и годный предмет для экспедиции (костёр / знамя) или None. Ничего не списывает."""
+    for key in EXPED_ITEMS:
+        it = next((o for o in items_of(user) if o.get("key") == key and o.get("use")), None)
+        if it is None or key not in ITEMS:
+            continue
+        if is_broken(it):
+            it.pop("use", None)
+            continue
+        return it
+    return None
+
+
+def exped_preview(user: dict) -> dict | None:
+    """Что сработает при отправке отряда: {"key", "bonus"} (bonus в %) или None. Ничего не списывает."""
+    it = exped_armed(user)
+    if it is None:
+        return None
+    item = ITEMS[it["key"]]
+    return {"key": it["key"], "bonus": bonus_pct(item, level_of(it), evo_of(it))}
+
+
+def exped_take(user: dict) -> dict | None:
+    """Вызывается при отправке отряда: тратит одно использование включённого костра/знамени и
+    возвращает {"key", "bonus"} (бонус к монетам, мясу и фруктам этой экспедиции, в %) или None.
+    После вызова сохрани игроков (D.save_users / save_users в exrn)."""
+    it = exped_armed(user)
+    if it is None:
+        return None
+    key = it["key"]
+    b = bonus_pct(ITEMS[key], level_of(it), evo_of(it))
+    consume(user, it, 1)   # одноразовый: использования кончились, предмет исчез из инвентаря
+    return {"key": key, "bonus": b}
 
 
 def mine_item_label(entry: dict) -> tuple[str, str]:
@@ -1942,6 +1983,8 @@ def item_html(user: dict, idx: int, with_image: bool) -> str:
 
     if it.get("use") and item.get("use_kind") == "arm":
         text += f"<p>{gap}</p><blockquote><i>✅ Включён: сработает сам</i></blockquote>"
+    elif it.get("use") and it.get("key") in EXPED_ITEMS:
+        text += f"<p>{gap}</p><blockquote><i>✅ Включён: сработает при следующей отправке в экспедицию</i></blockquote>"
     elif it.get("use") and (it.get("key") in MINE_ITEMS or item.get("slot")):
         text += f"<p>{gap}</p><blockquote><i>✅ Используется</i></blockquote>"
 
@@ -2877,7 +2920,7 @@ async def on_use(callback: CallbackQuery):
     if item.get("use_kind"):   # расходники раздела «Дополнительно»
         await _use_extra(callback, user, idx, it, item)
         return
-    if key not in MINE_ITEMS and not gear:
+    if key not in MINE_ITEMS and key not in EXPED_ITEMS and not gear:
         await callback.answer("🚧 Использование этого предмета скоро появится.", show_alert=True)
         return
     if it.get("use"):
@@ -2895,7 +2938,10 @@ async def on_use(callback: CallbackQuery):
             if o.get("key") in grp:
                 o.pop("use", None)   # из одного вида включён только один предмет
         it["use"] = True
-        msg = "Предмет надет." if gear else "Предмет используется."
+        if key in EXPED_ITEMS:
+            msg = "Предмет включён: он сработает, когда ты отправишь отряд в экспедицию."
+        else:
+            msg = "Предмет надет." if gear else "Предмет используется."
     D.save_users()
     await callback.answer(msg, show_alert=True)
     await D.show_rich_card(callback, "workshop", lambda wi: item_html(user, idx, wi), item_kb(user, idx))
