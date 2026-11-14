@@ -390,29 +390,46 @@ def open_many(user: dict, key: str, n: int | None) -> tuple[str | None, int, dic
     return None, opened, total, note
 
 
+def _plain(cmd: tuple, user: dict) -> str:
+    """Запасной ответ простым текстом, если rich-карточка не отправилась."""
+    if cmd[0] == "list":
+        own = owned_sets(user)
+        return "Твои наборы:\n" + "\n".join(f"{SETS[k]['name']}: {set_count(user, k):.1f} шт" for k in own) \
+            if own else "У тебя пока нет наборов."
+    return "Готово."
+
+
 @router.message(_is_command)
 async def on_command(message: Message):
+    cmd = _parse(message)
+    log.info("workshop_sets: команда %s от %s", cmd, message.from_user.id)
     user = W.D.get_user(message.from_user.id)
     if user is None:
         await message.answer("Сначала выбери питомца: /start")
         return
-    cmd = _parse(message)
     send = lambda html: W.D.send_rich_card(message.bot, message.chat.id, "workshop", html, None)
-
-    if cmd[0] == "list":
-        await send(lambda wi: list_html(user, wi))
-    elif cmd[0] == "info":
-        await send(lambda wi: info_html(cmd[1], wi))
-    elif cmd[0] == "give":
-        for k in ([cmd[1]] if cmd[1] else ORDER):
-            give_set(user, k, cmd[2])
-        W.D.save_users()
-        await send(lambda wi: list_html(user, wi))
-    else:
-        key = cmd[1]
-        err, opened, loot, note = open_many(user, key, cmd[2])
-        if err:
-            await message.answer(err)
-            return
-        W.D.save_users()
-        await send(lambda wi: loot_html(user, key, opened, loot, note, wi))
+    try:
+        if cmd[0] == "list":
+            await send(lambda wi: list_html(user, wi))
+        elif cmd[0] == "info":
+            await send(lambda wi: info_html(cmd[1], wi))
+        elif cmd[0] == "give":
+            for k in ([cmd[1]] if cmd[1] else ORDER):
+                give_set(user, k, cmd[2])
+            W.D.save_users()
+            await send(lambda wi: list_html(user, wi))
+        else:
+            key = cmd[1]
+            err, opened, loot, note = open_many(user, key, cmd[2])
+            if err:
+                await message.answer(err)
+                return
+            W.D.save_users()   # наборы уже списаны и выданы: сохраняем до отправки карточки
+            await send(lambda wi: loot_html(user, key, opened, loot, note, wi))
+    except Exception:
+        # карточка не отправилась (разметка, сеть): пишем причину в лог и отвечаем простым текстом
+        log.exception("workshop_sets: не удалось отправить карточку для %s", cmd)
+        try:
+            await message.answer(_plain(cmd, user))
+        except Exception:
+            log.exception("workshop_sets: и простой ответ не отправился")
