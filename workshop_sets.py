@@ -1,7 +1,7 @@
 """«Наборы»: кейсы с наградами для мастерской. Работают только командами, без кнопок.
 
 Команды (регистр не важен):
-    н-наборы-набор          показать наборы игрока (только те, что есть; также «н-набор-наборы», «наборы»)
+    н-наборы-набор          показать наборы игрока (только те, что есть; также «н-набор-наборы», «наборы», просто «н»)
     отк бн 3                открыть 3 штуки Базового набора («открыть бн 3» то же; без числа - один; «все» - все)
     инфо бн                 содержимое и шансы набора
     выдать бн 5 / выдать все 5    (только админам) выдать наборы себе для проверки
@@ -28,8 +28,10 @@ import re
 from collections import Counter
 from html import escape
 
-from aiogram import Router
-from aiogram.types import Message
+from aiogram import F, Router
+from aiogram.enums import ButtonStyle
+from aiogram.exceptions import TelegramAPIError
+from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 import workshop as W
 
@@ -51,6 +53,7 @@ def install(dp) -> None:
     так ни один общий обработчик текста не перехватит «н-наборы-набор» и «отк бн 3».
     Вызывать в main.py до quick_cmds.install(dp)."""
     dp.message.register(on_command, _is_command)
+    dp.callback_query.register(on_close, F.data == CLOSE_DATA)
 
 
 # ---------------------------------------------------------------------------
@@ -280,10 +283,10 @@ def _help_block() -> str:
     """Сворачиваемый блок со всеми командами."""
     codes = "<br>".join(f"<code>{CODES[k]}</code> — {SETS[k]['emoji']} {escape(SETS[k]['name'])}" for k in ORDER)
     return ("<blockquote expandable><b>Команды</b><br>"
-            "<code>отк бн 3</code> — открыть 3 базовых набора<br>"
-            "<code>открыть эн</code> — открыть один элитный набор<br>"
-            "<code>отк лн все</code> — открыть все легендарные наборы<br>"
-            "<code>инфо бн</code> — что внутри и какие шансы<br><br>"
+            "<code>отк бн 3</code> — <i>открыть 3 базовых набора</i><br>"
+            "<code>открыть эн</code> — <i>открыть один элитный набор</i><br>"
+            "<code>отк лн все</code> — <i>открыть все легендарные наборы</i><br>"
+            "<code>инфо бн</code> — <i>что внутри и какие шансы</i><br><br>"
             "<b>Коды наборов</b><br>" + codes + "</blockquote>")
 
 
@@ -318,6 +321,26 @@ def loot_html(user: dict, key: str, opened: int, loot: dict, note: str, with_ima
     return text + f"<p>Осталось: {_qty(set_count(user, key))}</p>"
 
 
+CLOSE_DATA = "st:close"
+
+
+def close_kb() -> InlineKeyboardMarkup:
+    """Красная кнопка «Закрыть» под каждым сообщением наборов: удаляет сообщение."""
+    return InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="Закрыть", callback_data=CLOSE_DATA, style=ButtonStyle.DANGER)]])
+
+
+async def on_close(callback: CallbackQuery):
+    await callback.answer()
+    try:
+        await callback.message.delete()
+    except TelegramAPIError:
+        pass
+
+
+router.callback_query.register(on_close, F.data == CLOSE_DATA)
+
+
 # ---------------------------------------------------------------------------
 # Команды
 # ---------------------------------------------------------------------------
@@ -338,7 +361,8 @@ def _parse(message: Message):
     if not w:
         return None
     # список наборов: н-наборы-набор, н-набор-наборы, наборы ...
-    if len(w) <= 3 and len(set(w)) == len(w) and set(w) <= LIST_WORDS and ("наборы" in w or ("н" in w and "набор" in w)):
+    if w == ["н"] or (len(w) <= 3 and len(set(w)) == len(w) and set(w) <= LIST_WORDS
+                      and ("наборы" in w or ("н" in w and "набор" in w))):
         return ("list",)
     if w[0] in OPEN_WORDS and 2 <= len(w) <= 3 and w[1] in BY_CODE:
         if len(w) == 2:
@@ -407,7 +431,7 @@ async def on_command(message: Message):
     if user is None:
         await message.answer("Сначала выбери питомца: /start")
         return
-    send = lambda html: W.D.send_rich_card(message.bot, message.chat.id, "workshop", html, None)
+    send = lambda html: W.D.send_rich_card(message.bot, message.chat.id, "workshop", html, close_kb())
     try:
         if cmd[0] == "list":
             await send(lambda wi: list_html(user, wi))
