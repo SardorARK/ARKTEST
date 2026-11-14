@@ -61,6 +61,45 @@ def _led(name: str, /, **fields) -> None:
 log = logging.getLogger(__name__)
 router = Router()
 
+
+def _ws():
+    """Модуль «Мастерской» (предметы). Если его нет или он сломан, экспедиции работают без предметов."""
+    try:
+        import workshop
+        return workshop
+    except Exception:
+        log.debug("Исследователи: мастерская недоступна", exc_info=True)
+        return None
+
+
+def _ws_item_name(key: str) -> str:
+    """«🏕️ Костёр» для текста; без мастерской просто ключ."""
+    ws = _ws()
+    try:
+        item = ws.ITEMS[key]
+        emoji = item["emoji"]
+        return f"{emoji[1] if isinstance(emoji, tuple) else emoji} {item['name']}"
+    except Exception:
+        return str(key)
+
+
+def _ws_line(user: dict) -> str:
+    """Строка на экране отряда: включён ли предмет Мастерской для экспедиции (или подсказка, что он есть)."""
+    ws = _ws()
+    if ws is None:
+        return ""
+    try:
+        pv = ws.exped_preview(user)
+        if pv:
+            return _p(f"<b>{_ws_item_name(pv['key'])} включён: +{pv['bonus']:g}% монет, мяса и фруктов</b>",
+                      "<i>Предмет сгорит при отправке в экспедицию.</i>")
+        if any(ws.find_entry(user, k) for k in ws.EXPED_ITEMS):
+            return _p("<i>В Мастерской есть предмет для экспедиций (Костёр, Знамя). "
+                      "Включи его кнопкой «Использовать»: он добавит добычи.</i>")
+    except Exception:
+        log.debug("Исследователи: не удалось показать предмет мастерской", exc_info=True)
+    return ""
+
 # Куда админ может добавить фото
 IMG_TARGETS: dict[str, str] = {"exrn": "Исследователи"}
 
@@ -83,6 +122,8 @@ ARROW_TEXT = "\u2800"        # кнопка только со стрелкой: 
 ART_CHANCE_HARD_CAP = 0.45   # потолок шанса артефакта даже с бонусами
 EVENT_CHANCE_CAP = 0.90
 SLOTS = 3                   # сколько артефактов исследователей можно надеть
+EXPED_BONUS_CAP = 50        # потолок бонуса предмета Мастерской (костёр, знамя) к монетам, мясу и фруктам, в %
+                            # (нужен и для проверки данных: больше в сохранении быть не может)
 MAX_TIME_CUT = 50           # экспедиция не может стать короче половины
 ARROW_PREV_ID = "5255703720078879038"   # стрелка «назад» на кнопках страниц
 ARROW_NEXT_ID = "5253767677670862169"   # стрелка «вперёд»
@@ -825,6 +866,24 @@ def _sanitize(user: dict, uid) -> list[str]:
         clean[key] = {"start": start, "end": end, "hours": hours}
         if t.get("notified"):
             clean[key]["notified"] = True
+        wsx = t.get("ws")                 # предмет Мастерской, сгоревший при отправке: {"key", "bonus"}
+        if wsx is not None:
+            good = None
+            if isinstance(wsx, dict) and isinstance(wsx.get("key"), str):
+                ws_mod = _ws()
+                known = getattr(ws_mod, "EXPED_ITEMS", {}) if ws_mod is not None else {}
+                try:
+                    b = float(wsx.get("bonus", 0))
+                except (TypeError, ValueError, OverflowError):
+                    b = -1.0
+                if wsx["key"] in known and math.isfinite(b) and 0 < b:
+                    good = {"key": wsx["key"], "bonus": min(b, float(EXPED_BONUS_CAP))}
+                    if good["bonus"] != b:
+                        fixes.append(f"trip_ws:{key}")
+            if good is not None:
+                clean[key]["ws"] = good
+            else:
+                fixes.append(f"trip_ws:{key}")
     if len(clean) > 1:
         keep = min(clean, key=lambda k: clean[k]["start"])
         fixes.append("trips_many:" + ",".join(k for k in clean if k != keep))
@@ -1228,7 +1287,7 @@ def group_html(user: dict, gi: int, with_image: bool = False) -> str:
             real = f" · в пути {_dur(h * 3600 * (1 - bon['time'] / 100))}" if bon["time"] else ""
             rows.append((f"{_em(EM_TIME)} {h} ч{real}",
                          f"{_num(lo)} – {_num(hi)} монет · {_em(EM_ART)} {art_chance(gi, h, lvl, 1.0, bon['art']) * 100:.1f}%"))
-        return head + _gap() + _tree(rows, "Доступные экспедиции") + _p(
+        return head + _gap() + _tree(rows, "Доступные экспедиции") + _ws_line(user) + _p(
             "<b>💤 Отряд отдохнул и готов к походу.</b>",
             "<i>В пути может случиться что угодно: сундук, торговец, отшельник с картой. "
             "Выбери время кнопкой ниже.</i>",
@@ -1243,7 +1302,8 @@ def group_html(user: dict, gi: int, with_image: bool = False) -> str:
         (f"{_em(EM_EXPED)} Экспедиция", f"{trip['hours']} ч"),
         (f"{_em(EM_PROGRESS)} Прогресс", _bar(now - trip["start"], trip["end"] - trip["start"])),
         (f"{_em(EM_TIME)} Вернутся через", _dur(trip["end"] - now)),
-    ], "⏳ В пути")
+    ] + ([(_ws_item_name(trip["ws"]["key"]), f"+{trip['ws']['bonus']:g}%")] if trip.get("ws") else []),
+        "⏳ В пути")
 
 def group_kb(user: dict, gi: int) -> InlineKeyboardMarkup:
     g = GROUPS[gi]
@@ -1389,6 +1449,8 @@ def loot_html(gi: int, hours: int, loot: dict, art, is_new: bool, dup: int, info
         summary.append((f"{_em(EM_STREAK)} Бонус серии ({info['streak']} дн.)", f"+{info['streak_bonus']}%"))
     if info.get("perk_bonus"):
         summary.append(("👑 Бонус привилегии", f"+{info['perk_bonus']:g}%"))
+    if info.get("ws_bonus"):
+        summary.append((_ws_item_name(info.get("ws_key")), f"+{info['ws_bonus']:g}%"))
     for kind, pct in info.get("art_bonus", {}).items():
         if pct and kind != "time":
             summary.append((f"{_kind_icon(kind) if kind == 'art' else '🎒'} {BONUS_KINDS[kind][0]}", fmt_bonus(kind, pct)))
@@ -1683,11 +1745,24 @@ async def on_go(callback: CallbackQuery):
         cut = bonus(user, "time")
         real = hours * 3600 * (1 - cut / 100)
         ex["trips"][g["key"]] = {"start": now, "end": now + real, "hours": hours}
+        ws_used = None
+        ws_mod = _ws()
+        if ws_mod is not None:             # костёр / знамя из Мастерской: сгорает сейчас, бонус пойдёт в добычу
+            try:
+                ws_used = ws_mod.exped_take(user)
+            except Exception:
+                log.exception("не удалось применить предмет мастерской в экспедиции")
+            if ws_used:
+                ws_used["bonus"] = min(float(ws_used["bonus"]), float(EXPED_BONUS_CAP))
+                ex["trips"][g["key"]]["ws"] = ws_used
         ex["sel"] = g["key"]
         _save_users()
-        _led("exrn_go", uid=str(callback.from_user.id), group=g["key"], hours=hours, cut=cut)
+        _led("exrn_go", uid=str(callback.from_user.id), group=g["key"], hours=hours, cut=cut,
+             ws_item=(ws_used or {}).get("key"), ws_bonus=(ws_used or {}).get("bonus"))
         settings.register_alert(callback.from_user.id, now + real)     # уведомление о возвращении
         note = f" Артефакты сократили путь до {_dur(real)}." if cut else ""
+        if ws_used:
+            note += f" {_ws_item_name(ws_used['key'])}: +{ws_used['bonus']:g}% к добыче."
         await callback.answer(f"{g['name']} отправились в путь на {hours} ч!{note}")
         await _show_main(callback, user)
         return
@@ -1716,6 +1791,7 @@ async def on_take(callback: CallbackQuery):
         return
 
     hours = int(trip["hours"])
+    trip_ws = trip.get("ws") if isinstance(trip.get("ws"), dict) else None   # костёр/знамя, сгоревшие при отправке
     ex["trips"].pop(g["key"], None)          # сначала снимаем экспедицию: награда выдаётся один раз
 
     # Серия ежедневных походов
@@ -1751,9 +1827,15 @@ async def on_take(callback: CallbackQuery):
             perk_pct = max(0.0, float(_reward_boost(user)))
         except Exception:
             log.exception("не удалось получить бонус привилегии")
-    if perk_pct:
+    ws_pct = 0.0                             # предмет Мастерской (костёр, знамя): больше монет, мяса и фруктов
+    if trip_ws:
+        try:
+            ws_pct = max(0.0, min(float(trip_ws.get("bonus", 0)), float(EXPED_BONUS_CAP)))
+        except (TypeError, ValueError):
+            ws_pct = 0.0
+    if perk_pct or ws_pct:
         for kind in ("coins", "meat", "fruit"):
-            loot[kind] = max(1, round(loot[kind] * (1 + perk_pct / 100)))
+            loot[kind] = max(1, round(loot[kind] * (1 + perk_pct / 100) * (1 + ws_pct / 100)))
     user["coins"] += loot["coins"]
     user["meat"] += loot["meat"]
     user["fruit"] += loot["fruit"]
@@ -1782,7 +1864,8 @@ async def on_take(callback: CallbackQuery):
     _led("exrn_claim", uid=str(callback.from_user.id), group=g["key"], hours=hours,
          coins=loot["coins"], meat=loot["meat"], fruit=loot["fruit"], xp=loot["xp"],
          trip_event=(loot["event"] or {}).get("key"), art=(art or {}).get("key"), art_new=is_new,
-         dup_coins=dup, level=new_level, streak=streak, coins_total=user["coins"])
+         dup_coins=dup, level=new_level, streak=streak, coins_total=user["coins"],
+         ws_item=(trip_ws or {}).get("key"), ws_bonus=ws_pct)
 
     info = {
         "old_level": old_level, "new_level": new_level,
@@ -1791,6 +1874,8 @@ async def on_take(callback: CallbackQuery):
         "rank_up": new_rank if new_rank != old_rank else None,
         "art_bonus": bon,
         "perk_bonus": round(perk_pct, 1),
+        "ws_bonus": round(ws_pct, 1),
+        "ws_key": (trip_ws or {}).get("key"),
     }
     await callback.answer("Добыча у тебя в запасах!")
     kb = _kb(
