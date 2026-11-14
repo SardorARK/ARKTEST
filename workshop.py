@@ -92,7 +92,7 @@ CATEGORIES = {
     "items": ("Предметы", "🎒", "Полезные предметы, которые можно создать и пустить в дело."),
     "ammo": ("Боезапас", "🎯", "Снаряды и заряды для боёв и охоты на боссов."),
     "gear": ("Снаряжение", "🛡", "Оружие и броня для питомца."),
-    "extra": ("Дополнительно", "✨", "Особые рецепты, которым не нашлось места в других разделах."),
+    "extra": ("Дополнительно", "✨", "Расходники кузницы: камни и печати для эволюции, ускорители, обмен ресурсов и расширение лимитов."),
 }
 
 # Предметы и их рецепты.
@@ -474,6 +474,137 @@ GEAR = {
 for _k, _g in GEAR.items():
     ITEMS[_k] = {**_g, "category": "gear"}
 
+# ---------------------------------------------------------------------------
+# Раздел «Дополнительно»: расходники кузницы. У каждого ограниченное число использований (uses);
+# израсходованный предмет сам исчезает из инвентаря.
+#   use_kind: "arm"  - кнопка «Использовать» включает предмет, дальше он срабатывает сам в нужный момент
+#             "now"  - срабатывает сразу по кнопке
+#             "pick" - по кнопке открывается экран выбора (слот, ресурс или предмет)
+# Все числа ниже можно менять здесь: тексты в карточках подставятся сами.
+# ---------------------------------------------------------------------------
+RARE_RESOURCES = ("light_essence", "fire_core", "ice_shard")             # редкие ресурсы
+BASIC_RESOURCES = tuple(k for k in RESOURCES if k not in RARE_RESOURCES)   # все остальные - базовые
+
+STONE_REFUND = 0.5          # Камень стабильности: доля ресурсов, которая возвращается при провале эволюции
+SEAL_BONUS = 0.05           # Печать удачи: прибавка к шансу эволюции (0.05 = +5 п.п.)
+BLUEPRINT_DISCOUNT = 0.15   # Чертёж мастера: скидка на следующее улучшение
+HAMMER_CHANCE = 0.30        # Мастерский молоток: шанс сработать при запуске ковки
+HAMMER_SAVE = 0.5           # Мастерский молоток: какая доля ресурсов ковки возвращается, когда он сработал
+HOURGLASS = {"hg_small": 0.25, "hg_mid": 0.5, "hg_instant": 1.0}   # песочные часы: доля срезаемого оставшегося времени
+INSTANT_RARITY = "Базовый"  # мгновенные часы завершают только ковку предметов этой редкости
+ALCHEMY_IN, ALCHEMY_OUT = 30, 1     # Алхимический состав: 30 базовых ресурсов -> 1 редкий
+SWAP_IN, SWAP_OUT = 30, 10          # Обменный жетон: 30 одного базового -> 10 другого (3:1)
+BACKPACK_MAX = 5                    # Рюкзак: насколько можно поднять лимит одного вида предметов (+1 за рюкзак)
+BANDOLIER_STEP, BANDOLIER_MAX = 100, 3   # Бандольер: +100 к максимуму зарядов, применить можно не больше 3 раз
+CRATE_ROLLS, CRATE_AMOUNT, CRATE_RARE_CHANCE = 4, (6, 14), 0.20   # Ящик старателя
+
+EXTRA = {
+    "stab_stone": {
+        "name": "Камень стабильности", "emoji": "🗿", "rarity": "Редкий", "use_kind": "arm",
+        "desc": "Тёплый камень гасит отдачу неудачной эволюции: часть ресурсов возвращается в кузницу.",
+        "cost": {"light_essence": 4, "clay": 20, "bone": 15}, "seconds": 30 * 60, "uses": 1,
+        "note": "Работает 1 раз",
+        "stats": [f"При провале эволюции возвращает {STONE_REFUND:.0%} ресурсов",
+                  "Включи кнопкой «Использовать» до эволюции"],
+        "armed_msg": "Камень включён: он сработает при следующей неудачной эволюции.",
+    },
+    "luck_seal": {
+        "name": "Печать удачи", "emoji": "🍀", "rarity": "Эпический", "use_kind": "arm",
+        "desc": "Старая печать подталкивает судьбу в нужную сторону. Эволюция получается чаще.",
+        "cost": {"light_essence": 5, "feather": 20, "ice_shard": 4}, "seconds": 90 * 60, "uses": 1,
+        "note": "Работает 1 раз",
+        "stats": [f"Шанс эволюции +{SEAL_BONUS * 100:g} п.п. на одну попытку",
+                  "Включи кнопкой «Использовать» до эволюции"],
+        "armed_msg": "Печать включена: она сработает при следующей эволюции.",
+    },
+    "blueprint": {
+        "name": "Чертёж мастера", "emoji": "📜", "rarity": "Редкий", "use_kind": "arm",
+        "desc": "Аккуратный чертёж с расчётами. По нему улучшение обходится дешевле.",
+        "cost": {"fiber": 15, "resin": 10, "thread": 12, "light_essence": 1}, "seconds": 40 * 60, "uses": 1,
+        "note": "Работает 1 раз",
+        "stats": [f"Скидка {BLUEPRINT_DISCOUNT:.0%} на следующее улучшение предмета",
+                  "Включи кнопкой «Использовать» до улучшения"],
+        "armed_msg": "Чертёж включён: скидка применится к следующему улучшению.",
+    },
+    "hg_small": {
+        "name": "Малые песочные часы", "emoji": "⏳", "rarity": "Базовый", "use_kind": "pick",
+        "desc": "Крошечные часы: песок в них течёт быстрее, а время ковки сокращается.",
+        "cost": {"shell": 4, "resin": 6, "thread": 6, "light_essence": 1}, "seconds": 10 * 60, "uses": 1,
+        "note": "Работает 1 раз",
+        "stats": [f"Сокращают оставшееся время ковки на {HOURGLASS['hg_small']:.0%}",
+                  "Применяются к слоту, где идёт ковка"],
+    },
+    "hg_mid": {
+        "name": "Песочные часы", "emoji": "⌛", "rarity": "Редкий", "use_kind": "pick",
+        "desc": "Хорошие часы кузнеца. Половину ожидания как не бывало.",
+        "cost": {"shell": 8, "resin": 10, "thread": 12, "light_essence": 2}, "seconds": 25 * 60, "uses": 1,
+        "note": "Работает 1 раз",
+        "stats": [f"Сокращают оставшееся время ковки на {HOURGLASS['hg_mid']:.0%}",
+                  "Применяются к слоту, где идёт ковка"],
+    },
+    "hg_instant": {
+        "name": "Часы мгновения", "emoji": "🕰️", "rarity": "Эпический", "use_kind": "pick",
+        "desc": "Время в них останавливается: простая ковка завершается в один миг.",
+        "cost": {"shell": 12, "resin": 15, "thread": 18, "light_essence": 4}, "seconds": 60 * 60, "uses": 1,
+        "note": "Работает 1 раз",
+        "stats": ["Мгновенно завершают ковку базового предмета или боезапаса",
+                  "На редкие и эпические не действуют"],
+    },
+    "hammer": {
+        "name": "Мастерский молоток", "emoji": "🔨", "rarity": "Редкий", "use_kind": "arm",
+        "desc": "Удачный удар молотка экономит материал. Не всегда, но когда повезёт, то приятно.",
+        "cost": {"iron": 15, "wood": 10, "leather": 8, "bone": 6}, "seconds": 25 * 60, "uses": 3,
+        "note": "Сработает 3 раза",
+        "stats": [f"Шанс {HAMMER_CHANCE:.0%} вернуть {HAMMER_SAVE:.0%} ресурсов при запуске ковки",
+                  "Тратит 1 использование за каждую ковку",
+                  "Включи кнопкой «Использовать» до ковки"],
+        "armed_msg": "Молоток включён: он сработает при следующих ковках.",
+    },
+    "alchemy": {
+        "name": "Алхимический состав", "emoji": "⚗️", "rarity": "Редкий", "use_kind": "pick",
+        "desc": "Булькающий состав превращает груду простого сырья в редкий ресурс.",
+        "cost": {"clay": 10, "resin": 10, "shell": 6, "thread": 8}, "seconds": 30 * 60, "uses": 3,
+        "note": "Сработает 3 раза",
+        "stats": [f"{ALCHEMY_IN} базовых ресурсов превращаются в {ALCHEMY_OUT} редкий",
+                  "Редкий: эссенция света, огненное ядро или ледяной осколок",
+                  "Списываются те ресурсы, которых у тебя больше всего"],
+    },
+    "swap_token": {
+        "name": "Обменный жетон", "emoji": "🔁", "rarity": "Базовый", "use_kind": "pick",
+        "desc": "Жетон старого менялы. Лишнее сырьё можно обменять на то, чего не хватает.",
+        "cost": {"iron": 6, "leather": 6, "thread": 8}, "seconds": 15 * 60, "uses": 3,
+        "note": "Сработает 3 раза",
+        "stats": [f"Меняет {SWAP_IN} одного базового ресурса на {SWAP_OUT} другого (3:1)",
+                  "Редкие ресурсы не меняются"],
+    },
+    "backpack": {
+        "name": "Рюкзак", "emoji": "🧳", "rarity": "Редкий", "use_kind": "pick",
+        "desc": "Просторный рюкзак с запасными карманами. Влезет ещё один такой же предмет.",
+        "cost": {"leather": 25, "thread": 20, "fiber": 20, "iron": 8}, "seconds": 40 * 60, "uses": 1,
+        "note": "Работает 1 раз",
+        "stats": [f"+1 к лимиту одинаковых предметов выбранного вида (максимум +{BACKPACK_MAX})",
+                  "Можно применять к разным предметам"],
+    },
+    "bandolier": {
+        "name": "Бандольер", "emoji": "📦", "rarity": "Редкий", "use_kind": "now",
+        "desc": "Патронташ с запасными ячейками. Боезапаса помещается больше.",
+        "cost": {"leather": 20, "thread": 15, "iron": 12, "bone": 10}, "seconds": 40 * 60, "uses": 1,
+        "note": "Работает 1 раз",
+        "stats": [f"+{BANDOLIER_STEP} к максимуму зарядов каждого вида",
+                  f"Можно применить не больше {BANDOLIER_MAX} раз"],
+    },
+    "crate": {
+        "name": "Ящик старателя", "emoji": "🎁", "rarity": "Базовый", "use_kind": "now",
+        "desc": "Запечатанный ящик с припасами. Что внутри, узнаешь, только открыв.",
+        "cost": {"wood": 12, "iron": 6, "leather": 8, "thread": 10}, "seconds": 15 * 60, "uses": 1,
+        "note": "Работает 1 раз",
+        "stats": [f"Внутри {CRATE_ROLLS} случайных базовых ресурса по {CRATE_AMOUNT[0]}-{CRATE_AMOUNT[1]} штук",
+                  f"{CRATE_RARE_CHANCE:.0%} шанс найти редкий ресурс"],
+    },
+}
+for _k, _x in EXTRA.items():
+    ITEMS[_k] = {**_x, "category": "extra"}
+
 
 def dmg_text(item: dict) -> str:
     """Строка урона для характеристик: «1567-2564 за удар». Пусто, если у предмета нет урона."""
@@ -577,6 +708,17 @@ def equipped(user: dict) -> dict:
     return out
 
 
+def stack_cap(user: dict, key: str) -> int:
+    """Сколько одинаковых предметов вида key можно иметь: STACK_MAX плюс прибавка от «Рюкзака»."""
+    bonus = user.get("ws_stack_bonus")
+    return STACK_MAX + (_int(bonus.get(key)) if isinstance(bonus, dict) else 0)
+
+
+def ammo_cap(user: dict) -> int:
+    """Максимум зарядов одного вида: AMMO_CAP плюс прибавка от «Бандольера»."""
+    return AMMO_CAP + _int(user.get("ws_ammo_bonus"))
+
+
 def ammo_of(user: dict) -> dict:
     a = user.get("ws_ammo")
     if not isinstance(a, dict):
@@ -594,7 +736,7 @@ def give_ammo(user: dict, key: str, amount: int = 1) -> None:
     """Выдаёт заряды игроку (награды, события)."""
     if key in AMMO and amount > 0:
         a = ammo_of(user)
-        a[key] = min(AMMO_CAP, _int(a.get(key)) + int(amount))
+        a[key] = min(ammo_cap(user), _int(a.get(key)) + int(amount))
 
 
 def spend_ammo(user: dict, key: str, amount: int = 1) -> bool:
@@ -820,9 +962,10 @@ def stacks_of(user: dict, category: str) -> list[list[int]]:
         if ITEMS.get(it.get("key"), {}).get("category") == category:
             groups.setdefault((it["key"], level_of(it), evo_of(it)), []).append(i)
     out = []
-    for idxs in groups.values():
+    for (gkey, _lvl, _evo), idxs in groups.items():
+        cap = stack_cap(user, gkey)   # обычно STACK_MAX, у видов с «Рюкзаком» больше
         idxs.sort(key=lambda i: (_int(lst[i].get("dur")), i))
-        out += [idxs[j:j + STACK_MAX] for j in range(0, len(idxs), STACK_MAX)]   # старые сохранения с >5 делятся на стопки
+        out += [idxs[j:j + cap] for j in range(0, len(idxs), cap)]   # старые сохранения с >лимита делятся на стопки
     return out
 
 
@@ -912,9 +1055,12 @@ def evo_cost(item: dict, stage: int) -> dict:
     return {k: n * mult for k, n in item["cost"].items()}
 
 
-def evolve_item(user: dict, idx: int) -> tuple[str | None, bool]:
+def evolve_item(user: dict, idx: int, info: dict | None = None) -> tuple[str | None, bool]:
     """Эволюция предмета за ресурсы. Возвращает (причина отказа или None, удалась ли).
-    Провал: ресурсы сгорают, предмет остаётся."""
+    Провал: ресурсы сгорают, предмет остаётся.
+    Расходники: включённая «Печать удачи» прибавляет шанс, включённый «Камень стабильности» возвращает часть ресурсов
+    при провале (каждый тратит 1 использование). info (необязательно) заполняется: seal, refund, idx - номер
+    предмета после того, как расходники могли исчезнуть из инвентаря и сдвинуть номера."""
     found = inv_item(user, idx)
     if found is None:
         return "Предмет не найден.", False
@@ -924,15 +1070,35 @@ def evolve_item(user: dict, idx: int) -> tuple[str | None, bool]:
     evo = evo_of(it)
     if evo >= MAX_EVO:
         return "Максимальный этап эволюции уже достигнут.", False
-    if count_same(user, it["key"], level_of(it), evo + 1) >= STACK_MAX:
-        return f"Таких предметов следующего этапа уже {STACK_MAX}: больше иметь нельзя.", False
+    cap = stack_cap(user, it["key"])
+    if count_same(user, it["key"], level_of(it), evo + 1) >= cap:
+        return f"Таких предметов следующего этапа уже {cap}: больше иметь нельзя.", False
     cost = evo_cost(item, evo + 1)
     if any(have(user, k) < n for k, n in cost.items()):
         return "Не хватает ресурсов для эволюции.", False
     r = res_of(user)
     for k, n in cost.items():
         r[k] = have(user, k) - n
-    if random.random() >= EVO_STAGES[evo][0]:
+    chance = EVO_STAGES[evo][0]
+    seal = armed(user, "luck_seal")
+    if seal is not None:
+        chance = min(1.0, chance + SEAL_BONUS)
+    won = random.random() < chance
+    stone = None if won else armed(user, "stab_stone")
+    refund: dict = {}
+    if stone is not None:
+        refund = {k: int(n * STONE_REFUND) for k, n in cost.items() if int(n * STONE_REFUND) > 0}
+        for k, n in refund.items():
+            r[k] = have(user, k) + n
+    if seal is not None:
+        consume(user, seal)
+    if stone is not None:
+        consume(user, stone)
+    if info is not None:
+        info["seal"] = seal is not None
+        info["refund"] = refund
+        info["idx"] = next((i for i, o in enumerate(items_of(user)) if o is it), idx)
+    if not won:
         return None, False
     it["evo"] = evo + 1
     it.pop("fuse", None)
@@ -940,8 +1106,17 @@ def evolve_item(user: dict, idx: int) -> tuple[str | None, bool]:
     return None, True
 
 
-def upgrade_item(user: dict, idx: int) -> str | None:
-    """Поднимает уровень предмета за ресурсы. None при успехе или текст причины отказа."""
+def upgrade_cost_for(user: dict, item: dict, to_level: int) -> dict:
+    """Цена улучшения для этого игрока: со скидкой, если включён «Чертёж мастера»."""
+    cost = upgrade_cost(item, to_level)
+    if armed(user, "blueprint") is not None:
+        cost = {k: max(1, round(n * (1 - BLUEPRINT_DISCOUNT))) for k, n in cost.items()}
+    return cost
+
+
+def upgrade_item(user: dict, idx: int, info: dict | None = None) -> str | None:
+    """Поднимает уровень предмета за ресурсы. None при успехе или текст причины отказа.
+    Включённый «Чертёж мастера» даёт скидку и тратится. info (необязательно): bp, idx (номер предмета после списаний)."""
     found = inv_item(user, idx)
     if found is None:
         return "Предмет не найден."
@@ -951,9 +1126,11 @@ def upgrade_item(user: dict, idx: int) -> str | None:
     lvl = level_of(it)
     if lvl >= MAX_LEVEL:
         return "Максимальный уровень уже достигнут."
-    if count_same(user, it["key"], lvl + 1, evo_of(it)) >= STACK_MAX:
-        return f"Таких предметов следующего уровня уже {STACK_MAX}: больше иметь нельзя."
-    cost = upgrade_cost(item, lvl + 1)
+    cap = stack_cap(user, it["key"])
+    if count_same(user, it["key"], lvl + 1, evo_of(it)) >= cap:
+        return f"Таких предметов следующего уровня уже {cap}: больше иметь нельзя."
+    bp = armed(user, "blueprint")
+    cost = upgrade_cost_for(user, item, lvl + 1)
     if any(have(user, k) < n for k, n in cost.items()):
         return "Не хватает ресурсов для улучшения."
     r = res_of(user)
@@ -963,6 +1140,11 @@ def upgrade_item(user: dict, idx: int) -> str | None:
         old_mx, new_mx = max_dur(item, lvl), max_dur(item, lvl + 1)
         it["dur"] = min(_int(it.get("dur")), old_mx) + (new_mx - old_mx)
     it["lvl"] = lvl + 1
+    if bp is not None:
+        consume(user, bp)
+    if info is not None:
+        info["bp"] = bp is not None
+        info["idx"] = next((i for i, o in enumerate(items_of(user)) if o is it), idx)
     return None
 
 
@@ -994,6 +1176,171 @@ def repair_item(user: dict, idx: int) -> str | None:
     for k, n in cost.items():
         r[k] = have(user, k) - n
     it["dur"] = mx
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Расходники раздела «Дополнительно» (логика)
+# ---------------------------------------------------------------------------
+
+def find_entry(user: dict, key: str) -> dict | None:
+    """Запись инвентаря с ключом key. Из нескольких берётся с меньшим остатком: начатый расходуется первым."""
+    best = None
+    for it in items_of(user):
+        if it.get("key") == key and (best is None or _int(it.get("dur")) < _int(best.get("dur"))):
+            best = it
+    return best
+
+
+def armed(user: dict, key: str) -> dict | None:
+    """Расходник key, включённый кнопкой «Использовать» (с остатком использований), или None."""
+    for it in items_of(user):
+        if it.get("key") == key and it.get("use") and _int(it.get("dur")) > 0:
+            return it
+    return None
+
+
+def consume(user: dict, it: dict, n: int = 1) -> None:
+    """Тратит использования расходника; когда они кончились, предмет исчезает из инвентаря.
+    После вызова номера предметов в инвентаре могут сдвинуться."""
+    it["dur"] = max(0, _int(it.get("dur")) - n)
+    if it["dur"] <= 0:
+        lst = items_of(user)
+        for i, o in enumerate(lst):
+            if o is it:
+                del lst[i]
+                break
+
+
+def basic_total(user: dict) -> int:
+    return sum(have(user, k) for k in BASIC_RESOURCES)
+
+
+def spend_basic(user: dict, amount: int) -> dict:
+    """Списывает amount базовых ресурсов, начиная с тех, которых больше всего. Возвращает {ключ: списано}.
+    Вызывать только после проверки basic_total(user) >= amount."""
+    spent, left, r = {}, amount, res_of(user)
+    for k in sorted(BASIC_RESOURCES, key=lambda x: -have(user, x)):
+        take = min(have(user, k), left)
+        if take > 0:
+            r[k] = have(user, k) - take
+            spent[k] = take
+            left -= take
+        if left <= 0:
+            break
+    return spent
+
+
+def alchemy_convert(user: dict, rare: str) -> tuple[str | None, dict]:
+    """Алхимический состав: ALCHEMY_IN базовых ресурсов -> ALCHEMY_OUT редкого. Возвращает (отказ или None, списано)."""
+    ent = find_entry(user, "alchemy")
+    if ent is None:
+        return "Алхимического состава нет в инвентаре.", {}
+    if rare not in RARE_RESOURCES:
+        return "Такой ресурс получить нельзя.", {}
+    total = basic_total(user)
+    if total < ALCHEMY_IN:
+        return f"Не хватает базовых ресурсов: нужно {ALCHEMY_IN}, у тебя {total}.", {}
+    spent = spend_basic(user, ALCHEMY_IN)
+    give_resource(user, rare, ALCHEMY_OUT)
+    consume(user, ent)
+    return None, spent
+
+
+def swap_resources(user: dict, src: str, dst: str) -> str | None:
+    """Обменный жетон: SWAP_IN базового ресурса src -> SWAP_OUT базового ресурса dst. None при успехе."""
+    ent = find_entry(user, "swap_token")
+    if ent is None:
+        return "Обменного жетона нет в инвентаре."
+    if src not in BASIC_RESOURCES or dst not in BASIC_RESOURCES or src == dst:
+        return "Такой обмен невозможен."
+    if have(user, src) < SWAP_IN:
+        return f"Не хватает ресурса: нужно {SWAP_IN}, у тебя {have(user, src)}."
+    res_of(user)[src] = have(user, src) - SWAP_IN
+    give_resource(user, dst, SWAP_OUT)
+    consume(user, ent)
+    return None
+
+
+def backpack_apply(user: dict, target: str) -> str | None:
+    """Рюкзак: +1 к лимиту одинаковых предметов вида target. None при успехе."""
+    ent = find_entry(user, "backpack")
+    if ent is None:
+        return "Рюкзака нет в инвентаре."
+    item = ITEMS.get(target)
+    if item is None or item.get("ammo"):
+        return "Для этого предмета лимит не расширяется."
+    bonus = user.get("ws_stack_bonus")
+    if not isinstance(bonus, dict):
+        bonus = {}
+        user["ws_stack_bonus"] = bonus
+    if _int(bonus.get(target)) >= BACKPACK_MAX:
+        return f"Лимит этого предмета уже расширен до максимума (+{BACKPACK_MAX})."
+    bonus[target] = _int(bonus.get(target)) + 1
+    consume(user, ent)
+    return None
+
+
+def bandolier_apply(user: dict) -> str | None:
+    """Бандольер: +BANDOLIER_STEP к максимуму зарядов, не больше BANDOLIER_MAX раз. None при успехе."""
+    ent = find_entry(user, "bandolier")
+    if ent is None:
+        return "Бандольера нет в инвентаре."
+    if _int(user.get("ws_ammo_bonus")) // BANDOLIER_STEP >= BANDOLIER_MAX:
+        return f"Бандольер уже применён {BANDOLIER_MAX} раза: больше нельзя."
+    user["ws_ammo_bonus"] = _int(user.get("ws_ammo_bonus")) + BANDOLIER_STEP
+    consume(user, ent)
+    return None
+
+
+def crate_open(user: dict) -> tuple[str | None, dict]:
+    """Ящик старателя: выдаёт случайные ресурсы. Возвращает (отказ или None, что выпало)."""
+    ent = find_entry(user, "crate")
+    if ent is None:
+        return "Ящика нет в инвентаре.", {}
+    loot: dict = {}
+    for _ in range(CRATE_ROLLS):
+        k = random.choice(BASIC_RESOURCES)
+        loot[k] = loot.get(k, 0) + random.randint(*CRATE_AMOUNT)
+    if random.random() < CRATE_RARE_CHANCE:
+        k = random.choice(RARE_RESOURCES)
+        loot[k] = loot.get(k, 0) + 1
+    for k, n in loot.items():
+        give_resource(user, k, n)
+    consume(user, ent)
+    return None, loot
+
+
+def hourglass_targets(user: dict, key: str) -> list[dict]:
+    """Идущие крафты, к которым можно применить часы key (мгновенные - только к базовым предметам)."""
+    now, out = time.time(), []
+    for j in jobs_of(user):
+        if j["end"] <= now:
+            continue
+        if HOURGLASS[key] >= 1.0 and ITEMS[j["item"]].get("rarity") != INSTANT_RARITY:
+            continue
+        out.append(j)
+    return out
+
+
+def hourglass_apply(user: dict, key: str, slot: int) -> str | None:
+    """Песочные часы: срезают долю оставшегося времени ковки в слоте. None при успехе."""
+    if key not in HOURGLASS:
+        return "Это не песочные часы."
+    ent = find_entry(user, key)
+    if ent is None:
+        return "Таких часов нет в инвентаре."
+    job, now = job_at(user, slot), time.time()
+    if job is None or job["end"] <= now:
+        return "В этом слоте сейчас ничего не куётся."
+    frac = HOURGLASS[key]
+    if frac >= 1.0:
+        if ITEMS[job["item"]].get("rarity") != INSTANT_RARITY:
+            return "Мгновенно завершается только ковка базовых предметов и боезапаса."
+        job["end"] = now
+    else:
+        job["end"] = now + (job["end"] - now) * (1 - frac)
+    consume(user, ent)
     return None
 
 
@@ -1077,8 +1424,10 @@ def settle(user: dict, now: float | None = None) -> list[str]:
     return done
 
 
-def start_craft(user: dict, item_key: str, slot: int, now: float | None = None) -> str | None:
-    """Запускает крафт в слоте. Возвращает None при успехе или текст причины отказа."""
+def start_craft(user: dict, item_key: str, slot: int, now: float | None = None, info: dict | None = None) -> str | None:
+    """Запускает крафт в слоте. Возвращает None при успехе или текст причины отказа.
+    Включённый «Мастерский молоток» тратит 1 использование и с шансом возвращает часть ресурсов.
+    info (необязательно): hammer, saved - что вернулось."""
     item = ITEMS.get(item_key)
     if item is None:
         return "Такого рецепта нет."
@@ -1087,17 +1436,29 @@ def start_craft(user: dict, item_key: str, slot: int, now: float | None = None) 
     if job_at(user, slot):
         return "Слот занят: дождись окончания крафта."
     if is_ammo(item):
-        if ammo_count(user, item_key) + ammo_pending(user, item_key) + item["batch"] > AMMO_CAP:
-            return f"Боезапас этого вида уже почти полон (максимум {AMMO_CAP})."
+        cap = ammo_cap(user)
+        if ammo_count(user, item_key) + ammo_pending(user, item_key) + item["batch"] > cap:
+            return f"Боезапас этого вида уже почти полон (максимум {cap})."
     elif len(items_of(user)) >= INVENTORY_CAP:
         return "Инвентарь мастерской переполнен."
-    elif owned_count(user, item_key) >= STACK_MAX:
-        return f"У тебя уже {STACK_MAX} таких предметов (с учётом тех, что куются): больше иметь нельзя."
+    elif owned_count(user, item_key) >= stack_cap(user, item_key):
+        return f"У тебя уже {stack_cap(user, item_key)} таких предметов (с учётом тех, что куются): больше иметь нельзя."
     if not can_afford(user, item_key):
         return "Не хватает ресурсов."
     r = res_of(user)
     for k, n in item["cost"].items():
         r[k] = have(user, k) - n
+    hammer = armed(user, "hammer")
+    if hammer is not None:
+        consume(user, hammer)
+        saved: dict = {}
+        if random.random() < HAMMER_CHANCE:
+            saved = {k: int(n * HAMMER_SAVE) for k, n in item["cost"].items() if int(n * HAMMER_SAVE) > 0}
+            for k, n in saved.items():
+                r[k] = have(user, k) + n
+        if info is not None:
+            info["hammer"] = True
+            info["saved"] = saved
     now = time.time() if now is None else now
     jobs_of(user).append({"item": item_key, "slot": slot, "start": now, "end": now + item["seconds"]})
     return None
@@ -1358,13 +1719,15 @@ def _cost_lines(user: dict, cost: dict) -> tuple[list[str], list[str]]:
     return lines, lack
 
 
-def _stats_box(item: dict, lvl: int, evo: int = 0, stack: int = 0) -> str:
+def _stats_box(item: dict, lvl: int, evo: int = 0, stack: int = 0, cap: int = STACK_MAX) -> str:
     """Характеристики без цитаты: подпись жирным, значение моно (копируется по нажатию). Общие для карточки и экрана улучшения."""
     boost = D.custom_emoji(BOOST_EMOJI)
     lines = []
     if can_upgrade(item):
         lines.append(f"<b>✨ Уровень:</b> <code>{lvl} / {MAX_LEVEL}</code>")
-    if item.get("slot"):   # снаряжение: слот, урон и эффекты вместо бонуса
+    if item.get("category") == "extra":   # расходники: строки эффектов вместо бонуса
+        lines += [f"<b>{boost} {escape(t)}</b>" for t in item.get("stats", [])]
+    elif item.get("slot"):   # снаряжение: слот, урон и эффекты вместо бонуса
         lines.append(f"<b>🎽 Слот:</b> <code>{SLOT_NAMES[item['slot']]}</code>")
         if item.get("dmg"):
             lines.append(f"<b>⚔️ Урон:</b> <code>{dmg_text(item)}</code>")
@@ -1383,7 +1746,7 @@ def _stats_box(item: dict, lvl: int, evo: int = 0, stack: int = 0) -> str:
     if evo:
         lines.append(f"<b>{_em(EVO_EMOJI)} Эволюция:</b> <code>{evo} / {MAX_EVO}</code> <code>(+{evo_bonus(evo)}%)</code>")
     if stack:
-        lines.append(f"<b>📦 В стопке:</b> <code>{stack} / {STACK_MAX}</code>")
+        lines.append(f"<b>📦 В стопке:</b> <code>{stack} / {cap}</code>")
     if item.get("note"):
         lines.append(f"<b>📌 {escape(item['note'])}</b>")
     return f"<p>{DIV}<br>" + "<br>".join(lines) + "</p>"
@@ -1397,7 +1760,7 @@ def item_html(user: dict, idx: int, with_image: bool) -> str:
     dur = min(_int(it.get("dur")), mx)
     gap = DIV + "<br>"
     text = _img(with_image) + _head(item["name"].upper(), item["emoji"], item.get("desc") or "Предмет из инвентаря.")
-    text += _stats_box(item, lvl, evo_of(it), len(stack_of(user, idx)))
+    text += _stats_box(item, lvl, evo_of(it), len(stack_of(user, idx)), stack_cap(user, it["key"]))
 
     if can_repair(item):
         text += (f"<p>{gap}<b>❤️ Прочность</b><br>{_bar(dur, mx)} "
@@ -1405,7 +1768,9 @@ def item_html(user: dict, idx: int, with_image: bool) -> str:
     else:
         text += f"<p>{gap}<b>❤️ Осталось использований:</b> <code>{dur} / {mx}</code><br>{_bar(dur, mx)}</p>"
 
-    if it.get("use") and (it.get("key") in MINE_ITEMS or item.get("slot")):
+    if it.get("use") and item.get("use_kind") == "arm":
+        text += f"<p>{gap}</p><blockquote><i>✅ Включён: сработает сам</i></blockquote>"
+    elif it.get("use") and (it.get("key") in MINE_ITEMS or item.get("slot")):
         text += f"<p>{gap}</p><blockquote><i>✅ Используется</i></blockquote>"
 
     legend = []
@@ -1446,8 +1811,10 @@ def upgrade_html(user: dict, idx: int, with_image: bool) -> str:
     it, item = inv_item(user, idx)
     lvl = level_of(it)
     text = _img(with_image) + _head(item["name"].upper(), item["emoji"], "Улучшение предмета.")
-    lines, lack = _cost_lines(user, upgrade_cost(item, lvl + 1))
+    lines, lack = _cost_lines(user, upgrade_cost_for(user, item, lvl + 1))
     note = ("<i>Не хватает " + ", ".join(lack) + ".</i>") if lack else "<i>Всё готово, можно улучшать.</i>"
+    if armed(user, "blueprint") is not None:
+        note += f"<br><i>📜 Чертёж мастера: скидка {BLUEPRINT_DISCOUNT:.0%}</i>"
     gap = DIV + "<br>"
     return text + (_stats_box(item, lvl, evo_of(it))
                    + f"<p>{gap}<b>▸ Нужно</b><br>" + "<br>".join(lines) + f"<br>{note}</p>")
@@ -1458,17 +1825,23 @@ def evo_html(user: dict, idx: int, with_image: bool) -> str:
     it, item = inv_item(user, idx)
     lvl, evo = level_of(it), evo_of(it)
     chance, bonus, mult = EVO_STAGES[evo]
+    seal_on = armed(user, "luck_seal") is not None
+    stone_on = armed(user, "stab_stone") is not None
+    shown = min(1.0, chance + SEAL_BONUS) if seal_on else chance
+    seal_txt = f" <i>(🍀 +{SEAL_BONUS * 100:g} п.п.)</i>" if seal_on else ""
+    fail_txt = (f"вернётся {STONE_REFUND:.0%} ресурсов (🗿 камень), предмет остаётся" if stone_on
+                else "ресурсы сгорают, предмет остаётся")
     text = _img(with_image) + _head(item["name"].upper(), item["emoji"], "Эволюция предмета.")
     gap = DIV + "<br>"
     boost = D.custom_emoji(BOOST_EMOJI)
     lines, lack = _cost_lines(user, evo_cost(item, evo + 1))
     note = (("<i>Не хватает " + ", ".join(lack) + ".</i>") if lack else "<i>Всё готово, можно пробовать.</i>")
     text += (f"<p>{gap}<b>{_em(EVO_EMOJI)} Этап:</b> <code>{evo + 1} / {MAX_EVO}</code><br>"
-             f"<b>🎲 Шанс успеха:</b> <code>{chance * 100:g}%</code><br>"
+             f"<b>🎲 Шанс успеха:</b> <code>{shown * 100:g}%</code>{seal_txt}<br>"
              f"<b>{boost} Бонус:</b> <code>{_pct(bonus_pct(item, lvl, evo))}</code> → "
              f"<code>{_pct(bonus_pct(item, lvl, evo + 1))}</code> <code>(+{bonus}%)</code><br>"
              f"<i>✅ Успех: этап растёт, прочность полная</i><br>"
-             f"<i>💥 Провал: ресурсы сгорают, предмет остаётся</i></p>"
+             f"<i>💥 Провал: {fail_txt}</i></p>"
              f"<p>{gap}<b>▸ Нужно</b> <i>({mult}х от рецепта крафта)</i><br>" + "<br>".join(lines) + f"<br>{note}</p>")
     return text
 
@@ -1637,7 +2010,8 @@ def recipe_html(user: dict, key: str, slot: int, with_image: bool) -> str:
     text = _img(with_image) + _head(item["name"].upper(), item["emoji"], desc)
     ammo = is_ammo(item)
     gear = bool(item.get("slot"))
-    bonus_name, bonus = ("", "") if (ammo or gear) else (item["bonus"][0], _pct(bonus_pct(item, 0)))
+    extra = item.get("category") == "extra"
+    bonus_name, bonus = ("", "") if (ammo or gear or extra) else (item["bonus"][0], _pct(bonus_pct(item, 0)))
     ok, no, clock = D.custom_emoji(OK_EMOJI), D.custom_emoji(NO_EMOJI), D.custom_emoji(TIME_EMOJI)
     boost = D.custom_emoji(BOOST_EMOJI)
     lines, lack = [], []
@@ -1649,10 +2023,10 @@ def recipe_html(user: dict, key: str, slot: int, with_image: bool) -> str:
         lines.append(f"{ok if got >= n else no} | {em} <b>{escape(name)}</b> — "
                      f"<code>{_n(got)}</code> / <code>{_n(n)}</code>")
     gap = "⠀<br>"   # невидимый символ: пустая строка видна и на ПК (как в _craft_status)
-    if ammo and ammo_count(user, key) + ammo_pending(user, key) + item["batch"] > AMMO_CAP:
-        note = f"<i>Боезапас этого вида почти полон (максимум {AMMO_CAP}).</i>"
-    elif not ammo and owned_count(user, key) >= STACK_MAX:
-        note = f"<i>У тебя уже {STACK_MAX} таких предметов: больше иметь нельзя.</i>"
+    if ammo and ammo_count(user, key) + ammo_pending(user, key) + item["batch"] > ammo_cap(user):
+        note = f"<i>Боезапас этого вида почти полон (максимум {ammo_cap(user)}).</i>"
+    elif not ammo and owned_count(user, key) >= stack_cap(user, key):
+        note = f"<i>У тебя уже {stack_cap(user, key)} таких предметов: больше иметь нельзя.</i>"
     elif lack:
         note = "<i>Не хватает " + ", ".join(lack) + ".</i>"
     else:
@@ -1667,6 +2041,10 @@ def recipe_html(user: dict, key: str, slot: int, with_image: bool) -> str:
         stats = (f"<b>Редкость: {escape(item['rarity'])} · {clock} {fmt_time(item['seconds'])}</b><br>"
                  f"<b>Слот: {SLOT_NAMES[item['slot']]}</b>"
                  + (f"<br><b>⚔️ Урон: {dmg_text(item)}</b>" if item.get("dmg") else "")
+                 + "".join(f"<br><b>{boost} {escape(t)}</b>" for t in item.get("stats", [])))
+    elif extra:
+        stats = (f"<b>Редкость: {escape(item['rarity'])} · {clock} {fmt_time(item['seconds'])}</b><br>"
+                 f"<b>Использований: {item['uses']}</b>"
                  + "".join(f"<br><b>{boost} {escape(t)}</b>" for t in item.get("stats", [])))
     else:
         stats = (f"<b>Редкость: {escape(item['rarity'])} · {clock} {fmt_time(item['seconds'])}</b><br>"
@@ -1882,12 +2260,17 @@ async def on_make(callback: CallbackQuery):
         return
     if settle(user):
         D.save_users()
-    err = start_craft(user, key, slot)
+    info: dict = {}
+    err = start_craft(user, key, slot, info=info)
     if err:
         await callback.answer(err, show_alert=True)
         return
     D.save_users()
-    await callback.answer("Ковка запущена.")
+    if info.get("saved"):
+        got = ", ".join(f"{RESOURCES[k][1]}{n}" for k, n in info["saved"].items())
+        await callback.answer(f"🔨 Молоток сработал: вернулось {got}. Ковка запущена.", show_alert=True)
+    else:
+        await callback.answer("Ковка запущена.")
     await _show_forge(callback, user)
 
 
@@ -1985,12 +2368,15 @@ async def on_upgrade_do(callback: CallbackQuery):
     if idx is None:
         await callback.answer()
         return
-    err = upgrade_item(user, idx)
+    info: dict = {}
+    err = upgrade_item(user, idx, info)
     if err:
         await callback.answer(err, show_alert=True)
         return
+    idx = info.get("idx", idx)   # «Чертёж мастера» мог исчезнуть из инвентаря и сдвинуть номера предметов
     D.save_users()
-    await callback.answer(f"Уровень повышен: {level_of(inv_item(user, idx)[0])}/{MAX_LEVEL}.")
+    await callback.answer(f"Уровень повышен: {level_of(inv_item(user, idx)[0])}/{MAX_LEVEL}."
+                          + (" 📜 Скидка чертежа применена." if info.get("bp") else ""))
     await D.show_rich_card(callback, "workshop", lambda wi: item_html(user, idx, wi), item_kb(user, idx))
 
 
@@ -2050,6 +2436,9 @@ async def on_use(callback: CallbackQuery):
     it, item = found
     key = it.get("key")
     gear = bool(item.get("slot"))
+    if item.get("use_kind"):   # расходники раздела «Дополнительно»
+        await _use_extra(callback, user, idx, it, item)
+        return
     if key not in MINE_ITEMS and not gear:
         await callback.answer("🚧 Использование этого предмета скоро появится.", show_alert=True)
         return
@@ -2105,18 +2494,246 @@ async def on_evo_do(callback: CallbackQuery):
     if idx is None:
         await callback.answer()
         return
-    err, success = evolve_item(user, idx)
+    info: dict = {}
+    err, success = evolve_item(user, idx, info)
     if err:
         await callback.answer(err, show_alert=True)
         return
+    idx = info.get("idx", idx)   # печать и камень могли исчезнуть из инвентаря и сдвинуть номера предметов
     D.save_users()
     it = inv_item(user, idx)[0]
+    seal_note = " 🍀 Печать удачи сработала." if info.get("seal") else ""
     if success:
-        await callback.answer(f"Эволюция удалась! Бонус эволюции: +{evo_bonus(evo_of(it))}%.", show_alert=True)
+        await callback.answer(f"Эволюция удалась! Бонус эволюции: +{evo_bonus(evo_of(it))}%.{seal_note}", show_alert=True)
         await D.show_rich_card(callback, "workshop", lambda wi: item_html(user, idx, wi), item_kb(user, idx))
         return
-    await callback.answer("Эволюция не удалась: ресурсы потрачены, предмет остался.", show_alert=True)
+    if info.get("refund"):
+        got = ", ".join(f"{RESOURCES[k][1]}{n}" for k, n in info["refund"].items())
+        await callback.answer(f"Эволюция не удалась, но 🗿 камень вернул: {got}. Предмет остался.{seal_note}", show_alert=True)
+    else:
+        await callback.answer("Эволюция не удалась: ресурсы потрачены, предмет остался." + seal_note, show_alert=True)
     if evo_of(it) >= MAX_EVO:   # на всякий случай
         await D.show_rich_card(callback, "workshop", lambda wi: item_html(user, idx, wi), item_kb(user, idx))
     else:
         await D.show_rich_card(callback, "workshop", lambda wi: evo_html(user, idx, wi), evo_kb(idx))
+
+
+# ---------------------------------------------------------------------------
+# Расходники раздела «Дополнительно»: экраны выбора и обработчики
+# ---------------------------------------------------------------------------
+
+def _res_btn(text: str, data: str, res_key: str) -> InlineKeyboardButton:
+    return _btn(text, data, RESOURCES[res_key][1], None)
+
+
+def pick_view(user: dict, key: str):
+    """Экран выбора для расходника вида «pick»: (функция html, клавиатура) или строка с причиной отказа."""
+    item = ITEMS[key]
+    back = _back(f"ws:grp:{key}:0")
+    body, rows, hint = "", [], ""
+    if key in HOURGLASS:
+        jobs = sorted(hourglass_targets(user, key), key=lambda j: j["slot"])
+        if not jobs:
+            return ("Сейчас в кузнице нечего ускорять." if HOURGLASS[key] < 1.0
+                    else "Мгновенно можно завершить только ковку базовых предметов и боезапаса.")
+        now = time.time()
+        hint = "Выбери слот, где идёт ковка."
+        body = "<p>⠀<br>" + "<br>".join(
+            f"{_em(ITEMS[j['item']]['emoji'])} <b>{escape(ITEMS[j['item']]['name'])}</b> — слот {j['slot']} · "
+            f"осталось {fmt_time(j['end'] - now)}" for j in jobs) + "</p>"
+        rows = [[_btn(f"Слот {j['slot']} · {fmt_time(j['end'] - now)}", f"ws:xh:{key}:{j['slot']}",
+                      ITEMS[j["item"]]["emoji"], ButtonStyle.SUCCESS)] for j in jobs]
+    elif key == "alchemy":
+        total = basic_total(user)
+        hint = "Выбери, какой редкий ресурс получить."
+        body = (f"<p>{DIV}<br><b>Нужно:</b> <code>{ALCHEMY_IN}</code> базовых ресурсов<br>"
+                f"<b>У тебя:</b> <code>{_n(total)}</code><br>"
+                f"<i>Списываются те ресурсы, которых у тебя больше всего.</i></p>")
+        rows = [[_res_btn(RESOURCES[r][0], f"ws:xa:{r}", r)] for r in RARE_RESOURCES]
+    elif key == "swap_token":
+        opts = [k for k in BASIC_RESOURCES if have(user, k) >= SWAP_IN]
+        if not opts:
+            return f"Нужно хотя бы {SWAP_IN} штук одного базового ресурса."
+        hint = f"Выбери, какой ресурс отдать: {SWAP_IN} штук превратятся в {SWAP_OUT} другого."
+        rows = _rows([_res_btn(f"{RESOURCES[k][0]} · {have(user, k)}", f"ws:xs:{k}", k) for k in opts], 2)
+    elif key == "backpack":
+        owned = [k for k, v in ITEMS.items() if not v.get("ammo") and any(o.get("key") == k for o in items_of(user))]
+        if not owned:
+            return "У тебя нет предметов, для которых можно расширить лимит."
+        opts = [k for k in owned if stack_cap(user, k) - STACK_MAX < BACKPACK_MAX]
+        if not opts:
+            return "Для всех твоих предметов лимит уже расширен до максимума."
+        hint = "Выбери предмет, для которого нужно расширить лимит."
+        body = f"<p>{DIV}<br><i>Сейчас можно иметь {STACK_MAX} одинаковых предметов, рюкзак добавит ещё один.</i></p>"
+        rows = [[_btn(f"{ITEMS[k]['name']} · {stack_cap(user, k)} → {stack_cap(user, k) + 1}", f"ws:xb:{k}",
+                      ITEMS[k]["emoji"], None)] for k in opts]
+    else:
+        return "Использование этого предмета скоро появится."
+    html = lambda wi: _img(wi) + _head(item["name"].upper(), item["emoji"], hint) + body
+    return html, InlineKeyboardMarkup(inline_keyboard=rows + [back])
+
+
+async def _after_use(callback: CallbackQuery, user: dict, key: str) -> None:
+    """Возврат к предмету после применения расходника; если он кончился, то в раздел."""
+    if group_stacks(user, key):
+        await _show_group(callback, user, key, 0)
+        return
+    cat = ITEMS[key]["category"]
+    pg = min(group_page_after(user, cat), _pages(len(groups_of(user, cat))) - 1)
+    await D.show_rich_card(callback, "workshop", lambda wi: category_html(user, cat, wi, pg), category_kb(user, cat, pg))
+
+
+async def _use_extra(callback: CallbackQuery, user: dict, idx: int, it: dict, item: dict) -> None:
+    """Кнопка «Использовать» у расходника из раздела «Дополнительно»."""
+    key, kind = it["key"], item["use_kind"]
+    if kind == "arm":   # включить / выключить (включённым может быть один предмет вида)
+        if it.get("use"):
+            it.pop("use", None)
+            msg = "Предмет не используется."
+        else:
+            for o in items_of(user):
+                if o.get("key") == key:
+                    o.pop("use", None)
+            it["use"] = True
+            msg = item.get("armed_msg", "Предмет включён.")
+        D.save_users()
+        await callback.answer(msg, show_alert=True)
+        await D.show_rich_card(callback, "workshop", lambda wi: item_html(user, idx, wi), item_kb(user, idx))
+        return
+    if key == "crate":
+        err, loot = crate_open(user)
+        if err:
+            await callback.answer(err, show_alert=True)
+            return
+        D.save_users()
+        got = ", ".join(f"{RESOURCES[k][1]}{n}" for k, n in loot.items())
+        await callback.answer(f"🎁 Из ящика выпало: {got}", show_alert=True)
+        await _after_use(callback, user, key)
+        return
+    if key == "bandolier":
+        err = bandolier_apply(user)
+        if err:
+            await callback.answer(err, show_alert=True)
+            return
+        D.save_users()
+        await callback.answer(f"📦 Бандольер применён: максимум зарядов каждого вида теперь {ammo_cap(user)}.", show_alert=True)
+        await _after_use(callback, user, key)
+        return
+    view = pick_view(user, key)   # остальные: экран выбора
+    if isinstance(view, str):
+        await callback.answer(view, show_alert=True)
+        return
+    await callback.answer()
+    html, kb = view
+    await D.show_rich_card(callback, "workshop", html, kb)
+
+
+def _parts(callback: CallbackQuery, n: int) -> list[str] | None:
+    parts = callback.data.split(":")
+    return parts if len(parts) >= n and all(parts[2:n]) else None
+
+
+@router.callback_query(F.data.startswith("ws:xh:"))
+async def on_x_hourglass(callback: CallbackQuery):
+    """Песочные часы: выбран слот."""
+    user = await _user_or_alert(callback)
+    if user is None:
+        return
+    parts = _parts(callback, 4)
+    try:
+        key, slot = parts[2], int(parts[3])
+    except (TypeError, IndexError, ValueError):
+        await callback.answer()
+        return
+    if key not in HOURGLASS:
+        await callback.answer()
+        return
+    done = settle(user)   # сначала забираем то, что уже готово: часы на готовую ковку не тратятся
+    err = hourglass_apply(user, key, slot)
+    if err:
+        if done:
+            D.save_users()
+        await callback.answer(err, show_alert=True)
+        return
+    done += settle(user)
+    D.save_users()
+    await callback.answer("⏳ Время ковки сокращено." if HOURGLASS[key] < 1.0 else "🕰️ Ковка завершена.")
+    await _show_forge(callback, user, _done_note(done))
+
+
+@router.callback_query(F.data.startswith("ws:xa:"))
+async def on_x_alchemy(callback: CallbackQuery):
+    """Алхимический состав: выбран редкий ресурс."""
+    user = await _user_or_alert(callback)
+    if user is None:
+        return
+    parts = _parts(callback, 3)
+    rare = parts[2] if parts else ""
+    err, _spent = alchemy_convert(user, rare)
+    if err:
+        await callback.answer(err, show_alert=True)
+        return
+    D.save_users()
+    await callback.answer(f"⚗️ Получено: {RESOURCES[rare][1]} {RESOURCES[rare][0]} ×{ALCHEMY_OUT}", show_alert=True)
+    await _after_use(callback, user, "alchemy")
+
+
+@router.callback_query(F.data.startswith("ws:xs:"))
+async def on_x_swap_src(callback: CallbackQuery):
+    """Обменный жетон: выбран отдаваемый ресурс, показываем, что можно получить."""
+    user = await _user_or_alert(callback)
+    if user is None:
+        return
+    parts = _parts(callback, 3)
+    src = parts[2] if parts else ""
+    if find_entry(user, "swap_token") is None:
+        await callback.answer("Обменного жетона нет в инвентаре.", show_alert=True)
+        return
+    if src not in BASIC_RESOURCES or have(user, src) < SWAP_IN:
+        await callback.answer(f"Не хватает ресурса: нужно {SWAP_IN}.", show_alert=True)
+        return
+    await callback.answer()
+    item = ITEMS["swap_token"]
+    name, em = RESOURCES[src]
+    hint = f"Отдаёшь: {name} ×{SWAP_IN}. Выбери, какой ресурс получить (×{SWAP_OUT})."
+    btns = [_res_btn(RESOURCES[k][0], f"ws:xg:{src}:{k}", k) for k in BASIC_RESOURCES if k != src]
+    kb = InlineKeyboardMarkup(inline_keyboard=_rows(btns, 2) + [_back("ws:grp:swap_token:0")])
+    await D.show_rich_card(callback, "workshop", lambda wi: _img(wi) + _head(item["name"].upper(), item["emoji"], hint), kb)
+
+
+@router.callback_query(F.data.startswith("ws:xg:"))
+async def on_x_swap_do(callback: CallbackQuery):
+    """Обменный жетон: выбран получаемый ресурс, обмен."""
+    user = await _user_or_alert(callback)
+    if user is None:
+        return
+    parts = _parts(callback, 4)
+    if not parts:
+        await callback.answer()
+        return
+    src, dst = parts[2], parts[3]
+    err = swap_resources(user, src, dst)
+    if err:
+        await callback.answer(err, show_alert=True)
+        return
+    D.save_users()
+    await callback.answer(f"🔁 Обмен выполнен: −{SWAP_IN} {RESOURCES[src][1]}, +{SWAP_OUT} {RESOURCES[dst][1]}", show_alert=True)
+    await _after_use(callback, user, "swap_token")
+
+
+@router.callback_query(F.data.startswith("ws:xb:"))
+async def on_x_backpack(callback: CallbackQuery):
+    """Рюкзак: выбран вид предмета."""
+    user = await _user_or_alert(callback)
+    if user is None:
+        return
+    parts = _parts(callback, 3)
+    target = parts[2] if parts else ""
+    err = backpack_apply(user, target)
+    if err:
+        await callback.answer(err, show_alert=True)
+        return
+    D.save_users()
+    await callback.answer(f"🧳 Лимит расширен: {ITEMS[target]['name']} — теперь можно иметь {stack_cap(user, target)}.",
+                          show_alert=True)
+    await _after_use(callback, user, "backpack")
