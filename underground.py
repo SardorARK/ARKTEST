@@ -451,7 +451,8 @@ def ore_weights(gold_extra: float = 0.0) -> dict[str, float]:
     return {k: w[k] for k in ORES}
 
 
-def roll_totals(pick: dict, minutes: float, bonus: float = 0, gold_extra: float = 0.0) -> dict[str, int]:
+def roll_totals(pick: dict, minutes: float, bonus: float = 0, gold_extra: float = 0.0,
+                mineral_extra: float = 0.0) -> dict[str, int]:
     """Весь запуск целиком: сколько штук каждой добычи он даст (уже с множителем шахты).
     Руда: случайное число из диапазона шахты и случайный состав по шансам ORES.
     Минералы: СТАБИЛЬНО, всегда одинаково (см. mineral_drops). bonus: бонус времени запуска в %.
@@ -464,7 +465,7 @@ def roll_totals(pick: dict, minutes: float, bonus: float = 0, gold_extra: float 
     for k in random.choices(keys, [w[k] for k in keys], k=n_ore):
         tot[k] += 1
     tot = {k: v * pick["qty"] for k, v in tot.items()}
-    tot["mineral"] = mineral_drops(pick, minutes, bonus)
+    tot["mineral"] = mineral_drops(pick, minutes, bonus + mineral_extra)   # фонарь: бонус только минералам
     return tot
 
 
@@ -1261,13 +1262,13 @@ async def on_start(callback: CallbackQuery):
     now = time.time()
 
     # Предметы мастерской: лучший из каждого вида (кирка, верёвка, аптечка) работает на этот запуск
-    ore_b = gold_b = time_b = 0.0
+    ore_b = gold_b = time_b = min_b = 0.0
     used: list = []
     ws = _ws()
     if ws is not None:
         try:
             fx = ws.mine_items_apply(user)
-            ore_b, gold_b, time_b, used = fx["ore"], fx["gold"], fx["time"], fx["used"]
+            ore_b, gold_b, time_b, min_b, used = fx["ore"], fx["gold"], fx["time"], fx["mineral"], fx["used"]
         except Exception:
             log.warning("Шахта: не удалось применить предметы", exc_info=True)
 
@@ -1277,7 +1278,7 @@ async def on_start(callback: CallbackQuery):
         "end": now + real_min * 60,
         "pick": i,
         "dur": minutes,
-        "tot": roll_totals(p, real_min, bonus + ore_b, gold_b),
+        "tot": roll_totals(p, real_min, bonus + ore_b, gold_b, min_b),
         "got": {},
     }
     if used:
