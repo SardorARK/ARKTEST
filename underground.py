@@ -62,6 +62,16 @@ def _ws():
         return None
 
 
+def _sets():
+    """Модуль «Наборов» (workshop_sets). Если его нет или он сломан, шахта работает без наборов."""
+    try:
+        import workshop_sets
+        return workshop_sets
+    except Exception:
+        log.debug("Шахта: наборы недоступны", exc_info=True)
+        return None
+
+
 def setup(**deps) -> None:
     """Передаём модулю функции и эмодзи из main.py.
     Нужны: get_user, save_users, send_rich_card, show_rich_card, custom_emoji,
@@ -91,6 +101,34 @@ ORES: dict[str, dict] = {
     "gold": {"name": "Золото", "icon": "🥇", "price": 40, "weight": 1,       # 1%
              "emoji": ("6278282858561803026", "🥇")},
 }
+
+# ---------- Наборы в шахте ----------
+# Игрок находит наборы (workshop_sets) прямо при добыче. Они попадают в «Добыто» и забираются кнопкой «Забрать».
+# Всё считается по МИНУТАМ работы шахты, а не по числу запусков: перезапускать шахту ради наборов не выгодно.
+#
+# 1) СТАРТ: в первые SET_START_HOURS часов работы шахты (суммарно, не по календарю) игрок гарантированно находит
+#    набранное число наборов. Число бросается один раз на игрока, время находок случайное; первая находка
+#    приходит в первые часы. Остановка запуска не теряет находки: незабранные вернутся в следующий запуск.
+# 2) ПОТОМ: обычные шансы в час работы, зависят от номера шахты (1-30, 31-60, 61-90).
+#    Мягкий лимит: после SET_DAILY_FULL находок за календарный день шанс умножается на SET_DAILY_AFTER.
+SETS_ENABLED = True
+SET_START_HOURS = 24                       # сколько часов работы шахты длится стартовая схема
+SET_START = {                              # ключ набора: (от, до) штук за стартовые часы
+    "basic": (5, 8),                       # Базовый набор
+    "elite": (1, 3),                       # Элитный набор
+}
+SET_START_EXTRA = {"items": 0.40}          # необязательные: шанс (0-1), что за стартовые часы найдётся 1 такой набор
+SET_START_FIRST = (0.3, 2.0)               # первая находка Базового набора: между этими часами работы
+SET_CHUNK_H = 0.25                         # шаг броска обычного шанса: раз в 15 минут работы
+
+# шансы набора за ЧАС работы шахты: (шахты 1-30, 31-60, 61-90). Ключи = ключи SETS в workshop_sets.py
+SET_RATES = (
+    {"basic": 0.30, "elite": 0.02, "legend": 0.00, "items": 0.02, "gear": 0.02, "ammo": 0.02, "wonder": 0.02},
+    {"basic": 0.20, "elite": 0.08, "legend": 0.01, "items": 0.03, "gear": 0.03, "ammo": 0.03, "wonder": 0.03},
+    {"basic": 0.10, "elite": 0.12, "legend": 0.03, "items": 0.04, "gear": 0.04, "ammo": 0.04, "wonder": 0.04},
+)
+SET_DAILY_FULL = 3                         # столько находок в день с полным шансом
+SET_DAILY_AFTER = 0.5                      # дальше шанс умножается на это число (1 = лимита нет)
 
 # ---------- Время запуска (улучшение, как экспедиции) ----------
 # (минут, цена открытия в монетах, бонус к добыче в %, подпись).
@@ -320,7 +358,7 @@ def get_ug(user: dict) -> dict:
         ug = user["ug"] = {}
         changed = True
     for key, default in (("ores", {}), ("pending", {}), ("run", None),
-                         ("last_end", 0.0), ("sel", 0), ("dur_open", 1), ("dur_sel", 0)):
+                         ("last_end", 0.0), ("sel", 0), ("dur_open", 1), ("dur_sel", 0), ("sets", {})):
         if key not in ug:
             ug[key] = default
             changed = True
@@ -473,6 +511,128 @@ def roll_totals(pick: dict, minutes: float, bonus: float = 0, gold_extra: float 
     return tot
 
 
+# ---------- Наборы: броски и выдача ----------
+# Находки запуска хранятся в run["sets"] = [[ключ_набора, доля_запуска (0-1), 1 если обычный шанс], ...] по возрастанию доли.
+# settle() кладёт их в pending["set_<ключ>"], когда доля пройдена; on_collect выдаёт их через workshop_sets.give_set.
+# user["ug"]["sets"] = {"hours": всего часов работы шахты, "plan": стартовый план или None, "days": {"ГГГГ-ММ-ДД": находок}}
+
+def _set_state(ug: dict) -> dict:
+    st = ug.get("sets")
+    if not isinstance(st, dict):
+        st = ug["sets"] = {}
+    if not isinstance(st.get("hours"), (int, float)):
+        st["hours"] = 0.0
+    if not isinstance(st.get("days"), dict):
+        st["days"] = {}
+    st.setdefault("plan", None)
+    return st
+
+
+def _spread(n: int) -> list[float]:
+    """n случайных моментов (в часах работы) на стартовые SET_START_HOURS: первый рано, остальные ровно по отрезку."""
+    lo, hi = SET_START_FIRST
+    times = [random.uniform(lo, min(hi, SET_START_HOURS))]
+    rest = n - 1
+    if rest > 0:
+        width = (SET_START_HOURS - hi) / rest
+        times += [hi + (i + random.random()) * width for i in range(rest)]
+    return [round(t, 3) for t in times]
+
+
+def _make_plan() -> dict:
+    """Стартовый план: {ключ набора: [часы работы шахты, когда он найдётся]}. Бросается один раз на игрока."""
+    plan: dict = {}
+    for key, (lo, hi) in SET_START.items():
+        n = random.randint(lo, hi)
+        if n > 0:
+            plan[key] = _spread(n) if key == "basic" else sorted(
+                max(0.01, round((i + random.random()) * SET_START_HOURS / n, 3)) for i in range(n))
+    for key, chance in SET_START_EXTRA.items():
+        if random.random() < chance:
+            plan[key] = [round(random.uniform(SET_START_HOURS / 6, SET_START_HOURS), 3)]
+    return plan
+
+
+def _set_tier(pick: dict) -> int:
+    n = int(pick["n"])
+    return 0 if n <= 30 else 1 if n <= 60 else 2
+
+
+def _day_of(ts: float) -> str:
+    return time.strftime("%Y-%m-%d", time.localtime(ts))
+
+
+def roll_set_events(ug: dict, pick: dict, real_min: float, now: float) -> list:
+    """Бросает находки наборов на весь запуск (вызывать один раз при старте, после создания run).
+    Прибавляет часы работы и дневные счётчики. Возвращает список событий для run["sets"]."""
+    if not SETS_ENABLED or real_min <= 0:
+        return []
+    st = _set_state(ug)
+    h0 = float(st["hours"])
+    hours = real_min / 60
+    h1 = h0 + hours
+    st["hours"] = h1
+    events: list = []
+
+    # 1) стартовый план: находки, чьё время попало в часы этого запуска
+    if h0 < SET_START_HOURS:
+        if not isinstance(st.get("plan"), dict):
+            st["plan"] = _make_plan()
+        for key, times in st["plan"].items():
+            for t in times:
+                if h0 < t <= h1:
+                    events.append([key, round((t - h0) / hours, 5), 0])
+
+    # 2) обычные шансы: для часов работы после стартовых
+    start_h = max(h0, float(SET_START_HOURS))
+    if h1 > start_h:
+        rates = SET_RATES[_set_tier(pick)]
+        days = st["days"]
+        pos = start_h
+        while pos < h1 - 1e-9:
+            ln = min(SET_CHUNK_H, h1 - pos)
+            pos += ln
+            frac = min(1.0, (pos - h0) / hours)
+            day = _day_of(now + (pos - h0) * 3600)
+            for key, rate in rates.items():
+                if rate <= 0:
+                    continue
+                p = rate * ln
+                if int(days.get(day, 0)) >= SET_DAILY_FULL:
+                    p *= SET_DAILY_AFTER
+                if random.random() < p:
+                    events.append([key, round(frac, 5), 1])
+                    days[day] = int(days.get(day, 0)) + 1
+        for old in sorted(days)[:-6]:           # хранится только последние дни
+            days.pop(old, None)
+    events.sort(key=lambda e: e[1])
+    return events
+
+
+def set_rewind(ug: dict, run: dict, now: float) -> None:
+    """Запуск остановлен раньше срока: вернуть непрошедшие часы работы и дневные счётчики,
+    чтобы ненайденное не пропало (стартовый план сработает позже сам: он привязан к часам)."""
+    if "set_h0" not in run:
+        return
+    st = _set_state(ug)
+    span = max(1.0, run["end"] - run["start"])
+    done = max(0.0, min(1.0, (now - run["start"]) / span))
+    st["hours"] = max(0.0, float(run["set_h0"]) + float(run.get("set_hours", 0)) * done)
+    evs = run.get("sets") or []
+    for key, frac, normal in evs[int(run.get("sets_given", 0)):]:
+        if normal:
+            day = _day_of(run["start"] + frac * span)
+            st["days"][day] = max(0, int(st["days"].get(day, 0)) - 1)
+
+
+def set_name(key: str) -> str:
+    ws = _sets()
+    try:
+        return f"{ws.SETS[key]['emoji']} {ws.SETS[key]['name']}"
+    except Exception:
+        return key
+
+
 def settle(ug: dict) -> bool:
     """Открывает добычу за прошедшее время и кладёт в «добыто». True, если что-то изменилось."""
     run = ug["run"]
@@ -505,6 +665,16 @@ def settle(ug: dict) -> bool:
                 ug["pending"][key] = int(ug["pending"].get(key, 0)) + diff
                 got[key] = target
                 changed = True
+        evs = run.get("sets")                 # находки наборов: выдаются, когда пройдена их доля запуска
+        if evs:
+            frac = 1.0 if now >= run["end"] else (now - run["start"]) / span
+            g = int(run.get("sets_given", 0))
+            while g < len(evs) and evs[g][1] <= frac + 1e-9:
+                pk = "set_" + str(evs[g][0])
+                ug["pending"][pk] = int(ug["pending"].get(pk, 0)) + 1
+                g += 1
+                changed = True
+            run["sets_given"] = g
     else:                                     # старый формат: сегменты по минутам
         segs = run["segs"]
         total = len(segs)
@@ -635,6 +805,9 @@ def selected(ug: dict) -> int:
 def _found_rows(ug: dict) -> list:
     rows = [(f"{_oi(k)} {o['name']}", fmt(ug['pending'][k])) for k, o in ORES.items()]
     rows.append((f"{D.MINERAL_EMOJI} Минералы", fmt(ug['pending']['mineral'])))
+    for k, n in ug["pending"].items():        # наборы показываются, только когда что-то найдено
+        if k.startswith("set_") and int(n) > 0:
+            rows.append((set_name(k[4:]), fmt(n)))
     return rows
 
 
@@ -1288,6 +1461,12 @@ async def on_start(callback: CallbackQuery):
     }
     if used:
         ug["run"]["used"] = used     # показывается в блоке «Используемые предметы»
+    try:
+        h0 = float(_set_state(ug)["hours"])
+        evs = roll_set_events(ug, p, real_min, now)
+        ug["run"].update({"sets": evs, "sets_given": 0, "set_h0": h0, "set_hours": real_min / 60})
+    except Exception:
+        log.warning("Шахта: не удалось бросить наборы", exc_info=True)
     _ach("on_ug_start", user)
     D.save_users()
     _active.add(callback.from_user.id)
@@ -1313,6 +1492,10 @@ async def on_stop(callback: CallbackQuery):
     if wait > 0:
         await callback.answer(f"Остановить можно через {math.ceil(wait)} сек.", show_alert=True)
         return
+    try:
+        set_rewind(ug, run, now)
+    except Exception:
+        log.warning("Шахта: не удалось вернуть часы наборов", exc_info=True)
     ug["last_end"] = now
     ug["run"] = None
     D.save_users()
@@ -1341,9 +1524,21 @@ async def on_collect(callback: CallbackQuery):
     pend["mineral"] = 0
     if minerals:
         user[D.MINERALS_FIELD] = int(user.get(D.MINERALS_FIELD, 0) or 0) + minerals
+    got_sets: dict = {}
+    wsets = _sets()
+    if wsets is not None:                     # наборы из «Добыто» идут в раздел «Наборы» (если модуля нет, ждут в «Добыто»)
+        for k in [k for k in pend if k.startswith("set_")]:
+            n, key = int(pend[k]), k[4:]
+            if n > 0 and key in wsets.SETS:
+                wsets.give_set(user, key, n)
+                got_sets[key] = n
+                pend[k] = 0
     _ach("on_ug_collect", user, ore_got, minerals)
     D.save_users()
     note = f"Минералов: +{fmt(minerals)}. " if minerals else ""
+    if got_sets:
+        note += "Наборы: " + ", ".join(f"{wsets.SETS[k]['name']} ×{n}" for k, n in got_sets.items()) + ". "
+        note = note[:150]
     await callback.answer(f"{note}Руда в рюкзаке.")
     await _show(callback, "ug")
 
