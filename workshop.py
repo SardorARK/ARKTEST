@@ -156,6 +156,18 @@ ITEMS = {
         "note": "Сработает 3 раза, отмена тоже тратит 1",
         "bonus": ("Время работы шахты", 1.10),
     },
+    "lantern": {
+        "name": "Шахтёрский фонарь",
+        "emoji": "🔦",
+        "category": "items",
+        "rarity": "Редкий",
+        "desc": "Яркий свет эссенции выхватывает из темноты редкие жилы. В шахте находится больше минералов.",
+        "cost": {"iron": 20, "light_essence": 3, "resin": 12, "thread": 20},
+        "seconds": 45 * 60,
+        "uses": 4,            # сработает 4 раза (не восстанавливается)
+        "note": "Сработает 4 раза",
+        "bonus": ("Минералы шахты", 1.15),
+    },
     "campfire": {
         "name": "Костёр",
         "emoji": "🏕️",
@@ -317,15 +329,15 @@ GOLD_CHANCE_CAP = 8.0   # итоговый шанс золота в шахте �
 # Сколько прочности предмет теряет за один запуск шахты. Предметы «на n использований» тратят 1 использование.
 MINE_WEAR = {"pickaxe": 5, "rope": 5}
 # Какие предметы работают в шахте и какой эффект дают: ключ -> тип эффекта
-MINE_ITEMS = {"pickaxe": "ore", "rope": "gold", "medkit": "time"}
+MINE_ITEMS = {"pickaxe": "ore", "rope": "gold", "medkit": "time", "lantern": "mineral"}
 
 
 def mine_items_apply(user: dict) -> dict:
     """Применяет в шахте только те предметы, которые игрок сам включил кнопкой «Использовать» (флаг "use"),
     и списывает износ. Сам по себе ничего не берётся.
-    Возвращает {"ore": %, "gold": пункты, "time": %, "used": [{"key", "lvl", "evo", "bonus"}]}.
+    Возвращает {"ore": %, "gold": пункты, "time": %, "mineral": %, "used": [{"key", "lvl", "evo", "bonus"}]}.
     Если подходящих предметов нет, used пустой, а бонусы нулевые."""
-    res = {"ore": 0.0, "gold": 0.0, "time": 0.0, "used": []}
+    res = {"ore": 0.0, "gold": 0.0, "time": 0.0, "mineral": 0.0, "used": []}
     lst = items_of(user)
     for key, kind in MINE_ITEMS.items():
         item = ITEMS.get(key)
@@ -956,7 +968,7 @@ def item_html(user: dict, idx: int, with_image: bool) -> str:
         text += f"<p>{gap}<b>❤️ Осталось использований:</b> <code>{dur} / {mx}</code><br>{_bar(dur, mx)}</p>"
 
     if it.get("use") and it.get("key") in MINE_ITEMS:
-        text += f"<p>{gap}</p><blockquote>✅ Используется</blockquote>"
+        text += f"<p>{gap}</p><blockquote><i>✅ Используется</i></blockquote>"
 
     legend = []
     if can_upgrade(item):
