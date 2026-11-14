@@ -123,9 +123,9 @@ SET_CHUNK_H = 0.25                         # шаг броска обычног�
 
 # шансы набора за ЧАС работы шахты: (шахты 1-30, 31-60, 61-90). Ключи = ключи SETS в workshop_sets.py
 SET_RATES = (
-    {"basic": 0.30, "elite": 0.02, "legend": 0.00, "items": 0.02, "gear": 0.02, "ammo": 0.02, "wonder": 0.02},
-    {"basic": 0.20, "elite": 0.08, "legend": 0.01, "items": 0.03, "gear": 0.03, "ammo": 0.03, "wonder": 0.03},
-    {"basic": 0.10, "elite": 0.12, "legend": 0.03, "items": 0.04, "gear": 0.04, "ammo": 0.04, "wonder": 0.04},
+    {"basic": 0.45, "elite": 0.02, "legend": 0.00, "items": 0.02, "gear": 0.02, "ammo": 0.02, "wonder": 0.02},
+    {"basic": 0.30, "elite": 0.08, "legend": 0.01, "items": 0.03, "gear": 0.03, "ammo": 0.03, "wonder": 0.03},
+    {"basic": 0.18, "elite": 0.12, "legend": 0.03, "items": 0.04, "gear": 0.04, "ammo": 0.04, "wonder": 0.04},
 )
 SET_DAILY_FULL = 3                         # столько находок в день с полным шансом
 SET_DAILY_AFTER = 0.5                      # дальше шанс умножается на это число (1 = лимита нет)
@@ -358,7 +358,7 @@ def get_ug(user: dict) -> dict:
         ug = user["ug"] = {}
         changed = True
     for key, default in (("ores", {}), ("pending", {}), ("run", None),
-                         ("last_end", 0.0), ("sel", 0), ("dur_open", 1), ("dur_sel", 0), ("sets", {})):
+                         ("last_end", 0.0), ("sel", 0), ("dur_open", 1), ("dur_sel", 0), ("sets", {}), ("found", {})):
         if key not in ug:
             ug[key] = default
             changed = True
@@ -513,7 +513,8 @@ def roll_totals(pick: dict, minutes: float, bonus: float = 0, gold_extra: float 
 
 # ---------- Наборы: броски и выдача ----------
 # Находки запуска хранятся в run["sets"] = [[ключ_набора, доля_запуска (0-1), 1 если обычный шанс], ...] по возрастанию доли.
-# settle() кладёт их в pending["set_<ключ>"], когда доля пройдена; on_collect выдаёт их через workshop_sets.give_set.
+# settle(ug, user) сразу выдаёт игроку набор (workshop_sets.give_set), когда доля пройдена, и записывает его в ug["found"]
+# (строка «Найдено» на экране шахты; сбрасывается при новом запуске). Если модуля наборов нет, набор ждёт в pending["set_<ключ>"].
 # user["ug"]["sets"] = {"hours": всего часов работы шахты, "plan": стартовый план или None, "days": {"ГГГГ-ММ-ДД": находок}}
 
 def _set_state(ug: dict) -> dict:
@@ -625,6 +626,25 @@ def set_rewind(ug: dict, run: dict, now: float) -> None:
             st["days"][day] = max(0, int(st["days"].get(day, 0)) - 1)
 
 
+def _flush_sets(user: dict, ug: dict) -> bool:
+    """Переносит найденные наборы из pending["set_<ключ>"] игроку (раздел «Наборы»). True, если что-то перенесено."""
+    pend = ug.get("pending", {})
+    keys = [k for k in pend if k.startswith("set_") and int(pend[k]) > 0]
+    if not keys:
+        return False
+    ws = _sets()
+    if ws is None:
+        return False
+    moved = False
+    for k in keys:
+        n, key = int(pend[k]), k[4:]
+        if key in ws.SETS:
+            ws.give_set(user, key, n)
+            pend[k] = 0
+            moved = True
+    return moved
+
+
 def set_name(key: str) -> str:
     ws = _sets()
     try:
@@ -633,7 +653,7 @@ def set_name(key: str) -> str:
         return key
 
 
-def settle(ug: dict) -> bool:
+def settle(ug: dict, user: dict | None = None) -> bool:
     """Открывает добычу за прошедшее время и кладёт в «добыто». True, если что-то изменилось."""
     run = ug["run"]
     if run is None:
@@ -641,6 +661,8 @@ def settle(ug: dict) -> bool:
     now = time.time()
     span = max(1.0, run["end"] - run["start"])
     changed = False
+    if user is not None and _flush_sets(user, ug):
+        changed = True
 
     if "plan" in run:                         # старый формат: символ на копание, множители ×1
         plan = run["plan"]
@@ -672,9 +694,13 @@ def settle(ug: dict) -> bool:
             while g < len(evs) and evs[g][1] <= frac + 1e-9:
                 pk = "set_" + str(evs[g][0])
                 ug["pending"][pk] = int(ug["pending"].get(pk, 0)) + 1
+                found = ug.setdefault("found", {})
+                found[str(evs[g][0])] = int(found.get(str(evs[g][0]), 0)) + 1
                 g += 1
                 changed = True
             run["sets_given"] = g
+            if user is not None:
+                _flush_sets(user, ug)
     else:                                     # старый формат: сегменты по минутам
         segs = run["segs"]
         total = len(segs)
@@ -706,7 +732,7 @@ def bag_value(ug: dict) -> int:
 def load(user_id: int) -> tuple[dict, dict]:
     user = D.get_user(user_id) or {"coins": 0}
     ug = get_ug(user)
-    if settle(ug):
+    if settle(ug, user):
         D.save_users()
     if ug["run"] is not None:
         _active.add(user_id)                     # фоновый цикл начнёт его вести
@@ -736,7 +762,7 @@ async def background_loop() -> None:
                 if ug["run"] is None:
                     _active.discard(uid)
                     continue
-                if settle(ug):
+                if settle(ug, user):
                     changed = True
             except Exception:
                 logging.exception("Шахта: ошибка фонового начисления у %s", uid)
@@ -805,10 +831,14 @@ def selected(ug: dict) -> int:
 def _found_rows(ug: dict) -> list:
     rows = [(f"{_oi(k)} {o['name']}", fmt(ug['pending'][k])) for k, o in ORES.items()]
     rows.append((f"{D.MINERAL_EMOJI} Минералы", fmt(ug['pending']['mineral'])))
-    for k, n in ug["pending"].items():        # наборы показываются, только когда что-то найдено
-        if k.startswith("set_") and int(n) > 0:
-            rows.append((set_name(k[4:]), fmt(n)))
     return rows
+
+
+def _sets_found_block(ug: dict) -> str:
+    """Отдельная строка «Найдено»: наборы, найденные в этом запуске. Пусто, если ничего не найдено."""
+    found = ug.get("found") or {}
+    rows = [(set_name(k), "×" + fmt(n)) for k, n in found.items() if int(n) > 0]
+    return (_gap() + _quote("Найдено", rows)) if rows else ""
 
 
 def _dur_label(minutes: int) -> str:
@@ -863,6 +893,7 @@ def ug_html(user_id: int, with_image: bool = False) -> str:
         + _gap()
         + _used_block(run)
         + _quote("Добыто", _found_rows(ug), expandable=True)
+        + _sets_found_block(ug)
     )
 
 
@@ -1430,7 +1461,7 @@ async def on_start(callback: CallbackQuery):
         await callback.answer()
         return
     ug = get_ug(user)
-    settle(ug)
+    settle(ug, user)
     if not await _check_can_run(callback, user, ug, i):
         return
 
@@ -1461,6 +1492,7 @@ async def on_start(callback: CallbackQuery):
     }
     if used:
         ug["run"]["used"] = used     # показывается в блоке «Используемые предметы»
+    ug["found"] = {}                 # строка «Найдено» показывает наборы только этого запуска
     try:
         h0 = float(_set_state(ug)["hours"])
         evs = roll_set_events(ug, p, real_min, now)
@@ -1481,7 +1513,7 @@ async def on_stop(callback: CallbackQuery):
     if user is None:
         return
     ug = get_ug(user)
-    settle(ug)
+    settle(ug, user)
     run = ug["run"]
     if run is None:
         await callback.answer("Шахта уже не работает.")
@@ -1509,7 +1541,7 @@ async def on_collect(callback: CallbackQuery):
     if user is None:
         return
     ug = get_ug(user)
-    settle(ug)
+    settle(ug, user)
     pend = ug["pending"]
     if pending_total(ug) < 1:
         await callback.answer("Пока нечего забирать.", show_alert=True)
