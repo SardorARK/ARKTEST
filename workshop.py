@@ -661,7 +661,7 @@ for _k, _x in EXTRA.items():
 def dmg_text(item: dict) -> str:
     """Строка урона для характеристик: «1567-2564 за удар». Пусто, если у предмета нет урона."""
     d = item.get("dmg")
-    return f"{d[0]}-{d[1]} {item.get('dmg_unit', 'за удар')}" if d else ""
+    return f"{short_num(d[0])}-{short_num(d[1])} {item.get('dmg_unit', 'за удар')}" if d else ""
 
 
 def roll_damage(item: dict, lvl: int = 0) -> int:
@@ -865,7 +865,7 @@ def ammo_dmg_at(key: str, lvl: int) -> tuple[int, int] | None:
 
 def ammo_dmg_text(key: str, lvl: int) -> str:
     d = ammo_dmg_at(key, lvl)
-    return f"{d[0]}-{d[1]} {ITEMS[key].get('dmg_unit', 'за выстрел')}" if d else ""
+    return f"{short_num(d[0])}-{short_num(d[1])} {ITEMS[key].get('dmg_unit', 'за выстрел')}" if d else ""
 
 
 def roll_ammo_damage(key: str, lvl: int = 0) -> int:
@@ -1051,7 +1051,7 @@ def gear_fx(item: dict, lvl: int = 0) -> dict:
 
 def gear_dmg_text(item: dict, lvl: int = 0) -> str:
     d = gear_dmg_at(item, lvl)
-    return f"{d[0]}-{d[1]} {item.get('dmg_unit', 'за удар')}" if d else ""
+    return f"{short_num(d[0])}-{short_num(d[1])} {item.get('dmg_unit', 'за удар')}" if d else ""
 
 
 def gear_stats(item: dict, lvl: int = 0) -> list[str]:
@@ -1769,13 +1769,25 @@ def start_craft(user: dict, item_key: str, slot: int, now: float | None = None, 
     return None
 
 
-def short_num(n: int) -> str:
-    """50000 -> 50к, 1500000 -> 1.5м."""
-    if n >= 1_000_000:
-        return f"{n / 1_000_000:g}м"
-    if n >= 1_000:
-        return f"{n / 1_000:g}к"
-    return str(n)
+NUMBER_SUFFIXES = ("", "K", "M", "B", "T", "Qa", "Qi", "Sx", "Sp", "Oc", "No", "Dc")
+
+
+def short_num(n) -> str:
+    """Короткая запись чисел, как в main.py: 999, 1K, 1.5K, 1M, 2.35B, 1T, 1Qa и так далее.
+    Без округления вверх: 999 999 это 999.99K, а не 1000K."""
+    n = int(n)
+    sign = "\u2212" if n < 0 else ""
+    a = abs(n)
+    if a < 1000:
+        return f"{sign}{a}"
+    idx = 1
+    while idx < len(NUMBER_SUFFIXES) - 1 and a >= 1000 ** (idx + 1):
+        idx += 1
+    div = 1000 ** idx
+    whole, frac = divmod(a, div)
+    text = f"{whole}.{frac * 100 // div:02d}".rstrip("0").rstrip(".")
+    return f"{sign}{text}{NUMBER_SUFFIXES[idx]}"
+
 
 
 def fmt_time(sec: float) -> str:
@@ -1790,7 +1802,7 @@ def fmt_time(sec: float) -> str:
 
 
 def _n(v: int) -> str:
-    return f"{v:,}".replace(",", " ")
+    return short_num(v)
 
 
 def _f(v: int) -> str:
