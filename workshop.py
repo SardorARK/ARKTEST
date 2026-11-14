@@ -405,7 +405,7 @@ GEAR = {
         "fx": {"armor_pierce": 0.0},
     },
     "iron_claw": {
-        "name": "Железный коготь", "emoji": "🐾", "rarity": "Редкий", "slot": "weapon",
+        "name": "Железный коготь", "emoji": ("5222092843618674743", "✏️"), "rarity": "Редкий", "slot": "weapon",
         "desc": "Стальные накладки на когти питомца. Рвут шкуру и находят щели в броне.",
         "cost": {"iron": 25, "leather": 10, "thread": 12, "bone": 10}, "seconds": 45 * 60, "durability": 150,
         "dmg": (1567, 2564), "dmg_unit": "за удар", "stats": ["Игнорирует 15% брони босса"],
@@ -419,7 +419,7 @@ GEAR = {
         "fx": {"burn_turns": 2, "burn_damage": 0.3},
     },
     "ice_spike": {
-        "name": "Ледяной шип", "emoji": "🧊", "rarity": "Эпический", "slot": "weapon",
+        "name": "Ледяной шип", "emoji": ("5971860706046250954", "🧊"), "rarity": "Эпический", "slot": "weapon",
         "desc": "Шип из вечного льда. Враг, которого он задел, двигается как в густом киселе.",
         "cost": {"ice_shard": 5, "iron": 18, "bone": 15, "thread": 15}, "seconds": 90 * 60, "durability": 200,
         "dmg": (2600, 4100), "dmg_unit": "за удар", "stats": ["Замедляет босса на 1 ход"],
