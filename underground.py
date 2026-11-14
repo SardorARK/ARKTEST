@@ -437,10 +437,10 @@ def minerals_range(p: dict, minutes: int) -> tuple[int, int]:
     return v, v
 
 
-GOLD_CHANCE_CAP = 8.0    # золото в шахте не может выпадать чаще, чем в 8% случаев руды (защита экономики)
+GOLD_CHANCE_CAP = 9.0    # золото в шахте не может выпадать чаще, чем в 9% случаев руды (верёвка до 8% + талисман, защита экономики)
 
 
-def ore_weights(gold_extra: float = 0.0) -> dict[str, float]:
+def ore_weights(gold_extra: float = 0.0, compass: float = 0.0) -> dict[str, float]:
     """Шансы руд (всего 100). Золото: базовый шанс из ORES + прибавка верёвки, но не больше GOLD_CHANCE_CAP.
     Остальные руды делят оставшиеся проценты в прежних пропорциях."""
     gold = min(GOLD_CHANCE_CAP, max(0.0, ORES["gold"]["weight"] + gold_extra))
@@ -448,11 +448,15 @@ def ore_weights(gold_extra: float = 0.0) -> dict[str, float]:
     scale = (100 - gold) / sum(others.values())
     w = {k: v * scale for k, v in others.items()}
     w["gold"] = gold
+    shift = min(max(0.0, compass), w["stone"] - 1)   # компас: пункты шанса от камня к меди (2/3) и железу (1/3)
+    w["stone"] -= shift
+    w["copper"] += shift * 2 / 3
+    w["iron"] += shift / 3
     return {k: w[k] for k in ORES}
 
 
 def roll_totals(pick: dict, minutes: float, bonus: float = 0, gold_extra: float = 0.0,
-                mineral_extra: float = 0.0) -> dict[str, int]:
+                mineral_extra: float = 0.0, compass: float = 0.0) -> dict[str, int]:
     """Весь запуск целиком: сколько штук каждой добычи он даст (уже с множителем шахты).
     Руда: случайное число из диапазона шахты и случайный состав по шансам ORES.
     Минералы: СТАБИЛЬНО, всегда одинаково (см. mineral_drops). bonus: бонус времени запуска в %.
@@ -461,7 +465,7 @@ def roll_totals(pick: dict, minutes: float, bonus: float = 0, gold_extra: float 
     n_ore = round(random.randint(lo, hi) * (100 - MINERAL_CHANCE) / 100 * (100 + bonus) / 100)
     tot = {k: 0 for k in ORES}
     keys = list(ORES)
-    w = ore_weights(gold_extra)
+    w = ore_weights(gold_extra, compass)
     for k in random.choices(keys, [w[k] for k in keys], k=n_ore):
         tot[k] += 1
     tot = {k: v * pick["qty"] for k, v in tot.items()}
@@ -1262,13 +1266,14 @@ async def on_start(callback: CallbackQuery):
     now = time.time()
 
     # Предметы мастерской: лучший из каждого вида (кирка, верёвка, аптечка) работает на этот запуск
-    ore_b = gold_b = time_b = min_b = 0.0
+    ore_b = gold_b = time_b = min_b = compass_b = 0.0
     used: list = []
     ws = _ws()
     if ws is not None:
         try:
-            fx = ws.mine_items_apply(user)
+            fx = ws.mine_items_apply(user, minutes)
             ore_b, gold_b, time_b, min_b, used = fx["ore"], fx["gold"], fx["time"], fx["mineral"], fx["used"]
+            compass_b = fx["compass"]
         except Exception:
             log.warning("Шахта: не удалось применить предметы", exc_info=True)
 
@@ -1278,7 +1283,7 @@ async def on_start(callback: CallbackQuery):
         "end": now + real_min * 60,
         "pick": i,
         "dur": minutes,
-        "tot": roll_totals(p, real_min, bonus + ore_b, gold_b, min_b),
+        "tot": roll_totals(p, real_min, bonus + ore_b, gold_b, min_b, compass_b),
         "got": {},
     }
     if used:
