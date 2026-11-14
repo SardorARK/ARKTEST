@@ -1797,14 +1797,7 @@ def category_html(user: dict, key: str, with_image: bool, page: int = 0) -> str:
         if not owned:
             return text + (f"<p>{DIV}<br><b>Пока пусто</b><br>Зарядов нет. Создай их в «Кузнице»: "
                            "они пригодятся против боссов.</p>")
-        lines = []
-        for k, a in owned:
-            line = f"{_em(a['emoji'])} <b>{escape(a['name'])}</b> — <code>{ammo_count(user, k)}</code>"
-            top = max(ammo_levels(user, k))
-            if top:
-                line += f" · <code>✨ до {top}</code>"
-            lines.append(line + f"<br><i>{escape(a['effect'])}</i>")
-        return text + "<p>⠀<br>" + "<br><br>".join(lines) + "</p>"
+        return text   # заряды показаны кнопками «значок | 12х»: списка с описаниями под заголовком нет
     groups = groups_of(user, key)
     mine = list(groups)
     if mine:
