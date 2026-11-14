@@ -22,6 +22,7 @@
 Чтобы добавить предмет в наборы с шансами, допиши его в ITEMS / GEAR / EXTRA в workshop.py:
 наборы берут предметы из раздела сами, по редкости. Чтобы поменять шансы или количества, правь SETS ниже.
 """
+import asyncio
 import logging
 import random
 import re
@@ -30,7 +31,7 @@ from html import escape
 
 from aiogram import F, Router
 from aiogram.enums import ButtonStyle
-from aiogram.exceptions import TelegramAPIError
+from aiogram.exceptions import TelegramAPIError, TelegramNetworkError
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 import workshop as W
@@ -430,8 +431,17 @@ def open_many(user: dict, key: str, n: int | None) -> tuple[str | None, int, dic
     return None, opened, total, note
 
 
-def _plain(cmd: tuple, user: dict) -> str:
-    """Запасной ответ простым текстом, если rich-карточка не отправилась."""
+def _plain(cmd: tuple, user: dict, result: tuple | None = None) -> str:
+    """Запасной ответ простым текстом, если карточка не отправилась (обрыв связи и т.п.).
+    result - (ключ набора, сколько открыто, что выпало, пояснение) для команды открытия."""
+    if cmd[0] == "open" and result is not None:
+        key, opened, loot, note = result
+        lines = [f"{W.RESOURCES[k][1]} {W.RESOURCES[k][0]} ×{n}" for k, n in loot["res"].items()]
+        lines += [f"{W.ITEMS[k]['name']} ×{n}" for k, n in loot["items"].items()]
+        lines += [f"{W.ITEMS[k]['name']} ×{n}" for k, n in loot["ammo"].items()]
+        text = f"{SETS[key]['name']}: открыто {opened}\nВыпало:\n" + "\n".join(lines)
+        text += f"\nОсталось: {set_count(user, key):.1f} шт"
+        return text + (f"\n{note}" if note else "")
     if cmd[0] == "list":
         own = owned_sets(user)
         return "Твои наборы:\n" + "\n".join(f"{SETS[k]['name']}: {set_count(user, k):.1f} шт" for k in own) \
@@ -447,7 +457,16 @@ async def on_command(message: Message):
     if user is None:
         await message.answer("Сначала выбери питомца: /start")
         return
-    send = lambda html: W.D.send_rich_card(message.bot, message.chat.id, "workshop", html, close_kb())
+
+    async def send(html):
+        try:
+            await W.D.send_rich_card(message.bot, message.chat.id, "workshop", html, close_kb())
+        except TelegramNetworkError:   # обрыв связи с Telegram: одна повторная попытка
+            log.warning("workshop_sets: обрыв связи, повторяю отправку")
+            await asyncio.sleep(1.5)
+            await W.D.send_rich_card(message.bot, message.chat.id, "workshop", html, close_kb())
+
+    result = None
     try:
         if cmd[0] == "list":
             await send(lambda wi: list_html(user, wi))
@@ -465,11 +484,13 @@ async def on_command(message: Message):
                 await message.answer(err)
                 return
             W.D.save_users()   # наборы уже списаны и выданы: сохраняем до отправки карточки
+            result = (key, opened, loot, note)
             await send(lambda wi: loot_html(user, key, opened, loot, note, wi))
     except Exception:
-        # карточка не отправилась (разметка, сеть): пишем причину в лог и отвечаем простым текстом
+        # карточка не отправилась (разметка, сеть): пишем причину в лог и отвечаем простым текстом,
+        # для открытия набора в нём весь список выпавшего: награда уже выдана и не должна пропасть
         log.exception("workshop_sets: не удалось отправить карточку для %s", cmd)
         try:
-            await message.answer(_plain(cmd, user))
+            await message.answer(_plain(cmd, user, result))
         except Exception:
             log.exception("workshop_sets: и простой ответ не отправился")
