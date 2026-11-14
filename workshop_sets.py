@@ -15,7 +15,7 @@
 Подключение (main.py):
     import workshop_sets
     workshop_sets.install(dp)                  # ДО quick_cmds.install(dp)
-    workshop_sets.setup(ADMIN_IDS=ADMIN_IDS)   # после workshop.setup(...)
+    workshop_sets.setup(ADMIN_IDS=ADMIN_IDS, name_html=settings.name_html)   # после workshop.setup(...)
     dp.include_router(workshop_sets.router)
 Отдельный setup для get_user / send_rich_card и т.д. не нужен: модуль берёт их у workshop.
 
@@ -44,8 +44,23 @@ COMMAND_WORDS = {"н", "набор", "наборы"}
 _ADMINS: set = set()
 
 
-def setup(ADMIN_IDS=()) -> None:
+_NAME_HTML = [None]   # функция «игрок -> его ник в HTML» (settings.name_html)
+
+
+def setup(ADMIN_IDS=(), name_html=None) -> None:
     _ADMINS.update(int(x) for x in ADMIN_IDS)
+    if name_html is not None:
+        _NAME_HTML[0] = name_html
+
+
+def _nick(user: dict) -> str:
+    """Ник игрока для вставки в HTML; без settings - имя из Telegram."""
+    try:
+        if _NAME_HTML[0] is not None:
+            return _NAME_HTML[0](user)
+    except Exception:
+        log.exception("workshop_sets: не удалось получить ник")
+    return escape(str(user.get("tg_name") or "Игрок"))
 
 
 def install(dp) -> None:
@@ -291,7 +306,8 @@ def _help_block() -> str:
 
 
 def list_html(user: dict, with_image: bool) -> str:
-    text = W._img(with_image) + W._head("НАБОРЫ", SETS_EMOJI, "Твои наборы. Открывай их командами: список команд ниже.")
+    text = (W._img(with_image) + f"<p><b>{W._em(SETS_EMOJI)} НАБОРЫ - {_nick(user)}</b></p>"
+            "<blockquote><i>Твои наборы. Открывай их командами: список команд ниже.</i></blockquote>")
     own = owned_sets(user)
     gap = "<p>⠀</p>"   # пустая строка из невидимого символа: одинаково на телефоне и на ПК
     if own:
