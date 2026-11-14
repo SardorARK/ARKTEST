@@ -622,21 +622,23 @@ def pet_form(user: dict) -> float:
 
 def pet_speed(user: dict) -> int:
     """Скорость с учётом ранений."""
-    return max(1, round(_stats_of(user)["spd"] * pet_form(user)))
+    return max(1, round(_stats_of(user)["spd"] * pet_form(user) * gear_speed(user)))
 
 
 def dodge_chance(user: dict) -> float:
     spd = pet_speed(user)
-    return min(DODGE_MAX, spd / (spd + DODGE_K))
+    base = min(DODGE_MAX, spd / (spd + DODGE_K))
+    return 1 - (1 - base) * (1 - gear_dodge(user))      # плащ шансом уклонения складывается со скоростью
 
 
 def _taken_factor(user: dict) -> float:
     """Множитель входящего урона от босса: 1.0 без эликсира стойкости, меньше с ним."""
     fn = getattr(D, "damage_taken", None)
     try:
-        return min(1.0, max(0.0, float(fn(user)))) if fn else 1.0
+        potion = min(1.0, max(0.0, float(fn(user)))) if fn else 1.0
     except Exception:
-        return 1.0
+        potion = 1.0
+    return potion * gear_taken(user)                    # броня снижает урон ещё и от себя
 
 
 def boss_strike(user: dict) -> dict:
@@ -1307,15 +1309,42 @@ def _weapon(user: dict):
         return None
 
 
-def _gear_crit(user: dict) -> float:
-    """Шанс крита от надетых вещей мастерской (Амулет охотника: fx.boss_crit). Сломанное не считается."""
+def _gear_fx_list(user: dict) -> list[dict]:
+    """Эффекты (fx) надетых вещей мастерской с учётом их уровня: оружие, броня, аксессуар."""
     ws = _ws()
     if ws is None:
-        return 0.0
+        return []
     try:
-        return sum(float(item.get("fx", {}).get("boss_crit", 0.0)) for _, item in ws.equipped(user).values())
+        return [ws.gear_fx(item, ws.level_of(it)) for it, item in ws.equipped(user).values()]
     except Exception:
-        return 0.0
+        logging.getLogger(__name__).debug("Босс: не удалось прочитать надетое", exc_info=True)
+        return []
+
+
+def gear_taken(user: dict) -> float:
+    """Множитель входящего урона от надетой брони (0.70 = урон снижен на 30%)."""
+    m = 1.0
+    for fx in _gear_fx_list(user):
+        m *= float(fx.get("damage_taken", 1.0))
+    return max(0.05, min(1.0, m))
+
+
+def gear_dodge(user: dict) -> float:
+    """Шанс уклонения от надетого плаща (аксессуара)."""
+    return max(0.0, min(0.9, sum(float(fx.get("dodge", 0.0)) for fx in _gear_fx_list(user))))
+
+
+def gear_speed(user: dict) -> float:
+    """Множитель скорости от брони (тяжёлая броня замедляет)."""
+    m = 1.0
+    for fx in _gear_fx_list(user):
+        m *= float(fx.get("speed", 1.0))
+    return m
+
+
+def _gear_crit(user: dict) -> float:
+    """Шанс крита от надетых вещей мастерской (Амулет охотника: fx.boss_crit). Сломанное не считается."""
+    return sum(float(fx.get("boss_crit", 0.0)) for fx in _gear_fx_list(user))
 
 
 def strike_damage(user: dict, bid: str, raw: float, pierce: float = 0.0,
@@ -2066,8 +2095,9 @@ async def on_strike(callback: CallbackQuery):
     if weapon is not None:
         it, item = weapon
         ws = _ws()
-        raw = ws.roll_damage(item) or random.randint(*STRIKE_BASE_DMG)
-        pierce = float(item.get("fx", {}).get("armor_pierce", 0.0))
+        wlvl = ws.level_of(it)                          # улучшенное оружие бьёт сильнее
+        raw = ws.roll_damage(item, wlvl) or random.randint(*STRIKE_BASE_DMG)
+        pierce = float(ws.gear_fx(item, wlvl).get("armor_pierce", 0.0))
         label = item["name"]
         if WEAPON_WEAR > 0:
             it["dur"] = max(0, int(it.get("dur", 0)) - WEAPON_WEAR)
