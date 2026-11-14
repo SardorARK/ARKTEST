@@ -2541,21 +2541,26 @@ def pick_view(user: dict, key: str):
         body = "<p>⠀<br>" + "<br>".join(
             f"{_em(ITEMS[j['item']]['emoji'])} <b>{escape(ITEMS[j['item']]['name'])}</b> — слот {j['slot']} · "
             f"осталось {fmt_time(j['end'] - now)}" for j in jobs) + "</p>"
-        rows = [[_btn(f"Слот {j['slot']} · {fmt_time(j['end'] - now)}", f"ws:xh:{key}:{j['slot']}",
-                      ITEMS[j["item"]]["emoji"], ButtonStyle.SUCCESS)] for j in jobs]
+        rows = _rows([_btn(f"Слот {j['slot']} • {fmt_time(j['end'] - now)}", f"ws:xh:{key}:{j['slot']}",
+                           ITEMS[j["item"]]["emoji"], ButtonStyle.SUCCESS) for j in jobs], 2)
     elif key == "alchemy":
         total = basic_total(user)
         hint = "Выбери, какой редкий ресурс получить."
         body = (f"<p>{DIV}<br><b>Нужно:</b> <code>{ALCHEMY_IN}</code> базовых ресурсов<br>"
                 f"<b>У тебя:</b> <code>{_n(total)}</code><br>"
                 f"<i>Списываются те ресурсы, которых у тебя больше всего.</i></p>")
-        rows = [[_res_btn(RESOURCES[r][0], f"ws:xa:{r}", r)] for r in RARE_RESOURCES]
+        short = {"light_essence": "Свет", "fire_core": "Огонь", "ice_shard": "Лёд"}
+        body += "<p>⠀<br>" + "<br>".join(
+            f"{RESOURCES[r][1]} <b>{escape(RESOURCES[r][0])}</b> — <code>{_n(have(user, r))}</code>" for r in RARE_RESOURCES) + "</p>"
+        rows = [[_res_btn(f"| {short.get(r, RESOURCES[r][0])}", f"ws:xa:{r}", r) for r in RARE_RESOURCES]]
     elif key == "swap_token":
         opts = [k for k in BASIC_RESOURCES if have(user, k) >= SWAP_IN]
         if not opts:
             return f"Нужно хотя бы {SWAP_IN} штук одного базового ресурса."
         hint = f"Выбери, какой ресурс отдать: {SWAP_IN} штук превратятся в {SWAP_OUT} другого."
-        rows = _rows([_res_btn(f"{RESOURCES[k][0]} · {have(user, k)}", f"ws:xs:{k}", k) for k in opts], 2)
+        body = "<p>⠀<br>" + "<br>".join(
+            f"{RESOURCES[k][1]} <b>{escape(RESOURCES[k][0])}</b> — <code>{_n(have(user, k))}</code>" for k in opts) + "</p>"
+        rows = _rows([_res_btn(f"| {have(user, k)}", f"ws:xs:{k}", k) for k in opts], 3)
     elif key == "backpack":
         owned = [k for k, v in ITEMS.items() if not v.get("ammo") and any(o.get("key") == k for o in items_of(user))]
         if not owned:
@@ -2564,9 +2569,11 @@ def pick_view(user: dict, key: str):
         if not opts:
             return "Для всех твоих предметов лимит уже расширен до максимума."
         hint = "Выбери предмет, для которого нужно расширить лимит."
-        body = f"<p>{DIV}<br><i>Сейчас можно иметь {STACK_MAX} одинаковых предметов, рюкзак добавит ещё один.</i></p>"
-        rows = [[_btn(f"{ITEMS[k]['name']} · {stack_cap(user, k)} → {stack_cap(user, k) + 1}", f"ws:xb:{k}",
-                      ITEMS[k]["emoji"], None)] for k in opts]
+        body = ("<p>⠀<br>" + "<br>".join(
+            f"{_em(ITEMS[k]['emoji'])} <b>{escape(ITEMS[k]['name'])}</b> — <code>{stack_cap(user, k)} → {stack_cap(user, k) + 1}</code>"
+            for k in opts) + "</p>")
+        rows = _rows([_btn(f"| {stack_cap(user, k)}→{stack_cap(user, k) + 1}", f"ws:xb:{k}", ITEMS[k]["emoji"], None)
+                      for k in opts], 3)
     else:
         return "Использование этого предмета скоро появится."
     html = lambda wi: _img(wi) + _head(item["name"].upper(), item["emoji"], hint) + body
@@ -2697,7 +2704,7 @@ async def on_x_swap_src(callback: CallbackQuery):
     name, em = RESOURCES[src]
     hint = f"Отдаёшь: {name} ×{SWAP_IN}. Выбери, какой ресурс получить (×{SWAP_OUT})."
     btns = [_res_btn(RESOURCES[k][0], f"ws:xg:{src}:{k}", k) for k in BASIC_RESOURCES if k != src]
-    kb = InlineKeyboardMarkup(inline_keyboard=_rows(btns, 2) + [_back("ws:grp:swap_token:0")])
+    kb = InlineKeyboardMarkup(inline_keyboard=_rows(btns, 3) + [_back("ws:grp:swap_token:0")])
     await D.show_rich_card(callback, "workshop", lambda wi: _img(wi) + _head(item["name"].upper(), item["emoji"], hint), kb)
 
 
