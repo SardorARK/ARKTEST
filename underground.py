@@ -684,7 +684,7 @@ def ug_html(user_id: int, with_image: bool = False) -> str:
         + _tree(state, "Состояние", mono=False)
         + _gap()
         + _used_block(run)
-        + _quote("Добыто, ещё не забрано", _found_rows(ug), expandable=True)
+        + _quote("Добыто", _found_rows(ug), expandable=True)
     )
 
 
