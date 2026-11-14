@@ -512,8 +512,25 @@ def resolve(ref: str) -> str:
 
 # ---------- Расчёты ----------
 
-def fmt(n: float) -> str:
-    return f"{int(n):,}".replace(",", " ")
+NUMBER_SUFFIXES = ("", "K", "M", "B", "T", "Qa", "Qi", "Sx", "Sp", "Oc", "No", "Dc")
+
+
+def fmt(n) -> str:
+    """Короткая запись чисел, как в main.py: 999, 1K, 1.5K, 1M, 2.35B, 1T, 1Qa и так далее.
+    Без округления вверх: 999 999 это 999.99K, а не 1000K."""
+    n = int(n)
+    sign = "\u2212" if n < 0 else ""
+    a = abs(n)
+    if a < 1000:
+        return f"{sign}{a}"
+    idx = 1
+    while idx < len(NUMBER_SUFFIXES) - 1 and a >= 1000 ** (idx + 1):
+        idx += 1
+    div = 1000 ** idx
+    whole, frac = divmod(a, div)
+    text = f"{whole}.{frac * 100 // div:02d}".rstrip("0").rstrip(".")
+    return f"{sign}{text}{NUMBER_SUFFIXES[idx]}"
+
 
 
 def fmt_dur(seconds: float) -> str:
@@ -1049,7 +1066,7 @@ def skills_html(user_id: int, with_image: bool = False, ref: str = "") -> str:
         wait = pet_ready_in(user)
         pet_part = (
             f"<p><b>{escape(pet_name.upper())} · ТВОЙ ПИТОМЕЦ</b><br>&nbsp;<br>"
-            f"<b>{_hp_icon()} {int(hp)} / {mx}</b><br>"
+            f"<b>{_hp_icon()} {fmt(hp)} / {fmt(mx)}</b><br>"
             f"<b>{bar(hp / mx)} {hp / mx * 100:.0f}%</b></p>"
         )
         pet_rows = [
@@ -1250,11 +1267,7 @@ def _emoji_id(e) -> str | None:
 
 
 def _short_num(n: int) -> str:
-    for div, suf in ((1_000_000_000, "B"), (1_000_000, "M"), (1_000, "K")):
-        if n >= div:
-            v = n / div
-            return f"{v:g}{suf}"
-    return str(n)
+    return fmt(n)
 
 
 def slots_open(user: dict) -> int:
@@ -1372,7 +1385,7 @@ def _ammo_row(user: dict, bid: str) -> list[InlineKeyboardButton]:
                 a = ranking[slot - 1]
                 left = ammo_left(user, slot)
                 icon_id = _emoji_id(a["emoji"])
-                text = str(a["count"]) if icon_id else f"{_plain_emoji(a['emoji'])} {a['count']}"
+                text = fmt(a["count"]) if icon_id else f"{_plain_emoji(a['emoji'])} {fmt(a['count'])}"
                 if left > 0:
                     row.append(_btn(f"{text} · {_short_dur(left)}", data, icon_id, ButtonStyle.DANGER))
                 else:
@@ -2178,4 +2191,4 @@ async def on_ammo(callback: CallbackQuery):
     total, crit = strike_damage(user, bid, raw, float(fx.get("armor_pierce", 0.0)),
                                 float(fx.get("crit_chance", 0.0)), float(fx.get("crit_mult", CRIT_MULT)))
     await _deal(callback, user, bid, total, a["name"], icon=_plain_emoji(a["emoji"]), crit=crit,
-                feed=True, fragments=True, extra=f"осталось {a['count'] - 1}")
+                feed=True, fragments=True, extra=f"осталось {fmt(a['count'] - 1)}")
