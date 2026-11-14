@@ -1550,6 +1550,19 @@ def _rows(btns: list, per_row: int = 4) -> list[list]:
     return [btns[i:i + per_row] for i in range(0, len(btns), per_row)]
 
 
+def _zigzag(btns: list, sizes: tuple = (4, 3)) -> list[list]:
+    """Кнопки рядами по очереди: 4, 3, 4, 3... Одинокая кнопка в последнем ряду добирает соседа из предыдущего."""
+    rows, i, n = [], 0, 0
+    while i < len(btns):
+        size = sizes[n % len(sizes)]
+        rows.append(btns[i:i + size])
+        i += size
+        n += 1
+    if len(rows) > 1 and len(rows[-1]) == 1 and len(rows[-2]) >= 3:
+        rows[-1].insert(0, rows[-2].pop())
+    return rows
+
+
 def _craft_status(user: dict) -> str:
     jobs = sorted(jobs_of(user), key=lambda j: j["slot"])
     if not jobs:
@@ -1969,7 +1982,7 @@ def slot_pick_kb(slot: int, cat: str = "items") -> InlineKeyboardMarkup:
             tabs.append(InlineKeyboardButton(text=f"• {emoji}", callback_data="ws:noop", style=ButtonStyle.PRIMARY))
         else:
             tabs.append(InlineKeyboardButton(text=emoji, callback_data=f"ws:slot:{slot}:{k}", style=ButtonStyle.PRIMARY))
-    return InlineKeyboardMarkup(inline_keyboard=_rows(recipes) + [tabs] + [_back("ws:forge")])
+    return InlineKeyboardMarkup(inline_keyboard=_zigzag(recipes) + [tabs] + [_back("ws:forge")])
 
 
 def slot_busy_html(job: dict, slot: int, with_image: bool) -> str:
