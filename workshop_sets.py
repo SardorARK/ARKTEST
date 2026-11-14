@@ -335,13 +335,13 @@ def loot_html(user: dict, key: str, opened: int, loot: dict, note: str, with_ima
     s = SETS[key]
     lines = [_loot_line(W.RESOURCES[k][1], W.RESOURCES[k][0], n) for k, n in loot["res"].items()]
     # боезапас: количество через «х» (х20); число с точкой (50.0) только у ресурсов
-    lines += [f"{W._em(W.ITEMS[k]['emoji'])} <b>{escape(W.ITEMS[k]['name'])}</b> <code>х{n}</code>"
+    lines += [f"{W._em(W.ITEMS[k]['emoji'])} <b>{escape(W.ITEMS[k]['name'])}</b> х{n}"
               for k, n in loot["ammo"].items()]
     # предметы: каждый в своём блоке-цитате и без числа (число видно только если одинаковых несколько)
     quotes = []
     for k, n in loot["items"].items():
         it = W.ITEMS[k]
-        tail = f" <code>х{n}</code>" if n > 1 else ""
+        tail = f" х{n}" if n > 1 else ""
         quotes.append(f"<blockquote>{W._em(it['emoji'])} <b>{escape(it['name'])}</b>{tail}</blockquote>")
     text = W._img(with_image) + W._head(s["name"].upper(), s["emoji"], f"Открыто наборов: {opened}")
     text += "<p><i>Выпало:</i>" + ("<br>" + "<br>".join(lines) if lines else "") + "</p>" + "".join(quotes)
