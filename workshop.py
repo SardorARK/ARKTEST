@@ -6,6 +6,7 @@
     user["res"]      = {ключ_ресурса: количество}
     user["ws_slots"] = сколько слотов кузницы открыто (1..MAX_SLOTS, сначала открыт один)
     user["ws_craft"] = [{"item": ключ, "slot": номер_слота, "start": время, "end": время}, ...]
+    user["ws_ammo"]  = {ключ_заряда: сколько всего}; user["ws_ammo_lv"] = {ключ_заряда: {"уровень": сколько}} (улучшенные заряды)
     user["ws_items"] = [{"key": ключ_предмета, "dur": прочность_или_остаток_использований, "lvl": уровень, "evo": этап_эволюции}, ...]
 
 В разделе предметы одного вида показываются одной кнопкой «⛏️ | 4х» независимо от уровня и эволюции;
@@ -381,10 +382,26 @@ def _round10(x: float) -> int:
     return int(round(x / 10.0)) * 10
 
 
+# Улучшение боезапаса: улучшается вся стопка сразу (до AMMO_STACK зарядов), у каждого заряда свой уровень 0-10.
+# Хранение: user["ws_ammo"][ключ] - всего зарядов вида (как раньше), user["ws_ammo_lv"][ключ] = {"1": сколько, "2": сколько, ...} -
+# сколько из них улучшено; остальные - 0 уровня. Новые заряды из кузницы всегда 0 уровня и лежат отдельной стопкой.
+# Урон: на 10 уровне заряд с fx["damage"] = 1.0 бьёт на AMMO_MAX_DMG, остальные: * fx["damage"]
+# (смоляная бомба, 0.8: 720-1120 на 0 уровне -> 15000-35000 на 10). Эволюции и «Использовать» у боезапаса нет.
+# Цена улучшения стопки: цена уровня для одной пачки (рецепт, batch зарядов) * (зарядов в стопке / batch).
+# Для одной пачки: на 1 уровне рецепт * AMMO_UP_FIRST, на 10 уровне рецепт * AMMO_UP_LAST; стопка из 2 пачек платит вдвое больше.
+AMMO_MAX_DMG = (18750, 43750)
+AMMO_UP_FIRST, AMMO_UP_LAST = 1, 20
+AMMO_STACK = 100   # больше зарядов одного вида и уровня в одной стопке не бывает (лишние идут во вторую стопку)
+
 for _k, _a in AMMO.items():
     _m = _a["fx"].get("damage", 0)
-    _d = {"dmg": (_round10(AMMO_BASE_DMG[0] * _m), _round10(AMMO_BASE_DMG[1] * _m)),
-          "dmg_unit": "за ход" if _k == "spike_net" else "за выстрел"} if _m > 0 else {}
+    _d = {}
+    if _m > 0:
+        _d = {"dmg": (_round10(AMMO_BASE_DMG[0] * _m), _round10(AMMO_BASE_DMG[1] * _m)),
+              "dmg_unit": "за ход" if _k == "spike_net" else "за выстрел",
+              "dmg_max": (_round10(AMMO_MAX_DMG[0] * _m), _round10(AMMO_MAX_DMG[1] * _m)),
+              "ammo_upgradable": True,
+              "upgrade": [(r, 1, n * AMMO_UP_FIRST, n * AMMO_UP_LAST, 1) for r, n in _a["cost"].items()]}
     ITEMS[_k] = {**_a, **_d, "category": "ammo", "ammo": True}   # крафтятся через общую кузницу, но хранятся счётчиком
 
 # ---------------------------------------------------------------------------
@@ -727,9 +744,39 @@ def ammo_of(user: dict) -> dict:
     return a
 
 
-def ammo_count(user: dict, key: str) -> int:
-    """Сколько зарядов этого вида у игрока (для боя с боссом)."""
-    return _int(ammo_of(user).get(key))
+def ammo_levels(user: dict, key: str) -> dict:
+    """{уровень: сколько зарядов}. Заряды без улучшений - 0 уровень."""
+    total = _int(ammo_of(user).get(key))
+    raw = user.get("ws_ammo_lv")
+    sub = raw.get(key) if isinstance(raw, dict) else None
+    out, left = {}, total
+    if isinstance(sub, dict):
+        for lv in sorted((_int(x) for x in sub), reverse=True):   # если кто-то списал заряды мимо этого модуля, лишнее срезается с низких уровней
+            n = min(left, _int(sub.get(str(lv), sub.get(lv))))
+            if 0 < lv <= MAX_LEVEL and n > 0:
+                out[lv] = n
+                left -= n
+    if left > 0:
+        out[0] = left
+    return dict(sorted(out.items()))
+
+
+def _ammo_set_levels(user: dict, key: str, levels: dict) -> None:
+    lv = user.get("ws_ammo_lv")
+    if not isinstance(lv, dict):
+        lv = {}
+        user["ws_ammo_lv"] = lv
+    lv[key] = {str(l): n for l, n in levels.items() if l > 0 and n > 0}
+    if not lv[key]:
+        lv.pop(key, None)
+    ammo_of(user)[key] = sum(n for n in levels.values() if n > 0)
+
+
+def ammo_count(user: dict, key: str, lvl: int | None = None) -> int:
+    """Сколько зарядов этого вида у игрока (для боя с боссом); с lvl - только этого уровня."""
+    if lvl is None:
+        return _int(ammo_of(user).get(key))
+    return ammo_levels(user, key).get(lvl, 0)
 
 
 def give_ammo(user: dict, key: str, amount: int = 1) -> None:
@@ -739,13 +786,127 @@ def give_ammo(user: dict, key: str, amount: int = 1) -> None:
         a[key] = min(ammo_cap(user), _int(a.get(key)) + int(amount))
 
 
-def spend_ammo(user: dict, key: str, amount: int = 1) -> bool:
-    """Тратит заряды (выстрел по боссу). False, если зарядов не хватает: тогда ничего не списывается.
-    После вызова не забудь D.save_users()."""
-    if key not in AMMO or amount <= 0 or ammo_count(user, key) < amount:
+def spend_ammo(user: dict, key: str, amount: int = 1, lvl: int | None = None) -> bool:
+    """Тратит заряды (выстрел по боссу). С lvl - заряды этого уровня; без него - сначала самые слабые.
+    False, если зарядов не хватает: тогда ничего не списывается. После вызова не забудь D.save_users()."""
+    if key not in AMMO or amount <= 0:
         return False
-    ammo_of(user)[key] = ammo_count(user, key) - amount
+    levels = ammo_levels(user, key)
+    if lvl is not None:
+        if levels.get(lvl, 0) < amount:
+            return False
+        levels[lvl] -= amount
+    else:
+        if sum(levels.values()) < amount:
+            return False
+        left = amount
+        for l in sorted(levels):
+            take = min(levels[l], left)
+            levels[l] -= take
+            left -= take
+            if not left:
+                break
+    _ammo_set_levels(user, key, levels)
     return True
+
+
+def ammo_can_upgrade(key: str) -> bool:
+    return bool(ITEMS.get(key, {}).get("ammo_upgradable"))
+
+
+def ammo_dmg_at(key: str, lvl: int) -> tuple[int, int] | None:
+    """Диапазон урона заряда на уровне lvl: от базового до dmg_max, кривая та же, что у бонуса предметов."""
+    item = ITEMS.get(key, {})
+    base, top = item.get("dmg"), item.get("dmg_max")
+    if not base:
+        return None
+    if not top:
+        return base
+    t = _LOGS[max(0, min(lvl, MAX_LEVEL))] / _LOGS[MAX_LEVEL]
+    return tuple(_round10(a * (b / a) ** t) for a, b in zip(base, top))
+
+
+def ammo_dmg_text(key: str, lvl: int) -> str:
+    d = ammo_dmg_at(key, lvl)
+    return f"{d[0]}-{d[1]} {ITEMS[key].get('dmg_unit', 'за выстрел')}" if d else ""
+
+
+def roll_ammo_damage(key: str, lvl: int = 0) -> int:
+    """Бросок урона заряда уровня lvl для боя с боссом. 0, если у заряда нет урона.
+    Босс должен брать урон отсюда и тратить заряды того же уровня: spend_ammo(user, key, 1, lvl)."""
+    d = ammo_dmg_at(key, lvl)
+    return random.randint(d[0], d[1]) if d else 0
+
+
+def ammo_stacks(user: dict, key: str) -> list[tuple[int, int]]:
+    """Стопки вида: [(уровень, сколько)], по возрастанию уровня; в стопке не больше AMMO_STACK."""
+    out = []
+    for lv, n in ammo_levels(user, key).items():
+        while n > 0:
+            out.append((lv, min(n, AMMO_STACK)))
+            n -= AMMO_STACK
+    return out
+
+
+def ammo_stack_n(user: dict, key: str, lvl: int, i: int) -> int:
+    """Сколько зарядов в i-й стопке уровня lvl (0, если такой стопки нет)."""
+    return max(0, min(AMMO_STACK, ammo_count(user, key, lvl) - i * AMMO_STACK)) if i >= 0 else 0
+
+
+def ammo_upgrade_cost(key: str, to_level: int, n: int) -> dict:
+    """Цена улучшения стопки из n зарядов до уровня to_level: цена пачки * (n / batch), округляем вверх."""
+    item = ITEMS[key]
+    return {k: max(1, math.ceil(v * n / item["batch"])) for k, v in upgrade_cost(item, to_level).items()}
+
+
+def ammo_upgrade(user: dict, key: str, lvl: int, i: int) -> tuple[str | None, int]:
+    """Поднимает на уровень ВСЮ стопку (key, lvl, i). Возвращает (причина отказа или None, сколько зарядов улучшено)."""
+    if not ammo_can_upgrade(key):
+        return "Этот боезапас нельзя улучшить.", 0
+    n = ammo_stack_n(user, key, lvl, i)
+    if n <= 0:
+        return "Стопка изменилась: открой её заново.", 0
+    if lvl >= MAX_LEVEL:
+        return "Максимальный уровень уже достигнут.", 0
+    cost = ammo_upgrade_cost(key, lvl + 1, n)
+    if any(have(user, k) < v for k, v in cost.items()):
+        return "Не хватает ресурсов для улучшения.", 0
+    r = res_of(user)
+    for k, v in cost.items():
+        r[k] = have(user, k) - v
+    levels = ammo_levels(user, key)
+    levels[lvl] -= n
+    levels[lvl + 1] = levels.get(lvl + 1, 0) + n
+    _ammo_set_levels(user, key, levels)
+    return None, n
+
+
+def ammo_recon_refund(key: str, lvl: int, qty: int) -> dict:
+    """Что вернёт реконструкция qty зарядов уровня lvl: RECON_SHARE от вложенного (рецепт + улучшения до lvl, на qty / batch пачек).
+    Округляем вниз, чтобы разбор по одному заряду не давал больше, чем потрачено."""
+    item = ITEMS[key]
+    total = dict(item["cost"])
+    for l in range(1, lvl + 1):
+        for k, v in upgrade_cost(item, l).items():
+            total[k] = total.get(k, 0) + v
+    out = {k: int(v * qty * RECON_SHARE / item["batch"] + 1e-9) for k, v in total.items()}
+    return {k: v for k, v in out.items() if v > 0}
+
+
+def ammo_reconstruct(user: dict, key: str, lvl: int, qty: int) -> tuple[str | None, dict]:
+    """Разбирает qty зарядов уровня lvl на ресурсы. Возвращает (причина отказа или None, выданные ресурсы)."""
+    if key not in AMMO:
+        return "Боезапас не найден.", {}
+    qty = min(qty, ammo_count(user, key, lvl))
+    if qty <= 0:
+        return "Таких зарядов нет.", {}
+    refund = ammo_recon_refund(key, lvl, qty)
+    if not refund:
+        return "Слишком мало зарядов: ресурсов не вернётся.", {}
+    spend_ammo(user, key, qty, lvl)
+    for k, v in refund.items():
+        give_resource(user, k, v)
+    return None, refund
 
 
 def ammo_pending(user: dict, key: str) -> int:
@@ -1636,8 +1797,13 @@ def category_html(user: dict, key: str, with_image: bool, page: int = 0) -> str:
         if not owned:
             return text + (f"<p>{DIV}<br><b>Пока пусто</b><br>Зарядов нет. Создай их в «Кузнице»: "
                            "они пригодятся против боссов.</p>")
-        lines = [f"{_em(a['emoji'])} <b>{escape(a['name'])}</b> — <code>{ammo_count(user, k)}</code>"
-                 f"<br><i>{escape(a['effect'])}</i>" for k, a in owned]
+        lines = []
+        for k, a in owned:
+            line = f"{_em(a['emoji'])} <b>{escape(a['name'])}</b> — <code>{ammo_count(user, k)}</code>"
+            top = max(ammo_levels(user, k))
+            if top:
+                line += f" · <code>✨ до {top}</code>"
+            lines.append(line + f"<br><i>{escape(a['effect'])}</i>")
         return text + "<p>⠀<br>" + "<br><br>".join(lines) + "</p>"
     groups = groups_of(user, key)
     mine = list(groups)
@@ -1883,6 +2049,125 @@ def recon_kb(user: dict, idx: int) -> InlineKeyboardMarkup:
         [_btn("Реконструкция", f"ws:rcgo:{idx}:{it['key']}:{level_of(it)}:{evo_of(it)}", RECON_EMOJI, ButtonStyle.SUCCESS)],
         _back(f"ws:it:{idx}"),
     ])
+
+
+def ammo_list_kb(user: dict) -> InlineKeyboardMarkup:
+    """Раздел «Боезапас»: кнопка «значок | 12х» на каждый вид зарядов (все уровни вместе)."""
+    btns = [_btn(f"| {ammo_count(user, k)}х", f"ws:am:{k}", ITEMS[k]["emoji"], None)
+            for k in AMMO if ammo_count(user, k) > 0]
+    return InlineKeyboardMarkup(inline_keyboard=_rows(btns, ITEMS_PER_ROW) + [_back("ws:open")])
+
+
+def ammo_group_html(user: dict, key: str, with_image: bool) -> str:
+    item = ITEMS[key]
+    return (_img(with_image) + _head(item["name"].upper(), item["emoji"], item.get("desc") or "Боезапас.")
+            + f"<p>{DIV}<br><b>📦 Всего зарядов:</b> <code>{ammo_count(user, key)}</code><br>"
+              f"<i>Заряды разных уровней лежат отдельными стопками (до {AMMO_STACK} в стопке).</i></p>")
+
+
+def ammo_group_kb(user: dict, key: str) -> InlineKeyboardMarkup:
+    """Стопки вида: «💣 | 10х · ✨2» (уровень, сколько)."""
+    btns, seen = [], {}
+    for lv, n in ammo_stacks(user, key):
+        i = seen.get(lv, 0)
+        seen[lv] = i + 1
+        btns.append(_btn(f"| {n}х · {UPGRADE_EMOJI[1]}{lv}", f"ws:amst:{key}:{lv}:{i}", ITEMS[key]["emoji"], None))
+    return InlineKeyboardMarkup(inline_keyboard=_rows(btns, ITEMS_PER_ROW) + [_back("ws:cat:ammo")])
+
+
+def _ammo_back(user: dict, key: str) -> str:
+    """Назад из карточки стопки: если стопка одна, экрана-списка не было, сразу в раздел."""
+    return "ws:cat:ammo" if len(ammo_stacks(user, key)) <= 1 else f"ws:am:{key}"
+
+
+def _ammo_stats_box(user: dict, key: str, lvl: int, n: int, to_next: bool = True) -> str:
+    item = ITEMS[key]
+    boost = D.custom_emoji(BOOST_EMOJI)
+    lines = []
+    if ammo_can_upgrade(key):
+        lines.append(f"<b>✨ Уровень:</b> <code>{lvl} / {MAX_LEVEL}</code>")
+    if item.get("dmg"):
+        line = f"<b>⚔️ Урон:</b> <code>{ammo_dmg_text(key, lvl)}</code>"
+        if to_next and ammo_can_upgrade(key) and lvl < MAX_LEVEL:
+            nxt = ammo_dmg_at(key, lvl + 1)
+            line += f" → <code>{nxt[0]}-{nxt[1]}</code>"
+        lines.append(line)
+    lines.append(f"<b>{boost} {escape(item['effect'])}</b>")
+    lines.append(f"<b>💎 Редкость:</b> <code>{escape(item['rarity'])}</code>")
+    lines.append(f"<b>📦 В стопке:</b> <code>{n} / {AMMO_STACK}</code>")
+    return f"<p>{DIV}<br>" + "<br>".join(lines) + "</p>"
+
+
+def ammo_html(user: dict, key: str, lvl: int, i: int, with_image: bool) -> str:
+    """Карточка стопки зарядов: уровень, урон (и каким он станет), сколько в стопке."""
+    item = ITEMS[key]
+    n = ammo_stack_n(user, key, lvl, i)
+    text = _img(with_image) + _head(item["name"].upper(), item["emoji"], item.get("desc") or "Боезапас.")
+    text += _ammo_stats_box(user, key, lvl, n)
+    legend = []
+    if ammo_can_upgrade(key):
+        legend.append((UPGRADE_EMOJI, "Улучшить всю стопку"))
+    legend.append((RECON_EMOJI, "Реконструкция"))
+    return text + _legend(*legend, div=True)
+
+
+def ammo_card_kb(user: dict, key: str, lvl: int, i: int) -> InlineKeyboardMarkup:
+    acts = []
+    if ammo_can_upgrade(key):
+        acts.append(_ebtn(f"ws:amup:{key}:{lvl}:{i}", UPGRADE_EMOJI, ButtonStyle.PRIMARY))
+    acts.append(_ebtn(f"ws:amrc:{key}:{lvl}:{i}", RECON_EMOJI, ButtonStyle.PRIMARY))
+    return InlineKeyboardMarkup(inline_keyboard=[acts, _back(_ammo_back(user, key))])
+
+
+def ammo_upgrade_html(user: dict, key: str, lvl: int, i: int, with_image: bool) -> str:
+    item = ITEMS[key]
+    n = ammo_stack_n(user, key, lvl, i)
+    text = _img(with_image) + _head(item["name"].upper(), item["emoji"], "Улучшение боезапаса.")
+    lines, lack = _cost_lines(user, ammo_upgrade_cost(key, lvl + 1, n))
+    note = (("<i>Не хватает " + ", ".join(lack) + ".</i>") if lack else "<i>Всё готово, можно улучшать.</i>")
+    note += f"<br><i>Улучшатся сразу все {n} зарядов стопки. Цена растёт с их числом.</i>"
+    gap = DIV + "<br>"
+    return text + (_ammo_stats_box(user, key, lvl, n)
+                   + f"<p>{gap}<b>▸ Нужно</b> <i>(на {n} зарядов)</i><br>" + "<br>".join(lines) + f"<br>{note}</p>")
+
+
+def ammo_upgrade_kb(key: str, lvl: int, i: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [_btn("Улучшить", f"ws:amugo:{key}:{lvl}:{i}", UPGRADE_EMOJI, ButtonStyle.SUCCESS)],
+        _back(f"ws:amst:{key}:{lvl}:{i}"),
+    ])
+
+
+def _refund_lines(refund: dict) -> str:
+    return "<br>".join(f"{RESOURCES[k][1]} <b>{escape(RESOURCES[k][0])}</b> — <code>+{_n(v)}</code>"
+                       for k, v in refund.items())
+
+
+def ammo_recon_html(user: dict, key: str, lvl: int, i: int, with_image: bool) -> str:
+    """Экран реконструкции стопки: что вернётся за пачку и за всю стопку."""
+    item = ITEMS[key]
+    n, batch = ammo_stack_n(user, key, lvl, i), item["batch"]
+    text = _img(with_image) + _head(item["name"].upper(), item["emoji"], "Реконструкция боезапаса.")
+    gap = DIV + "<br>"
+    text += f"<p>{DIV}<br><b>✨ Уровень:</b> <code>{lvl}</code><br><b>📦 В стопке:</b> <code>{n}</code></p>"
+    one, allr = ammo_recon_refund(key, lvl, min(batch, n)), ammo_recon_refund(key, lvl, n)
+    if n > batch and one:
+        text += f"<p>{gap}<b>▸ За пачку ×{batch}</b> <i>({RECON_SHARE * 100:g}% от вложенного)</i><br>{_refund_lines(one)}</p>"
+    if allr:
+        text += f"<p>{gap}<b>▸ За всю стопку ×{n}</b><br>{_refund_lines(allr)}</p>"
+    else:
+        text += f"<p>{gap}<i>Слишком мало зарядов: ресурсов не вернётся.</i></p>"
+    return text + "<p><i>⚠️ Заряды будут разобраны и исчезнут из инвентаря.</i></p>"
+
+
+def ammo_recon_kb(user: dict, key: str, lvl: int, i: int) -> InlineKeyboardMarkup:
+    n, batch = ammo_stack_n(user, key, lvl, i), ITEMS[key]["batch"]
+    btns = []
+    if n > batch and ammo_recon_refund(key, lvl, batch):
+        btns.append(_btn(f"Пачка ×{batch}", f"ws:amrcgo:{key}:{lvl}:{i}:b", RECON_EMOJI, ButtonStyle.SUCCESS))
+    if ammo_recon_refund(key, lvl, n):
+        btns.append(_btn(f"Стопка ×{n}", f"ws:amrcgo:{key}:{lvl}:{i}:a", RECON_EMOJI, ButtonStyle.SUCCESS))
+    return InlineKeyboardMarkup(inline_keyboard=([btns] if btns else []) + [_back(f"ws:amst:{key}:{lvl}:{i}")])
 
 
 def evo_kb(idx: int) -> InlineKeyboardMarkup:
@@ -2134,7 +2419,12 @@ async def on_category(callback: CallbackQuery):
     if settle(user):
         D.save_users()
     page = min(max(page, 0), _pages(len(groups_of(user, key))) - 1)
-    kb = InlineKeyboardMarkup(inline_keyboard=[_back("ws:open")]) if key in ("res", "ammo") else category_kb(user, key, page)
+    if key == "res":
+        kb = InlineKeyboardMarkup(inline_keyboard=[_back("ws:open")])
+    elif key == "ammo":
+        kb = ammo_list_kb(user)
+    else:
+        kb = category_kb(user, key, page)
     await D.show_rich_card(callback, "workshop", lambda wi: category_html(user, key, wi, page), kb)
 
 
@@ -2432,6 +2722,148 @@ async def on_recon_do(callback: CallbackQuery):
         cat = ITEMS[key]["category"]
         pg = min(group_page_after(user, cat), _pages(len(groups_of(user, cat))) - 1)
         await D.show_rich_card(callback, "workshop", lambda wi: category_html(user, cat, wi, pg), category_kb(user, cat, pg))
+
+
+def _ammo_args(data: str) -> tuple[str, int, int] | None:
+    """ws:xxx:ключ:уровень:стопка -> (ключ, уровень, номер стопки среди стопок этого уровня)."""
+    parts = data.split(":")
+    try:
+        key, lvl, i = parts[2], int(parts[3]), int(parts[4])
+    except (ValueError, IndexError):
+        return None
+    return (key, lvl, i) if key in AMMO and 0 <= lvl <= MAX_LEVEL and i >= 0 else None
+
+
+async def _show_ammo_type(callback: CallbackQuery, user: dict, key: str) -> None:
+    """Вид зарядов: если стопка одна, сразу её карточка; если зарядов не осталось, раздел «Боезапас»."""
+    sts = ammo_stacks(user, key)
+    if not sts:
+        await D.show_rich_card(callback, "workshop", lambda wi: category_html(user, "ammo", wi), ammo_list_kb(user))
+    elif len(sts) == 1:
+        lv = sts[0][0]
+        await D.show_rich_card(callback, "workshop", lambda wi: ammo_html(user, key, lv, 0, wi), ammo_card_kb(user, key, lv, 0))
+    else:
+        await D.show_rich_card(callback, "workshop", lambda wi: ammo_group_html(user, key, wi), ammo_group_kb(user, key))
+
+
+async def _show_stack(callback: CallbackQuery, user: dict, key: str, lvl: int, i: int) -> None:
+    if ammo_stack_n(user, key, lvl, i) <= 0:
+        await _show_ammo_type(callback, user, key)
+        return
+    await D.show_rich_card(callback, "workshop", lambda wi: ammo_html(user, key, lvl, i, wi), ammo_card_kb(user, key, lvl, i))
+
+
+@router.callback_query(F.data.startswith("ws:am:"))
+async def on_ammo(callback: CallbackQuery):
+    """Нажатие на «💣 | 25х»: стопки этого вида по уровням."""
+    user = await _user_or_alert(callback)
+    if user is None:
+        return
+    parts = callback.data.split(":")
+    key = parts[2] if len(parts) > 2 and parts[2] in AMMO else None
+    if key is None:
+        await callback.answer()
+        return
+    if settle(user):
+        D.save_users()
+    await callback.answer()
+    await _show_ammo_type(callback, user, key)
+
+
+@router.callback_query(F.data.startswith("ws:amst:"))
+async def on_ammo_stack(callback: CallbackQuery):
+    """Нажатие на «💣 | 10х · ✨2»: карточка стопки."""
+    user = await _user_or_alert(callback)
+    if user is None:
+        return
+    args = _ammo_args(callback.data)
+    if args is None:
+        await callback.answer()
+        return
+    await callback.answer()
+    await _show_stack(callback, user, *args)
+
+
+@router.callback_query(F.data.startswith("ws:amup:"))
+async def on_ammo_upgrade(callback: CallbackQuery):
+    """Кнопка «Улучшить» на карточке стопки: экран с требованиями."""
+    user = await _user_or_alert(callback)
+    if user is None:
+        return
+    args = _ammo_args(callback.data)
+    if args is None or not ammo_can_upgrade(args[0]):
+        await callback.answer("Этот боезапас нельзя улучшить.", show_alert=True)
+        return
+    key, lvl, i = args
+    if ammo_stack_n(user, key, lvl, i) <= 0:
+        await callback.answer("Стопка изменилась: открой её заново.", show_alert=True)
+        return
+    if lvl >= MAX_LEVEL:
+        await callback.answer("Максимальный уровень уже достигнут.", show_alert=True)
+        return
+    await callback.answer()
+    await D.show_rich_card(callback, "workshop", lambda wi: ammo_upgrade_html(user, key, lvl, i, wi), ammo_upgrade_kb(key, lvl, i))
+
+
+@router.callback_query(F.data.startswith("ws:amugo:"))
+async def on_ammo_upgrade_do(callback: CallbackQuery):
+    """Подтверждение: списывает ресурсы и поднимает уровень всей стопки."""
+    user = await _user_or_alert(callback)
+    if user is None:
+        return
+    args = _ammo_args(callback.data)
+    if args is None:
+        await callback.answer()
+        return
+    key, lvl, i = args
+    err, n = ammo_upgrade(user, key, lvl, i)
+    if err:
+        await callback.answer(err, show_alert=True)
+        return
+    D.save_users()
+    await callback.answer(f"Улучшено {n} шт.: уровень {lvl + 1}/{MAX_LEVEL}.")
+    # улучшенные заряды дописаны в конец стопок нового уровня
+    new_i = max(0, (ammo_count(user, key, lvl + 1) - 1) // AMMO_STACK)
+    await _show_stack(callback, user, key, lvl + 1, new_i)
+
+
+@router.callback_query(F.data.startswith("ws:amrc:"))
+async def on_ammo_recon_screen(callback: CallbackQuery):
+    """Кнопка «Реконструкция» на карточке стопки: экран с тем, что вернётся."""
+    user = await _user_or_alert(callback)
+    if user is None:
+        return
+    args = _ammo_args(callback.data)
+    if args is None or ammo_stack_n(user, *args) <= 0:
+        await callback.answer("Таких зарядов нет.", show_alert=True)
+        return
+    key, lvl, i = args
+    await callback.answer()
+    await D.show_rich_card(callback, "workshop", lambda wi: ammo_recon_html(user, key, lvl, i, wi), ammo_recon_kb(user, key, lvl, i))
+
+
+@router.callback_query(F.data.startswith("ws:amrcgo:"))
+async def on_ammo_recon_do(callback: CallbackQuery):
+    """Подтверждение реконструкции: пачка или вся стопка разбирается, игрок получает 50% вложенного."""
+    user = await _user_or_alert(callback)
+    if user is None:
+        return
+    args = _ammo_args(callback.data)
+    mode = callback.data.split(":")[5] if callback.data.count(":") >= 5 else ""
+    if args is None or mode not in ("b", "a"):
+        await callback.answer()
+        return
+    key, lvl, i = args
+    n = ammo_stack_n(user, key, lvl, i)
+    qty = min(ITEMS[key]["batch"], n) if mode == "b" else n
+    err, refund = ammo_reconstruct(user, key, lvl, qty)
+    if err:
+        await callback.answer(err, show_alert=True)
+        return
+    D.save_users()
+    got = ", ".join(f"{RESOURCES[k][1]}{v}" for k, v in refund.items())
+    await callback.answer(f"Реконструкция выполнена: {got}", show_alert=True)
+    await _show_ammo_type(callback, user, key)
 
 
 @router.callback_query(F.data.startswith("ws:use:"))
