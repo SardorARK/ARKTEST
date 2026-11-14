@@ -315,7 +315,7 @@ def list_html(user: dict, with_image: bool) -> str:
         text += gap + "<p>" + "<br>".join(f"<b>{SETS[k]['emoji']} {escape(SETS[k]['name'])}:</b> {_qty(set_count(user, k))}"
                                           for k in own) + "</p>" + gap
     else:
-        text += gap + "<p>У тебя пока нет наборов.</p>" + gap
+        text += gap + "<p>Пусто</p>" + gap
     return text + _help_block()
 
 
@@ -326,23 +326,28 @@ def info_html(key: str, with_image: bool) -> str:
     return text + f"<p>Открыть: <code>отк {CODES[key]}</code></p>"
 
 
+def _loot_line(emoji, name: str, n: int) -> str:
+    """Как в разделе «Ресурсы»: эмодзи, название жирным, значение моно (96 -> 96.0)."""
+    return f"{emoji} <b>{escape(name)}</b> — <code>{float(n):.1f}</code>"
+
+
 def loot_html(user: dict, key: str, opened: int, loot: dict, note: str, with_image: bool) -> str:
     s = SETS[key]
-    lines = [_res_line(k, n) for k, n in loot["res"].items()]
-    lines += [f"{W._em(W.ITEMS[k]['emoji'])} {escape(W.ITEMS[k]['name'])} ×{n}" for k, n in loot["items"].items()]
-    lines += [f"{W._em(W.ITEMS[k]['emoji'])} {escape(W.ITEMS[k]['name'])} ×{n}" for k, n in loot["ammo"].items()]
+    lines = [_loot_line(W.RESOURCES[k][1], W.RESOURCES[k][0], n) for k, n in loot["res"].items()]
+    lines += [_loot_line(W._em(W.ITEMS[k]["emoji"]), W.ITEMS[k]["name"], n) for k, n in loot["items"].items()]
+    lines += [_loot_line(W._em(W.ITEMS[k]["emoji"]), W.ITEMS[k]["name"], n) for k, n in loot["ammo"].items()]
     text = W._img(with_image) + W._head(s["name"].upper(), s["emoji"], f"Открыто наборов: {opened}")
-    text += "<p><b>Выпало</b><br>" + "<br>".join(lines) + "</p>"
+    text += "<p><i>Выпало:</i><br>" + "<br>".join(lines) + "</p>"
     if note:
         text += f"<p>{escape(note)}</p>"
-    return text + f"<p>Осталось: {_qty(set_count(user, key))}</p>"
+    return text
 
 
 CLOSE_DATA = "st:close"
 
 
 def close_kb() -> InlineKeyboardMarkup:
-    """Красная кнопка «Закрыть» под каждым сообщением наборов: удаляет сообщение."""
+    """Красная кнопка «Закрыть» под списком и «инфо» (под итогом открытия её нет): удаляет сообщение."""
     return InlineKeyboardMarkup(inline_keyboard=[[
         InlineKeyboardButton(text="Закрыть", callback_data=CLOSE_DATA, style=ButtonStyle.DANGER)]])
 
@@ -436,16 +441,15 @@ def _plain(cmd: tuple, user: dict, result: tuple | None = None) -> str:
     result - (ключ набора, сколько открыто, что выпало, пояснение) для команды открытия."""
     if cmd[0] == "open" and result is not None:
         key, opened, loot, note = result
-        lines = [f"{W.RESOURCES[k][1]} {W.RESOURCES[k][0]} ×{n}" for k, n in loot["res"].items()]
-        lines += [f"{W.ITEMS[k]['name']} ×{n}" for k, n in loot["items"].items()]
-        lines += [f"{W.ITEMS[k]['name']} ×{n}" for k, n in loot["ammo"].items()]
+        lines = [f"{W.RESOURCES[k][1]} {W.RESOURCES[k][0]} — {float(n):.1f}" for k, n in loot["res"].items()]
+        lines += [f"{W.ITEMS[k]['name']} — {float(n):.1f}" for k, n in loot["items"].items()]
+        lines += [f"{W.ITEMS[k]['name']} — {float(n):.1f}" for k, n in loot["ammo"].items()]
         text = f"{SETS[key]['name']}: открыто {opened}\nВыпало:\n" + "\n".join(lines)
-        text += f"\nОсталось: {set_count(user, key):.1f} шт"
         return text + (f"\n{note}" if note else "")
     if cmd[0] == "list":
         own = owned_sets(user)
         return "Твои наборы:\n" + "\n".join(f"{SETS[k]['name']}: {set_count(user, k):.1f} шт" for k in own) \
-            if own else "У тебя пока нет наборов."
+            if own else "Пусто"
     return "Готово."
 
 
@@ -458,13 +462,14 @@ async def on_command(message: Message):
         await message.answer("Сначала выбери питомца: /start")
         return
 
-    async def send(html):
+    async def send(html, kb=True):
+        markup = close_kb() if kb else None   # под итогом открытия кнопки «Закрыть» нет
         try:
-            await W.D.send_rich_card(message.bot, message.chat.id, "workshop", html, close_kb())
+            await W.D.send_rich_card(message.bot, message.chat.id, "workshop", html, markup)
         except TelegramNetworkError:   # обрыв связи с Telegram: одна повторная попытка
             log.warning("workshop_sets: обрыв связи, повторяю отправку")
             await asyncio.sleep(1.5)
-            await W.D.send_rich_card(message.bot, message.chat.id, "workshop", html, close_kb())
+            await W.D.send_rich_card(message.bot, message.chat.id, "workshop", html, markup)
 
     result = None
     try:
@@ -485,7 +490,7 @@ async def on_command(message: Message):
                 return
             W.D.save_users()   # наборы уже списаны и выданы: сохраняем до отправки карточки
             result = (key, opened, loot, note)
-            await send(lambda wi: loot_html(user, key, opened, loot, note, wi))
+            await send(lambda wi: loot_html(user, key, opened, loot, note, wi), kb=False)
     except Exception:
         # карточка не отправилась (разметка, сеть): пишем причину в лог и отвечаем простым текстом,
         # для открытия набора в нём весь список выпавшего: награда уже выдана и не должна пропасть
