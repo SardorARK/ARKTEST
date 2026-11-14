@@ -493,8 +493,25 @@ def setup(
 # Вспомогательное
 # ---------------------------------------------------------------------------
 
-def _num(n: int | float) -> str:
-    return f"{int(n):,}".replace(",", " ")
+NUMBER_SUFFIXES = ("", "K", "M", "B", "T", "Qa", "Qi", "Sx", "Sp", "Oc", "No", "Dc")
+
+
+def _num(n) -> str:
+    """Короткая запись чисел, как в main.py: 999, 1K, 1.5K, 1M, 2.35B, 1T, 1Qa и так далее.
+    Без округления вверх: 999 999 это 999.99K, а не 1000K."""
+    n = int(n)
+    sign = "\u2212" if n < 0 else ""
+    a = abs(n)
+    if a < 1000:
+        return f"{sign}{a}"
+    idx = 1
+    while idx < len(NUMBER_SUFFIXES) - 1 and a >= 1000 ** (idx + 1):
+        idx += 1
+    div = 1000 ** idx
+    whole, frac = divmod(a, div)
+    text = f"{whole}.{frac * 100 // div:02d}".rstrip("0").rstrip(".")
+    return f"{sign}{text}{NUMBER_SUFFIXES[idx]}"
+
 
 
 def _em(pair: tuple[str, str]) -> str:
