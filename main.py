@@ -1660,6 +1660,7 @@ dp.errors.register(on_error)
 gift.install(dp)         # запоминает ники игроков для «дать @ник»
 # Текст «Шахта» (быстрая команда «шахта») открывает раздел шахты. Ловим его ДО остальных обработчиков
 dp.message.outer_middleware(underground.MenuButtonMiddleware())
+workshop_sets.install(dp)   # команды наборов - раньше всех, чтобы их ничто не перехватило (workshop_sets.py)
 quick_cmds.install(dp)   # быстрые команды: «шахта», «/босс», «арена» и т.д. (quick_cmds.py)
 
 dp.include_router(admin.router)
