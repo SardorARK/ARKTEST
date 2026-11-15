@@ -4,6 +4,8 @@
     н-наборы-набор          показать наборы игрока (только те, что есть; также «н-набор-наборы», «наборы», просто «н»)
     отк бн 3                открыть 3 штуки Базового набора («открыть бн 3» то же; без числа - один; «все» - все)
     инфо бн                 содержимое и шансы набора
+    дать бн 4               ответом на сообщение игрока: передать ему 4 Базовых набора (также «gift», «подарить»)
+    дать @ник бн 4          то же по @нику (без числа - один; «все» - все такие наборы)
     выдать бн 5 / выдать все 5    (только админам) выдать наборы себе для проверки
 Код набора - первые буквы двух слов названия: Базовый набор = бн, Набор предметов = нп и т.д. (см. CODES).
 
@@ -29,10 +31,11 @@ import re
 from collections import Counter
 from html import escape
 
-from aiogram import F, Router
+from aiogram import BaseMiddleware, F, Router
 from aiogram.enums import ButtonStyle
 from aiogram.exceptions import TelegramAPIError, TelegramNetworkError
-from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
+from aiogram.types import (CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message,
+                           ReplyParameters)
 
 import workshop as W
 
@@ -46,12 +49,15 @@ _ADMINS: set = set()
 
 
 _NAME_HTML = [None]   # функция «игрок -> его ник в HTML» (settings.name_html)
+_USERS = [None]       # база игроков (main.users): нужна, чтобы найти игрока по @нику
 
 
-def setup(ADMIN_IDS=(), name_html=None) -> None:
+def setup(ADMIN_IDS=(), name_html=None, users=None) -> None:
     _ADMINS.update(int(x) for x in ADMIN_IDS)
     if name_html is not None:
         _NAME_HTML[0] = name_html
+    if users is not None:
+        _USERS[0] = users
 
 
 def _nick(user: dict) -> str:
@@ -68,6 +74,7 @@ def install(dp) -> None:
     """Ставит команды наборов на сам диспетчер, РАНЬШЕ остальных роутеров и quick_cmds:
     так ни один общий обработчик текста не перехватит «н-наборы-набор» и «отк бн 3».
     Вызывать в main.py до quick_cmds.install(dp)."""
+    dp.message.outer_middleware(_TrackUsernames())   # запоминает @ники игроков для «дать @ник бн 4»
     dp.message.register(on_command, _is_command)
     dp.callback_query.register(on_close, F.data == CLOSE_DATA)
 
@@ -302,13 +309,18 @@ def _help_block() -> str:
             "<code>отк бн 3</code> — <i>открыть 3 базовых набора</i><br>"
             "<code>открыть эн</code> — <i>открыть один элитный набор</i><br>"
             "<code>отк лн все</code> — <i>открыть все легендарные наборы</i><br>"
-            "<code>инфо бн</code> — <i>что внутри и какие шансы</i><br><br>"
+            "<code>инфо бн</code> — <i>что внутри и какие шансы</i><br>"
+            "<code>дать бн 4</code> — <i>ответом на сообщение игрока: передать ему 4 базовых набора</i><br>"
+            "<code>дать @ник бн 4</code> — <i>передать 4 базовых набора по нику</i><br>"
+            "<i>Вместо «дать» работают «gift» и «подарить». Без числа передаётся один набор, «все» — все такие наборы.</i><br><br>"
             "<b>Коды наборов</b><br>" + codes + "</blockquote>")
 
 
 def list_html(user: dict, with_image: bool) -> str:
     text = (W._img(with_image) + f"<p><b>{W._em(SETS_EMOJI)} НАБОРЫ - {_nick(user)}</b></p>"
-            "<blockquote><i>Твои наборы. Открывай их командами: список команд ниже.</i></blockquote>")
+            "<blockquote><i>Твои наборы. Открывай их и передавай другим игрокам командами: "
+            "ответом на сообщение игрока <code>дать бн 4</code> или по нику <code>дать @ник бн 4</code>. "
+            "Все команды ниже.</i></blockquote>")
     own = owned_sets(user)
     gap = "<p>⠀</p>"   # пустая строка из невидимого символа: одинаково на телефоне и на ПК
     if own:
@@ -392,6 +404,120 @@ router.callback_query.register(on_open, F.data == OPEN_DATA)
 
 
 # ---------------------------------------------------------------------------
+# Передача наборов другому игроку
+# ---------------------------------------------------------------------------
+
+class _TrackUsernames(BaseMiddleware):
+    """Пишет @ник Telegram в данные игрока (user["tg_username"]) при каждом его сообщении боту/в чат."""
+
+    async def __call__(self, handler, event, data):
+        try:
+            u = event.from_user
+            if u is not None and u.username and not u.is_bot:
+                user = W.D.get_user(u.id)
+                if user is not None and user.get("tg_username") != u.username.lower():
+                    user["tg_username"] = u.username.lower()
+                    W.D.save_users()
+        except Exception:
+            log.debug("workshop_sets: не удалось запомнить ник", exc_info=True)
+        return await handler(event, data)
+
+
+def _find_uid(username: str) -> int | None:
+    """Ищет игрока по @нику среди известных боту (кто хоть раз писал после запуска учёта ников)."""
+    users, name = _USERS[0], username.lower()
+    if users is None:
+        return None
+    try:
+        for uid, u in list(users.items()):
+            if isinstance(u, dict) and (u.get("tg_username") or "") == name:
+                return int(uid)
+    except Exception:
+        log.exception("workshop_sets: не удалось перебрать игроков")
+    return None
+
+
+_SEND_RE = re.compile(r"^[/!.]?(?:дать|gift|подарить)(?:@\w+)?\s+(?:@(\w{3,32})\s+)?([a-zа-я]{1,6})(?:\s+(\d+|все))?\s*$",
+                      re.IGNORECASE)
+
+
+def _parse_send(message: Message):
+    """«дать бн 4» / «gift @ник бн 4» -> ("send", ключ набора, число или None=все, ник или None); иначе None."""
+    if not message.text:
+        return None
+    m = _SEND_RE.match(message.text.strip().replace("ё", "е").replace("Ё", "Е"))
+    if not m:
+        return None
+    uname, code, num = m.group(1), m.group(2).lower(), (m.group(3) or "1").lower()
+    if code not in BY_CODE:
+        return None   # это не набор: например «дать @ник железо 5» обработает gift.py
+    return ("send", BY_CODE[code], None if num == "все" else int(num), uname)
+
+
+async def _send_sets(message: Message, cmd: tuple) -> None:
+    _, key, n, uname = cmd
+    bot = message.bot
+    sender = W.D.get_user(message.from_user.id)
+    if sender is None:
+        await message.answer("Сначала выбери питомца: /start")
+        return
+    tid = None
+    rep_msg = message.reply_to_message
+    if uname:
+        tid = _find_uid(uname)
+        if tid is None:
+            await message.answer(f"Игрок @{escape(uname)} не найден. Он должен играть в боте и хоть раз написать сообщение.")
+            return
+    elif rep_msg is not None and rep_msg.from_user is not None and not rep_msg.from_user.is_bot:
+        tid = rep_msg.from_user.id
+    else:
+        await message.answer("Ответь этой командой на сообщение игрока или укажи его: <code>дать @ник бн 4</code>")
+        return
+    if tid == message.from_user.id:
+        await message.answer("Нельзя передать наборы самому себе.")
+        return
+    target = W.D.get_user(tid)
+    if target is None:
+        await message.answer("Этот игрок ещё не выбрал питомца, передать ему наборы нельзя.")
+        return
+    name = SETS[key]["name"]
+    have = set_count(sender, key)
+    if have <= 0:
+        await message.answer(f"У тебя нет набора «{escape(name)}».")
+        return
+    n = have if n is None else n
+    if n < 1:
+        await message.answer("Количество должно быть не меньше 1.")
+        return
+    if n > have:
+        await message.answer(f"У тебя только {have} шт. набора «{escape(name)}».")
+        return
+    # списание и выдача без await между ними
+    left = have - n
+    if left > 0:
+        sets_of(sender)[key] = left
+    else:
+        sets_of(sender).pop(key, None)
+    give_set(target, key, n)
+    W.D.save_users()
+    text = (f"<p>{W._em(SETS_EMOJI)} <b>Игрок {_nick(sender)}</b> отправил игроку <b>{_nick(target)}</b></p>"
+            f"<p>{SETS[key]['emoji']} <b>{escape(name)}</b> ×{n}</p>")
+    try:
+        await bot.send_message(
+            message.chat.id, text,
+            message_thread_id=message.message_thread_id if message.is_topic_message else None,
+            reply_parameters=ReplyParameters(message_id=message.message_id, allow_sending_without_reply=True),
+        )
+    except TelegramAPIError:
+        log.warning("workshop_sets: не удалось отправить сообщение о передаче", exc_info=True)
+    if message.chat.type == "private":   # передали в личке по @нику: получатель должен узнать
+        try:
+            await bot.send_message(tid, text)
+        except TelegramAPIError:
+            pass
+
+
+# ---------------------------------------------------------------------------
 # Команды
 # ---------------------------------------------------------------------------
 LIST_WORDS = {"н", "набор", "наборы"}
@@ -431,6 +557,8 @@ def _parse(message: Message):
 
 
 def _is_command(message: Message) -> bool:
+    if _parse_send(message) is not None:
+        return True
     cmd = _parse(message)
     if cmd is None:
         return False
@@ -483,6 +611,10 @@ def _plain(cmd: tuple, user: dict, result: tuple | None = None) -> str:
 
 @router.message(_is_command)
 async def on_command(message: Message):
+    send_cmd = _parse_send(message)
+    if send_cmd is not None:
+        await _send_sets(message, send_cmd)
+        return
     cmd = _parse(message)
     log.info("workshop_sets: команда %s от %s", cmd, message.from_user.id)
     user = W.D.get_user(message.from_user.id)
