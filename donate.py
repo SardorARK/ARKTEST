@@ -679,7 +679,8 @@ def home_kb() -> InlineKeyboardMarkup:
         [_btn("Привилегии", "donate:priv", ButtonStyle.PRIMARY, EM_PRIV[0]), _btn("Кейсы", "donate:cases", ButtonStyle.PRIMARY, "5285009510300150278")],
         [_btn("Временные бусты", "donate:boosts", ButtonStyle.SUCCESS, "5438571934210082705"),
          _btn("🎒 Инвентарь", "donate:inv", ButtonStyle.SUCCESS)],
-        [_btn("Скины ника", "set:skin", ButtonStyle.PRIMARY, EM_SKIN[0])],
+        [_btn("Лавка", "donate:lavka", ButtonStyle.SUCCESS, EM_LAVKA[0]),
+         _btn("Скины ника", "set:skin", ButtonStyle.PRIMARY, EM_SKIN[0])],
         _back_btn("menu:back"),
     ])
 
@@ -738,6 +739,7 @@ def home_html(user_id: int, with_image: bool = False) -> str:
              "<b>Кейсы</b>: <i>артефакты Эпик, Миф и Лега</i>",
              "<b>Временные бусты</b>: <i>эликсиры на несколько часов</i>",
              f"🎒 <b>Инвентарь</b>: <i>твои эликсиры, сейчас</i> <b>{inv_total(user)}</b>",
+             f"{_ce(EM_LAVKA)} <b>Лавка</b>: <i>паки с наборами и ресурсами, товар меняется каждые {LAVKA_HOURS} ч</i>",
              f"{_ce(EM_SKIN)} <b>Скины ника</b>: <i>эмодзи вместо букв в имени</i>"],
         )
     )
@@ -1085,6 +1087,430 @@ async def on_soon(callback: CallbackQuery):
     # Заглушки будущих разделов
     name = _SOON.get(callback.data.rsplit(":", 1)[-1], "Раздел")
     await callback.answer(f"{name}: скоро появится.", show_alert=True)
+
+
+# ---------- Лавка ----------
+# Каждые LAVKA_HOURS часов в лавке меняется товар: из LAVKA_PACKS случайно выбирается LAVKA_SLOTS паков
+# (одинаково для всех игроков; выбор считается от номера окна, поэтому не меняется после перезапуска).
+# Лимиты действуют в пределах одного окна: «per_player» - сколько паков может купить один игрок,
+# «global» - сколько паков может купить весь сервер вместе (None - без общего лимита).
+# «weight» - шанс появления пака в лавке (чем выше, тем чаще). «items» - содержимое пака:
+#   ("set", ключ набора, штук)     наборы из workshop_sets (basic, elite, items, gear ...)
+#   ("minerals", None, штук)       минералы
+#   ("res", (куски названия), n)   ресурс мастерской: ищется в workshop.RESOURCES по названию
+LAVKA_HOURS = 4
+LAVKA_SLOTS = 3
+LAVKA_FIELD = "lavka"        # в профиле: {"slot": номер окна, "bought": {пак: сколько куплено}}
+LAVKA_FILE = Path(__file__).with_name("lavka_state.json")   # общий счётчик проданных паков в этом окне
+EM_LAVKA = EM_BUY
+
+LAVKA_PACKS: dict[str, dict] = {
+    "start": {
+        "name": "Стартовый пак", "icon": "🎁", "price": 89, "per_player": 3, "global": None, "weight": 3,
+        "tagline": "Лучший способ начать: два базовых набора и один элитный.",
+        "items": [("set", "basic", 2), ("set", "elite", 1)],
+    },
+    "wealth": {
+        "name": "Богатство", "icon": "💰", "price": 359, "per_player": 2, "global": None, "weight": 2,
+        "tagline": "Сразу сто тысяч минералов: хватит на несколько уровней вперёд.",
+        "items": [("minerals", None, 100_000)],
+    },
+    "elite": {
+        "name": "Элитный пак", "icon": "👑", "price": 249, "per_player": 2, "global": 50, "weight": 2,
+        "tagline": "Для тех, кто любит качество: элитные наборы, предметы и чистая эссенция света.",
+        "items": [("set", "elite", 2), ("set", "items", 1), ("res", ("эссенц", "свет"), 20.0)],
+    },
+    "res": {
+        "name": "Пак ресурсов", "icon": "📦", "price": 129, "per_player": 2, "global": None, "weight": 3,
+        "tagline": "Всё для крафта в одной коробке: по сто штук каждого материала.",
+        "items": [("res", ("волокн",), 100), ("res", ("бревн",), 100), ("res", ("лоз",), 100),
+                  ("res", ("панцир",), 100), ("res", ("глин",), 100)],
+    },
+    "royal": {
+        "name": "Королевский пак", "icon": "🏆", "price": 1599, "per_player": 2, "global": 25, "weight": 1,
+        "tagline": "Царская сокровищница: горы наборов, предметы и редкие материалы.",
+        "items": [("set", "basic", 10), ("set", "elite", 3), ("set", "items", 1),
+                  ("res", ("ледя",), 25), ("res", ("ядр",), 25)],
+    },
+    "master": {
+        "name": "Пак мастера", "icon": "🛠", "price": 689, "per_player": 2, "global": None, "weight": 1.5,
+        "tagline": "Выбор настоящего мастера: наборы предметов и снаряжения.",
+        "items": [("set", "items", 3), ("set", "gear", 2)],
+    },
+}
+SET_FALLBACK = {"basic": "Базовый набор", "elite": "Элитный набор", "items": "Набор предметов",
+                "gear": "Набор снаряжения"}
+
+_LV: dict = {"slot": -1, "sold": {}}
+
+
+def _lv_load() -> None:
+    try:
+        data = read_json_safe(LAVKA_FILE)
+        if isinstance(data, dict):
+            _LV["slot"] = int(data.get("slot", -1))
+            _LV["sold"] = {str(k): int(v) for k, v in (data.get("sold") or {}).items()}
+    except Exception:
+        log.exception("не удалось прочитать %s", LAVKA_FILE.name)
+
+
+def _lv_save() -> None:
+    try:
+        atomic_write_json(LAVKA_FILE, _LV)
+    except Exception:
+        log.exception("не удалось записать %s", LAVKA_FILE.name)
+
+
+_lv_load()
+
+
+def lavka_slot(now: float | None = None) -> int:
+    return int((time.time() if now is None else now) // (LAVKA_HOURS * 3600))
+
+
+def lavka_left_sec(now: float | None = None) -> int:
+    now = time.time() if now is None else now
+    return max(0, int((lavka_slot(now) + 1) * LAVKA_HOURS * 3600 - now))
+
+
+def _lv_roll() -> int:
+    """Новое окно: общий счётчик проданных паков обнуляется. Возвращает номер текущего окна."""
+    slot = lavka_slot()
+    if _LV.get("slot") != slot:
+        _LV["slot"] = slot
+        _LV["sold"] = {}
+        _lv_save()
+    return slot
+
+
+def lavka_stock(slot: int | None = None) -> list[str]:
+    """Какие паки лежат в лавке в этом окне (случайно, но одинаково для всех)."""
+    slot = lavka_slot() if slot is None else slot
+    rnd = random.Random(f"lavka:{slot}")
+    pool = list(LAVKA_PACKS)
+    order = list(LAVKA_PACKS)
+    out: list[str] = []
+    for _ in range(min(LAVKA_SLOTS, len(pool))):
+        k = rnd.choices(pool, weights=[LAVKA_PACKS[p]["weight"] for p in pool])[0]
+        pool.remove(k)
+        out.append(k)
+    return sorted(out, key=order.index)
+
+
+def _lv_user(user: dict, create: bool = False) -> dict:
+    """Покупки игрока в текущем окне (при смене окна обнуляются)."""
+    slot = lavka_slot()
+    rec = user.get(LAVKA_FIELD)
+    if not isinstance(rec, dict) or rec.get("slot") != slot or not isinstance(rec.get("bought"), dict):
+        rec = {"slot": slot, "bought": {}}
+        if create:
+            user[LAVKA_FIELD] = rec
+    return rec
+
+
+def lavka_user_left(user: dict, key: str) -> int:
+    got = int(_lv_user(user)["bought"].get(key, 0) or 0)
+    return max(0, LAVKA_PACKS[key]["per_player"] - got)
+
+
+def lavka_global_left(key: str) -> int | None:
+    cap = LAVKA_PACKS[key]["global"]
+    if cap is None:
+        return None
+    _lv_roll()
+    return max(0, cap - int(_LV["sold"].get(key, 0) or 0))
+
+
+def _hm(sec: int) -> str:
+    h, rest = divmod(max(0, int(sec)), 3600)
+    m = rest // 60
+    return f"{h} ч {m:02d} мин" if h else f"{m} мин"
+
+
+def _sets_mod():
+    try:
+        import workshop_sets
+        return workshop_sets
+    except Exception:
+        return None
+
+
+def _ws_mod():
+    try:
+        import workshop
+        return workshop
+    except Exception:
+        return None
+
+
+def _res_key(parts: tuple[str, ...]) -> str | None:
+    """Ключ ресурса мастерской по кускам названия («эссенц» + «свет» - эссенция света)."""
+    ws = _ws_mod()
+    if ws is None:
+        return None
+    for k, (name, _emoji) in ws.RESOURCES.items():
+        low = str(name).lower()
+        if all(p in low for p in parts):
+            return k
+    return None
+
+
+def _amt(n) -> str:
+    """100 -> «100», 20.0 -> «20.0», 100000 -> «100 000»."""
+    if isinstance(n, float):
+        return f"{n:.1f}"
+    return _fmt(n)
+
+
+def _item_line(kind: str, ref, n) -> str:
+    if kind == "set":
+        s = (getattr(_sets_mod(), "SETS", None) or {}).get(ref)
+        label = f"{s['emoji']} {s['name']}" if s else SET_FALLBACK.get(ref, str(ref))
+    elif kind == "minerals":
+        label = f"{_cfg.get('MINERAL_EMOJI', '🏜')} Минералы"
+    else:
+        k = _res_key(ref)
+        if k is None:
+            label = ref[0].capitalize()
+        else:
+            name, emoji = _ws_mod().RESOURCES[k]
+            label = f"{emoji} {name}"
+    return f"{label}: <b>×{_amt(n)}</b>" if kind == "set" else f"{label}: <b>{_amt(n)}</b>"
+
+
+def _pack_ready(key: str) -> bool:
+    """Паком можно торговать, только если все его наборы и ресурсы существуют в игре."""
+    for kind, ref, _n in LAVKA_PACKS[key]["items"]:
+        if kind == "set" and ref not in (getattr(_sets_mod(), "SETS", None) or {}):
+            return False
+        if kind == "res" and _res_key(ref) is None:
+            return False
+    return True
+
+
+def _grant_pack(user: dict, key: str) -> None:
+    """Кладёт содержимое пака игроку (если упадёт, вызывающий вернёт игрока в прежнее состояние)."""
+    for kind, ref, n in LAVKA_PACKS[key]["items"]:
+        if kind == "set":
+            _sets_mod().give_set(user, ref, int(n))
+        elif kind == "minerals":
+            field = _cfg.get("MINERALS_FIELD", "minerals")
+            user[field] = int(user.get(field, 0) or 0) + int(n)
+        else:
+            res = _ws_mod().res_of(user)
+            k = _res_key(ref)
+            res[k] = res.get(k, 0) + n
+
+
+def _lv_error(user: dict, key: str) -> str | None:
+    """Почему пак сейчас купить нельзя (None - можно)."""
+    if key not in LAVKA_PACKS or key not in lavka_stock():
+        return "Этот пак уже ушёл из лавки: товар обновился."
+    if not _pack_ready(key):
+        return "Пак временно недоступен. Кристаллы не потрачены."
+    if lavka_user_left(user, key) <= 0:
+        return f"Ты уже купил максимум этого пака в этом окне: {LAVKA_PACKS[key]['per_player']}. Жди обновления."
+    g = lavka_global_left(key)
+    if g is not None and g <= 0:
+        return "Пак распродан: весь тираж выкуплен. Жди обновления лавки."
+    return None
+
+
+def _limits_lines(user: dict, key: str) -> list[str]:
+    p = LAVKA_PACKS[key]
+    lines = [f"<b>Тебе доступно</b>: <b>{lavka_user_left(user, key)}</b> из {p['per_player']}"]
+    g = lavka_global_left(key)
+    if g is not None:
+        lines.append(f"<b>Осталось на всех</b>: <b>{g}</b> из {p['global']}")
+    return lines
+
+
+def _lv_head() -> str:
+    return (f"<b>{_ce(EM_LAVKA)} Товар обновится через</b> <b>{_hm(lavka_left_sec())}</b>")
+
+
+def lavka_html(user_id: int, with_image: bool = False) -> str:
+    user = _cfg["get_user"](user_id)
+    image = '<img src="tg://photo?id=pet"/>' if with_image else ""
+    blocks = []
+    for key in lavka_stock():
+        p = LAVKA_PACKS[key]
+        gl = lavka_global_left(key)
+        if lavka_user_left(user, key) <= 0:
+            state = "<i>ты купил максимум</i>"
+        elif gl is not None and gl <= 0:
+            state = "<i>распродано</i>"
+        else:
+            state = f"<i>доступно тебе: {lavka_user_left(user, key)} из {p['per_player']}</i>"
+        blocks.append(
+            f"<p><b>{p['icon']} {p['name']}</b> · {_ce(EM_CRYSTAL)} <b>{_fmt(p['price'])}</b><br>"
+            f"{state}</p>"
+        )
+    return (
+        f"{image}"
+        f"<p><b>{_ce(EM_LAVKA)} ЛАВКА</b></p>"
+        "<blockquote><i>Редкие паки с наборами, ресурсами и минералами. Товар в лавке меняется "
+        f"каждые {LAVKA_HOURS} часа: что-то появляется, что-то уходит навсегда. "
+        "Количество паков ограничено, так что не зевай.</i></blockquote>"
+        f"{_balance_line(user)}"
+        f"<p>{_lv_head()}</p>"
+        + "".join(blocks)
+    )
+
+
+def lavka_kb(user_id: int) -> InlineKeyboardMarkup:
+    user = _cfg["get_user"](user_id) or {}
+    rows = []
+    for key in lavka_stock():
+        p = LAVKA_PACKS[key]
+        gl = lavka_global_left(key)
+        sold = lavka_user_left(user, key) <= 0 or (gl is not None and gl <= 0)
+        affordable = get_balance(user) >= p["price"]
+        style = ButtonStyle.DANGER if sold or not affordable else ButtonStyle.SUCCESS
+        rows.append([_btn(f"{p['icon']} {p['name']} · {_fmt(p['price'])}", f"donate:lv:{key}", style)])
+    rows.append([_btn("Обновить", "donate:lavka", ButtonStyle.PRIMARY)])
+    rows.append(_back_btn("donate:home"))
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def lavka_item_html(user_id: int, key: str, with_image: bool = False) -> str:
+    user = _cfg["get_user"](user_id)
+    p = LAVKA_PACKS[key]
+    image = '<img src="tg://photo?id=pet"/>' if with_image else ""
+    have = get_balance(user)
+    return (
+        f"{image}"
+        f"<p><b>{p['icon']} {p['name'].upper()}</b></p>"
+        f"<blockquote><i>{p['tagline']}</i></blockquote>"
+        + _tree(f"{_ce(EM_PACK)} Внутри", [_item_line(*it) for it in p["items"]])
+        + _tree("Условия", [
+            f"{_ce(EM_PRICE)} <b>Цена</b>: {_ce(EM_CRYSTAL)} <b>{_fmt(p['price'])}</b> {_plural(p['price'])}",
+            f"{_ce(EM_CRYSTAL)} <b>Твой баланс</b>: <b>{_fmt(have)}</b>",
+            *_limits_lines(user, key),
+            f"<b>Обновление через</b>: <b>{_hm(lavka_left_sec())}</b>",
+        ])
+    )
+
+
+def lavka_item_kb(user_id: int, key: str) -> InlineKeyboardMarkup:
+    user = _cfg["get_user"](user_id) or {}
+    p = LAVKA_PACKS[key]
+    ok = _lv_error(user, key) is None and get_balance(user) >= p["price"]
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [_btn(f"Купить · {_fmt(p['price'])}", f"donate:lvgo:{key}",
+              ButtonStyle.SUCCESS if ok else ButtonStyle.DANGER, EM_BUY[0])],
+        _back_btn("donate:lavka"),
+    ])
+
+
+def lavka_done_html(user_id: int, key: str) -> str:
+    user = _cfg["get_user"](user_id)
+    p = LAVKA_PACKS[key]
+    return (
+        f"<p><b>{p['icon']} {p['name'].upper()} КУПЛЕН</b></p>"
+        "<blockquote><i>Всё содержимое уже у тебя: наборы лежат в разделе «Наборы», "
+        "ресурсы в мастерской, минералы на счёте.</i></blockquote>"
+        + _tree(f"{_ce(EM_PACK)} Получено", [_item_line(*it) for it in p["items"]])
+        + _tree("Итог", [
+            f"{_ce(EM_CRYSTAL)} <b>Баланс</b>: <b>{_fmt(get_balance(user))}</b>",
+            *_limits_lines(user, key),
+        ])
+    )
+
+
+def lavka_done_kb(key: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [_btn("В лавку", "donate:lavka", ButtonStyle.SUCCESS, EM_BUY[0])],
+        _back_btn("donate:home"),
+    ])
+
+
+@router.callback_query(F.data == "donate:lavka")
+async def on_lavka(callback: CallbackQuery):
+    if await _require_user(callback) is None:
+        return
+    await callback.answer()
+    uid = callback.from_user.id
+    _lv_roll()
+    await _cfg["show_rich_card"](callback, IMG_KEY, lambda wi: lavka_html(uid, wi), lavka_kb(uid))
+
+
+@router.callback_query(F.data.regexp(r"^donate:lv:\w+$"))
+async def on_lavka_item(callback: CallbackQuery):
+    if await _require_user(callback) is None:
+        return
+    key = callback.data.split(":")[2]
+    if key not in LAVKA_PACKS or key not in lavka_stock():
+        await callback.answer("Этот пак уже ушёл из лавки: товар обновился.", show_alert=True)
+        uid = callback.from_user.id
+        await _cfg["show_rich_card"](callback, IMG_KEY, lambda wi: lavka_html(uid, wi), lavka_kb(uid))
+        return
+    await callback.answer()
+    uid = callback.from_user.id
+    await _cfg["show_rich_card"](callback, IMG_KEY, lambda wi: lavka_item_html(uid, key, wi),
+                                 lavka_item_kb(uid, key))
+
+
+@router.callback_query(F.data.regexp(r"^donate:lvgo:\w+$"))
+async def on_lavka_buy(callback: CallbackQuery):
+    """Покупка пака за кристаллы. Проверки, списание и выдача идут без await между ними:
+    лимит нельзя обойти быстрыми нажатиями. Если выдача упала, игрок и счётчик возвращаются как были."""
+    user = await _require_user(callback)
+    if user is None:
+        return
+    uid = callback.from_user.id
+    key = callback.data.split(":")[2]
+    err = _lv_error(user, key)
+    if err:
+        await callback.answer(err, show_alert=True)
+        if key not in LAVKA_PACKS or key not in lavka_stock():
+            await _cfg["show_rich_card"](callback, IMG_KEY, lambda wi: lavka_html(uid, wi), lavka_kb(uid))
+        return
+    p = LAVKA_PACKS[key]
+    have = get_balance(user)
+    if have < p["price"]:
+        await callback.answer(
+            f"Не хватает кристаллов: нужно {_fmt(p['price'])}, у тебя {_fmt(have)}.", show_alert=True)
+        return
+
+    snapshot = copy.deepcopy(user)
+    sold_before = _LV["sold"].get(key, 0)
+    try:
+        user[BALANCE_FIELD] = have - p["price"]
+        _grant_pack(user, key)
+        rec = _lv_user(user, create=True)
+        rec["bought"][key] = int(rec["bought"].get(key, 0) or 0) + 1
+        _bump(user, spent_lavka=p["price"], lavka=1, **{f"lavka_{key}": 1})
+        _lv_roll()
+        _LV["sold"][key] = int(_LV["sold"].get(key, 0) or 0) + 1
+    except Exception:
+        user.clear()
+        user.update(snapshot)
+        _LV["sold"][key] = sold_before
+        log.exception("покупка пака %s у игрока %s не удалась, состояние восстановлено", key, uid)
+        ledger("donate_lavka_failed", user=uid, pack=key, price=p["price"])
+        await callback.answer("Не удалось купить пак. Кристаллы не потрачены.", show_alert=True)
+        return
+    _lv_save()
+    _cfg["save_users"]()
+    ledger("donate_lavka", user=uid, pack=key, price=p["price"], slot=lavka_slot(),
+           balance=user[BALANCE_FIELD])
+    await callback.answer()
+    await _cfg["show_rich_card"](callback, IMG_KEY, lambda wi: lavka_done_html(uid, key), lavka_done_kb(key))
+
+
+# ---------- «Донат» в чате: текст раздела и кнопка «Перейти» ----------
+
+async def send_group_card(bot, chat_id: int, user_id: int, url: str) -> bool:
+    """В группе раздел «Донат» не открывается: показываем его текст и одну кнопку «Перейти» в личку
+    с ботом. False: у игрока нет питомца."""
+    if _cfg["get_user"](user_id) is None:
+        return False
+    kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(
+        text="Перейти", url=url, style=ButtonStyle.PRIMARY,
+        icon_custom_emoji_id=_cfg["DONATE_EMOJI"][0])]])
+    await _cfg["send_rich_card"](bot, chat_id, IMG_KEY, lambda wi: home_html(user_id, wi), kb)
+    return True
 
 
 # ---------- Скины ника ----------
