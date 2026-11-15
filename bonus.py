@@ -87,11 +87,48 @@ def setup(**deps) -> None:
         _active = {}
 
 
-def _save_active() -> None:
+_active_dirty = False
+_active_writing = False
+_bg_tasks: set = set()
+
+
+def _write_active_sync() -> None:
     try:
-        atomic_write_json(ACTIVE_FILE, _active, backup_every=50)
+        atomic_write_json(ACTIVE_FILE, {k: dict(v) for k, v in _active.items()}, backup_every=50)
     except Exception:
         log.exception("Не удалось сохранить bonus_active.json")
+
+
+async def _active_writer() -> None:
+    """Пишет bonus_active.json в потоке, не блокируя бота; частые изменения склеиваются в одну запись."""
+    global _active_dirty, _active_writing
+    _active_writing = True
+    try:
+        while _active_dirty:
+            _active_dirty = False
+            await asyncio.sleep(1.0)
+            snapshot = {k: dict(v) for k, v in _active.items()}   # копия в основном потоке: словарь не меняется под записью
+            try:
+                await asyncio.to_thread(atomic_write_json, ACTIVE_FILE, snapshot, backup_every=50)
+            except Exception:
+                log.exception("Не удалось сохранить bonus_active.json")
+    finally:
+        _active_writing = False
+
+
+def _save_active() -> None:
+    global _active_dirty
+    _active_dirty = True
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        _active_dirty = False
+        _write_active_sync()
+        return
+    if not _active_writing:
+        task = loop.create_task(_active_writer())
+        _bg_tasks.add(task)
+        task.add_done_callback(_bg_tasks.discard)
 
 
 # ---------------------------------------------------------------------------
@@ -224,7 +261,7 @@ async def set_channel(bot: Bot, raw) -> tuple[bool, str]:
     link_note = ""
     if not link:
         try:
-            link = await bot.export_chat_invite_link(chat.id)
+            link = (await bot.create_chat_invite_link(chat.id, name="Бонусы бота")).invite_link
         except TelegramAPIError:
             link = ""
             link_note = ("\n\n<i>Канал приватный, а у бота нет права приглашать пользователей, "
@@ -409,6 +446,8 @@ def _note_for(res: dict | None) -> str:
     status = (res or {}).get("status")
     if status == "busy":
         return "Подожди секунду: награда уже выдаётся."
+    if status == "nouser":
+        return "Сначала выбери питомца: /start"
     return ""
 
 
@@ -561,14 +600,18 @@ async def _daily_reply(callback: CallbackQuery, res: dict) -> None:
 async def on_daily(callback: CallbackQuery):
     _, action, mode = callback.data.split(":")
     uid = callback.from_user.id
-    if D.get_user(uid) is None:
-        await callback.answer("Сначала выбери питомца: /start", show_alert=True)
-        return
     if action == "claim" and mode == "c":
-        # Команда «еб» короткий ответ без кнопок
-        res = await claim(callback.bot, uid)
+        # Команда «еб»: короткий ответ без кнопок. Заглушка «⏳» никогда не должна остаться висеть.
+        try:
+            res = await claim(callback.bot, uid)   # для игрока без питомца вернёт nouser
+        except Exception:
+            log.exception("daily: ошибка выдачи бонуса игроку %s", uid)
+            res = {"status": "error"}
         await callback.answer()
         await _daily_reply(callback, res)
+        return
+    if D.get_user(uid) is None:
+        await callback.answer("Сначала выбери питомца: /start", show_alert=True)
         return
     res = None
     if action == "claim":
@@ -692,6 +735,8 @@ async def recheck_loop(bot: Bot) -> None:
             if due:
                 _save_active()
         except asyncio.CancelledError:
+            if _active_dirty:
+                _write_active_sync()   # остановка бота: дописываем то, что не успело уйти в файл
             raise
         except Exception:
             log.exception("Ошибка в цикле проверки бонуса")
@@ -892,6 +937,8 @@ async def on_check(callback: CallbackQuery):
     if wait > 0:
         await callback.answer(f"Подожди {int(wait) + 1} сек. перед новой проверкой", show_alert=True)
         return
+    if len(_manual_last) > 5000:
+        _manual_last.clear()
     _manual_last[uid] = now
     await callback.answer("Проверяю описание профиля…")
 
