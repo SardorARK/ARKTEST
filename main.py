@@ -1369,30 +1369,34 @@ def pet_short_html(user_id: int, with_image: bool = False) -> str:
     )
 
 
-def pet_short_kb() -> InlineKeyboardMarkup:
-    """Одна кнопка «Перейти»: открывает полный профиль питомца со всеми кнопками (menu:pet)."""
+def pet_short_kb(url: str) -> InlineKeyboardMarkup:
+    """Одна кнопка «Перейти»: ссылка в личный чат с ботом (?start=pet), там открывается полный профиль."""
     return InlineKeyboardMarkup(
         inline_keyboard=[[
             InlineKeyboardButton(
-                text="Перейти", callback_data="menu:pet", style=ButtonStyle.PRIMARY,
+                text="Перейти", url=url, style=ButtonStyle.PRIMARY,
                 icon_custom_emoji_id=PET_BTN_EMOJI[0],
             )
         ]]
     )
 
 
-async def send_pet_short(bot: Bot, chat_id: int, user_id: int) -> None:
-    """Вызов из чата: короткая карточка питомца с кнопкой «Перейти»."""
-    if get_user(user_id) is None:
-        await bot.send_message(chat_id, "Сначала выбери питомца: /start")
-        return
+async def send_pet_short(bot: Bot, chat_id: int, user_id: int, url: str) -> bool:
+    """Вызов из группы: короткая карточка питомца с кнопкой «Перейти». False: у игрока нет питомца."""
+    user = get_user(user_id)
+    if user is None:
+        return False
     await send_rich_card(
         bot,
         chat_id,
-        get_user(user_id)["pet"],   # фото питомца, как в полном профиле
+        user["pet"],   # фото питомца, как в полном профиле
         lambda with_image: pet_short_html(user_id, with_image),
-        pet_short_kb(),
+        pet_short_kb(url),
     )
+    return True
+
+
+quick_cmds.pet_group_card = send_pet_short   # «пет», «питомец», «я» в группе (quick_cmds.py)
 
 
 def back_kb() -> InlineKeyboardMarkup:
@@ -2177,12 +2181,6 @@ async def on_pet_pick(callback: CallbackQuery):
 @dp.message(F.text == "Меню")
 async def open_menu(message: Message):
     await send_menu(message.bot, message.chat.id, message.from_user.id)
-
-
-@dp.message(F.text.regexp(r"(?i)^/?(мой\s+)?(питомец|pet)(@\w+)?$"))
-async def open_pet_short(message: Message):
-    """«питомец», «мой питомец», «/pet» в чате: короткая карточка + кнопка «Перейти»."""
-    await send_pet_short(message.bot, message.chat.id, message.from_user.id)
 
 
 @dp.message(F.text == "Заработать")
