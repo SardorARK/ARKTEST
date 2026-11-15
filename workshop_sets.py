@@ -70,6 +70,10 @@ def _nick(user: dict) -> str:
     return escape(str(user.get("tg_name") or "Игрок"))
 
 
+SEND_EMOJI = ("5195033767969839232", "🚀")   # значок в сообщении о передаче набора
+SEND_EMOJI_HTML = f'<tg-emoji emoji-id="{SEND_EMOJI[0]}">{SEND_EMOJI[1]}</tg-emoji>'
+
+
 def _plain_nick(user: dict) -> str:
     """Ник без разметки (запасной вариант текста)."""
     return re.sub(r"<[^>]+>", "", _nick(user)).replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">") or "Игрок"
@@ -505,9 +509,9 @@ async def _send_sets(message: Message, cmd: tuple) -> None:
         sets_of(sender).pop(key, None)
     give_set(target, key, n)
     W.D.save_users()
-    text = (f"{W._em(SETS_EMOJI)} <b>Игрок {_nick(sender)}</b> отправил игроку <b>{_nick(target)}</b>\n\n"
+    text = (f"{SEND_EMOJI_HTML} <b>Игрок {_nick(sender)}</b> <i>отправил игроку</i> <b>{_nick(target)}</b>\n\n"
             f"{SETS[key]['emoji']} <b>{escape(name)}</b> ×{n}")
-    plain = (f"Игрок {_plain_nick(sender)} отправил игроку {_plain_nick(target)}\n\n"
+    plain = (f"🚀 Игрок {_plain_nick(sender)} отправил игроку {_plain_nick(target)}\n\n"
              f"{SETS[key]['emoji']} {name} ×{n}")
 
     async def _deliver(chat_id: int, **kw) -> None:
