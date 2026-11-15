@@ -706,12 +706,9 @@ def _ach_emoji_id() -> str | None:
     return pair[0] if isinstance(pair, tuple) else None
 
 
-def notice_kb() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(text="Открыть", callback_data="ach:home", style=ButtonStyle.SUCCESS,
-                             icon_custom_emoji_id=_ach_emoji_id()),
-        InlineKeyboardButton(text="Закрыть", callback_data="ach:close", style=ButtonStyle.DANGER),
-    ]])
+def notice_kb() -> InlineKeyboardMarkup | None:
+    """Уведомление о достижении теперь без кнопок: «Открыть» вело в меню через «Назад»."""
+    return None
 
 
 async def _send_notice(bot, chat_id: int, user: dict, new: list[dict]) -> None:
