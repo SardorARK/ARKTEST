@@ -253,7 +253,7 @@ def open_set(user: dict, key: str) -> tuple[str | None, dict]:
 # ---------------------------------------------------------------------------
 # Оформление
 # ---------------------------------------------------------------------------
-SETS_EMOJI = ("", "🎁")
+SETS_EMOJI = ("5203996991054432397", "🎁")   # заголовок списка и кнопка «Наборы» в профиле
 
 
 def _res_line(k: str, n: int) -> str:
@@ -351,6 +351,7 @@ def loot_html(user: dict, key: str, opened: int, loot: dict, note: str, with_ima
 
 
 CLOSE_DATA = "st:close"
+OPEN_DATA = "st:open"   # кнопка «Наборы» в профиле (main.py): тот же список, но с «Назад» вместо «Закрыть»
 
 
 def close_kb() -> InlineKeyboardMarkup:
@@ -368,6 +369,26 @@ async def on_close(callback: CallbackQuery):
 
 
 router.callback_query.register(on_close, F.data == CLOSE_DATA)
+
+
+def back_kb() -> InlineKeyboardMarkup:
+    """Список наборов, открытый из профиля: «Назад» возвращает в профиль (команда даёт «Закрыть»)."""
+    return InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="Назад", callback_data="menu:player", style=ButtonStyle.PRIMARY,
+                             icon_custom_emoji_id=W.D.BACK_EMOJI_ID)]])
+
+
+async def on_open(callback: CallbackQuery):
+    """Кнопка «Наборы» в профиле."""
+    user = W.D.get_user(callback.from_user.id)
+    if user is None:
+        await callback.answer("Сначала выбери питомца: /start", show_alert=True)
+        return
+    await callback.answer()
+    await W.D.show_rich_card(callback, "workshop", lambda wi: list_html(user, wi), back_kb())
+
+
+router.callback_query.register(on_open, F.data == OPEN_DATA)
 
 
 # ---------------------------------------------------------------------------
