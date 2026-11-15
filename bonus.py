@@ -12,6 +12,9 @@
     бонус выключается, игроку приходит уведомление. Если Telegram не ответил (сеть, лимиты),
     бонус не снимается: проверка повторится позже.
   * Прибавка к урону отдаётся в boss через bonus.damage_pct(user).
+  * Если админ задал канал (channel_gate.py, админка -> «Канал»), для бонуса нужна ещё и подписка на него:
+    ушёл с канала, бонус отключается при ближайшей проверке.
+  * «Бонус» в меню открывает раздел из двух бонусов: «Ежедневный бонус» (daily.py) и «Бонус за описание».
 """
 
 import asyncio
@@ -28,6 +31,9 @@ from aiogram.exceptions import TelegramAPIError, TelegramBadRequest, TelegramRet
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup
 
 from storage import atomic_write_json, read_json_safe
+
+import channel_gate
+import daily
 
 router = Router()
 log = logging.getLogger(__name__)
@@ -135,7 +141,8 @@ def _deactivate(user_id: int, user: dict | None) -> None:
 
 async def check_user(bot: Bot, user_id: int) -> str:
     """Проверяет одного игрока. Возвращает: 'on' (бонус активен), 'off' (нет юзернейма),
-    'error' (проверить не удалось, состояние не менялось), 'nouser' (игрока нет в базе)."""
+    'nosub' (юзернейм есть, но нет подписки на канал), 'error' (проверить не удалось, состояние не менялось),
+    'nouser' (игрока нет в базе)."""
     user = D.get_user(user_id)
     if user is None:
         _active.pop(str(user_id), None)
@@ -145,6 +152,13 @@ async def check_user(bot: Bot, user_id: int) -> str:
     if not ok:
         return "error"
     if _has_username(bio, username):
+        gate = await channel_gate.status(bot, user_id)
+        if gate == "no":
+            if is_active(user) or str(user_id) in _active:
+                _deactivate(user_id, user)
+            return "nosub"
+        if gate == "error":
+            return "error"
         _activate(user_id, user)
         return "on"
     if is_active(user) or str(user_id) in _active:
@@ -165,6 +179,8 @@ async def recheck_loop(bot: Bot) -> None:
                 res = await check_user(bot, uid_int)
                 if res == "off":
                     await _notify_lost(bot, uid_int)
+                elif res == "nosub":
+                    await _notify_lost(bot, uid_int, no_sub=True)
                 elif res == "error":
                     # Не сняли и не подтвердили: повторим через тик, а не через 2 часа
                     rec = _active.get(uid)
@@ -180,31 +196,73 @@ async def recheck_loop(bot: Bot) -> None:
         await asyncio.sleep(LOOP_TICK_SEC)
 
 
-async def _notify_lost(bot: Bot, user_id: int) -> None:
-    username = _bot_username
-    text = (
-        "<b>Бонус отключён</b>\n\n"
-        f"Мы не нашли <b>@{escape(username)}</b> в описании твоего профиля, поэтому "
-        f"<b>+{BONUS_PCT}% к урону по боссам</b> больше не действует.\n\n"
-        "Верни юзернейм в описание и нажми «Проверить» в разделе «Бонус», "
-        "и сила вернётся к тебе."
-    )
+async def _notify_lost(bot: Bot, user_id: int, no_sub: bool = False) -> None:
+    if no_sub:
+        text = (
+            "<b>Бонус отключён</b>\n\n"
+            f"Ты больше не подписан на канал <b>{channel_gate.title_html()}</b>, поэтому "
+            f"<b>+{BONUS_PCT}% к урону по боссам</b> больше не действует.\n\n"
+            "Подпишись снова и нажми «Проверить» в разделе «Бонус», и сила вернётся к тебе."
+        )
+    else:
+        text = (
+            "<b>Бонус отключён</b>\n\n"
+            f"Мы не нашли <b>@{escape(_bot_username)}</b> в описании твоего профиля, поэтому "
+            f"<b>+{BONUS_PCT}% к урону по боссам</b> больше не действует.\n\n"
+            "Верни юзернейм в описание и нажми «Проверить» в разделе «Бонус», "
+            "и сила вернётся к тебе."
+        )
     try:
         await bot.send_message(user_id, text)
     except TelegramAPIError:
         pass
 
 
-# ---------- Экран ----------
+# ---------- Экраны ----------
 
 def _gap() -> str:
     return "<br>&nbsp;<br>"
+
+
+def _hub_html(user_id: int | None, with_image: bool) -> str:
+    """Раздел «Бонус»: два бонуса и коротко, что с каждым сейчас."""
+    user = D.get_user(user_id) if user_id else None
+    image = '<img src="tg://photo?id=pet"/>' if with_image else ""
+    ok = D.custom_emoji(CHECK_EMOJI)
+    desc_state = (f"{ok} активен: +{BONUS_PCT}% к урону по боссам" if is_active(user)
+                  else f"не активен: +{BONUS_PCT}% к урону по боссам за юзернейм в описании")
+    return (
+        f"{image}"
+        f"<p><b>{D.custom_emoji(BONUS_EMOJI)} БОНУСЫ</b></p>"
+        "<blockquote><i>Награды за то, что ты с нами: заходи каждый день и расскажи о боте "
+        "в своём профиле.</i></blockquote>"
+        f"<p><b>{D.custom_emoji(daily.DAILY_EMOJI)} Ежедневный бонус</b><br>"
+        f"{daily.summary(user)}<br>"
+        "<i>Наборы каждый день, награда растёт 7 дней подряд.</i></p>"
+        f"<p><b>{D.custom_emoji(BONUS_EMOJI)} Бонус за описание</b><br>"
+        f"Статус: {desc_state}</p>"
+    )
+
+
+def _hub_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="Ежедневный бонус", callback_data="daily:open:m",
+                              style=ButtonStyle.SUCCESS, icon_custom_emoji_id=daily.DAILY_EMOJI[0])],
+        [InlineKeyboardButton(text="Бонус за описание", callback_data="bonus:desc",
+                              style=ButtonStyle.PRIMARY, icon_custom_emoji_id=BONUS_EMOJI[0])],
+        [InlineKeyboardButton(text="Назад", callback_data="menu:back",
+                              style=ButtonStyle.PRIMARY, icon_custom_emoji_id=D.BACK_EMOJI_ID)],
+    ])
 
 
 def _active_html(with_image: bool) -> str:
     """Экран после успешной активации: сразу видно, что бонус включён."""
     image = '<img src="tg://photo?id=pet"/>' if with_image else ""
     ok = D.custom_emoji(CHECK_EMOJI)
+    gate = channel_gate.is_enabled()
+    sub_line = f"{ok} Подписка на канал: <b>есть</b><br>" if gate else ""
+    cond = " и ты подписан на канал" if gate else ""
+    off_by = "убрать его или отписаться" if gate else "убрать его"
     return (
         f"{image}"
         f"<p><b>{D.custom_emoji(BONUS_EMOJI)} БОНУС АКТИВИРОВАН</b></p>"
@@ -213,10 +271,11 @@ def _active_html(with_image: bool) -> str:
         f"<p><b>{ok} Успешно активировано</b>{_gap()}"
         f"{ok} Урон по боссам: <b>+{BONUS_PCT}%</b><br>"
         f"{ok} Действует на всех боссов<br>"
+        f"{sub_line}"
         f"{ok} Проверка описания: раз в 2 часа</p>"
         f"<p><b>{D.custom_emoji(D.INFO_EMOJI)} Важно</b>{_gap()}"
-        "Пока юзернейм стоит в описании, бонус с тобой. "
-        "Если убрать его, бонус отключится при ближайшей проверке.</p>"
+        f"Пока юзернейм стоит в описании{cond}, бонус с тобой. "
+        f"Если {off_by}, бонус отключится при ближайшей проверке.</p>"
     )
 
 
@@ -227,29 +286,51 @@ def bonus_html(user_id: int | None, with_image: bool = False, note: str = "") ->
     image = '<img src="tg://photo?id=pet"/>' if with_image else ""
     uname = f"@{escape(_bot_username)}" if _bot_username else "@юзернейм_бота"
     note_html = f"<p><b>{note}</b></p>" if note else ""
+    gate = channel_gate.is_enabled()
+    intro = ("Подпишись на наш канал, расскажи о боте в своём профиле и получи "
+             if gate else "Расскажи о боте в своём профиле и получи ")
+    if gate:
+        steps = (
+            f"{D.custom_emoji(NUM_EMOJI[0])} Подпишись на канал <b>{channel_gate.title_html()}</b> "
+            "(кнопка ниже).<br>"
+            f"{D.custom_emoji(NUM_EMOJI[1])} Открой Telegram: Настройки, «Изменить профиль», и в поле «О себе» "
+            f"впиши <b>{uname}</b>.<br>"
+            f"{D.custom_emoji(NUM_EMOJI[2])} Вернись сюда и нажми «Проверить».</p>"
+        )
+        hint = ("<p><i>Подсказка: юзернейм можно писать в любом месте описания и в любом регистре. "
+                "Бонус работает, пока ты подписан на канал и юзернейм стоит в описании. "
+                "Если описание скрыто настройками приватности, бот его не увидит.</i></p>")
+    else:
+        steps = (
+            f"{D.custom_emoji(NUM_EMOJI[0])} Открой Telegram: Настройки, затем «Изменить профиль».<br>"
+            f"{D.custom_emoji(NUM_EMOJI[1])} В поле «О себе» впиши <b>{uname}</b>.<br>"
+            f"{D.custom_emoji(NUM_EMOJI[2])} Вернись сюда и нажми «Проверить».</p>"
+        )
+        hint = ("<p><i>Подсказка: юзернейм можно писать в любом месте описания и в любом регистре. "
+                "Если описание скрыто настройками приватности, бот его не увидит.</i></p>")
     return (
         f"{image}"
         f"<p><b>{D.custom_emoji(BONUS_EMOJI)} БОНУС ЗА ОПИСАНИЕ</b></p>"
-        f"<blockquote><i>Расскажи о боте в своём профиле и получи "
+        f"<blockquote><i>{intro}"
         f"<b>+{BONUS_PCT}% к урону</b> по всем боссам. Бесплатно и без ограничений по времени, "
-        "пока юзернейм стоит в описании.</i></blockquote>"
+        "пока условия выполняются.</i></blockquote>"
         "<p><b>Статус: бонус не активен</b></p>"
         f"<p><b>{D.custom_emoji(D.INFO_EMOJI)} Как получить</b>{_gap()}"
-        f"{D.custom_emoji(NUM_EMOJI[0])} Открой Telegram: Настройки, затем «Изменить профиль».<br>"
-        f"{D.custom_emoji(NUM_EMOJI[1])} В поле «О себе» впиши <b>{uname}</b>.<br>"
-        f"{D.custom_emoji(NUM_EMOJI[2])} Вернись сюда и нажми «Проверить».</p>"
+        f"{steps}"
         f"{note_html}"
-        "<p><i>Подсказка: юзернейм можно писать в любом месте описания и в любом регистре. "
-        "Если описание скрыто настройками приватности, бот его не увидит.</i></p>"
+        f"{hint}"
     )
 
 
 def bonus_kb(active: bool = False) -> InlineKeyboardMarkup:
     rows = []
     if not active:
+        sub = channel_gate.subscribe_button()
+        if sub is not None:
+            rows.append([sub])
         rows.append([InlineKeyboardButton(text="Проверить", callback_data="bonus:check",
                                           style=ButtonStyle.SUCCESS, icon_custom_emoji_id=CHECK_EMOJI[0])])
-    rows.append([InlineKeyboardButton(text="Назад", callback_data="menu:back",
+    rows.append([InlineKeyboardButton(text="Назад", callback_data="bonus:hub",
                                       style=ButtonStyle.PRIMARY, icon_custom_emoji_id=D.BACK_EMOJI_ID)])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -267,14 +348,38 @@ async def _show(callback: CallbackQuery, note: str = "", force_new: bool = False
             raise
 
 
-@router.callback_query(F.data == "menu:bonus")
+async def _show_hub(callback: CallbackQuery, force_new: bool = False) -> None:
+    uid = callback.from_user.id
+    try:
+        await D.show_rich_card(
+            callback, "menu",
+            lambda with_image: _hub_html(uid, with_image),
+            _hub_kb(), force_new=force_new,
+        )
+    except TelegramBadRequest as e:
+        if "not modified" not in str(e):
+            raise
+
+
+@router.callback_query(F.data.in_({"menu:bonus", "bonus:hub"}))
 async def on_open(callback: CallbackQuery):
+    """«Бонус» в меню (новое сообщение) и «Назад» из бонусов (правка на месте): раздел из двух бонусов."""
     if D.get_user(callback.from_user.id) is None:
         await callback.answer("Сначала выбери питомца: /start", show_alert=True)
         return
     await callback.answer()
     await _resolve_username(callback.bot)
-    await _show(callback, force_new=True)
+    await _show_hub(callback, force_new=callback.data == "menu:bonus")
+
+
+@router.callback_query(F.data == "bonus:desc")
+async def on_desc(callback: CallbackQuery):
+    if D.get_user(callback.from_user.id) is None:
+        await callback.answer("Сначала выбери питомца: /start", show_alert=True)
+        return
+    await callback.answer()
+    await _resolve_username(callback.bot)
+    await _show(callback)
 
 
 @router.callback_query(F.data == "bonus:check")
@@ -296,6 +401,9 @@ async def on_check(callback: CallbackQuery):
         note = ""   # экран сам станет «Бонус активирован»
     elif res == "off":
         note = "Юзернейм бота в описании не найден. Проверь, что он сохранён в профиле, и попробуй снова."
+    elif res == "nosub":
+        note = (f"Юзернейм найден, но ты не подписан на канал {channel_gate.title_html()}. "
+                "Подпишись и нажми «Проверить» снова.")
     else:
-        note = "Не удалось получить описание профиля. Попробуй чуть позже."
+        note = "Не удалось получить описание профиля или проверить подписку. Попробуй чуть позже."
     await _show(callback, note=note)
