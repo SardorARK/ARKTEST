@@ -84,7 +84,7 @@ import cases
 import donate
 import store as market   # раздел «Рынок» (store.py)
 import arena
-import channel_gate   # обязательная подписка на канал (channel_gate.py)
+import bonus   # бонусы и обязательная подписка на канал (bonus.py)
 import equipment
 import exrn
 import friends
@@ -917,7 +917,7 @@ class ChStates(StatesGroup):
 
 
 def _ch_text() -> str:
-    if not channel_gate.is_enabled():
+    if not bonus.gate_enabled():
         return (
             "<b>Канал подписки</b>\n\n"
             "Сейчас канал <b>не задан</b>: подписка нигде не требуется.\n\n"
@@ -925,12 +925,12 @@ def _ch_text() -> str:
             "<b>бонуса за описание</b> (+% к урону). Бот должен быть <b>администратором</b> канала, "
             "иначе Telegram не позволит проверить подписку."
         )
-    cfg = channel_gate.CONFIG
-    link = channel_gate.url()
+    cfg = bonus.GATE
+    link = bonus.gate_url()
     lines = [
         "<b>Канал подписки</b>",
         "",
-        f"Канал: <b>{escape(channel_gate.title())}</b>",
+        f"Канал: <b>{escape(bonus.gate_title())}</b>",
         f"ID: <code>{cfg['chat_id']}</code>",
     ]
     if cfg.get("username"):
@@ -942,8 +942,8 @@ def _ch_text() -> str:
 
 def _ch_kb() -> InlineKeyboardMarkup:
     S, G, P = ButtonStyle.SUCCESS, ButtonStyle.PRIMARY, ButtonStyle.DANGER
-    rows = [[_b("Сменить канал" if channel_gate.is_enabled() else "Указать канал", "adm:chset", S)]]
-    if channel_gate.is_enabled():
+    rows = [[_b("Сменить канал" if bonus.gate_enabled() else "Указать канал", "adm:chset", S)]]
+    if bonus.gate_enabled():
         rows.append([_b("Проверить права бота", "adm:chchk", G)])
         rows.append([_b("Отключить подписку", "adm:chdel", P)])
     rows.append(_back())
@@ -972,10 +972,10 @@ async def adm_channel_set(cb: CallbackQuery, state: FSMContext):
 
 
 async def _channel_apply(message: Message, state: FSMContext, raw) -> None:
-    ok, text = await channel_gate.set_channel(message.bot, raw)
+    ok, text = await bonus.set_channel(message.bot, raw)
     if ok:
-        ledger("admin_channel_set", admin=message.from_user.id, chat_id=channel_gate.CONFIG["chat_id"],
-               title=channel_gate.CONFIG["title"])
+        ledger("admin_channel_set", admin=message.from_user.id, chat_id=bonus.GATE["chat_id"],
+               title=bonus.GATE["title"])
         await state.clear()
         await message.answer(text, reply_markup=_ch_kb())
     else:
@@ -985,7 +985,7 @@ async def _channel_apply(message: Message, state: FSMContext, raw) -> None:
 @router.message(ChStates.waiting_channel, F.forward_origin)
 async def channel_receive_forward(message: Message, state: FSMContext):
     origin = message.forward_origin
-    chat = getattr(origin, "chat", None)
+    chat = getattr(origin, "chat", None) or getattr(origin, "sender_chat", None)
     if chat is None:
         await message.answer("<i>Это не пост из канала. Перешли пост именно из канала или пришли @юзернейм.</i>")
         return
@@ -1004,7 +1004,7 @@ async def channel_receive_other(message: Message):
 
 @router.callback_query(F.data == "adm:chchk")
 async def adm_channel_check(cb: CallbackQuery):
-    ok, text = await channel_gate.check_bot_rights(cb.bot)
+    ok, text = await bonus.check_bot_rights(cb.bot)
     await cb.answer("Бот администратор канала" if ok else "Проблема с правами бота", show_alert=not ok)
     await _show(cb, _ch_text() + "\n\n" + ("<b>Проверка:</b> " if ok else "<b>Проверка:</b> ⚠ ") + text, _ch_kb())
 
@@ -1018,7 +1018,7 @@ async def adm_channel_del(cb: CallbackQuery):
 
 @router.callback_query(F.data == "adm:chdel2")
 async def adm_channel_del_do(cb: CallbackQuery):
-    channel_gate.clear()
+    bonus.clear_channel()
     ledger("admin_channel_clear", admin=cb.from_user.id)
     await cb.answer("Подписка отключена")
     await _show(cb, _ch_text(), _ch_kb())
