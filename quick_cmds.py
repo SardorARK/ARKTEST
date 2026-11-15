@@ -45,7 +45,7 @@ SECTIONS: list[tuple[str, str, tuple[str, ...]]] = [
     ("cb", "menu:boss", ("босс", "боссы", "охота")),
     ("cb", "menu:exrn", ("исл", "исследование", "иследование", "экспедиция",
                          "экспидиция", "эксп")),
-    ("cb", "menu:pet", ("я", "пет", "питомец", "петомец")),
+    ("cb", "menu:pet", ("я", "пет", "pet", "питомец", "петомец")),
     ("cb", "menu:stock", ("склад", "ящик", "хранение")),
     ("cb", "menu:cases", ("кейс", "кейсы", "сундук", "сундуки")),
     ("cb", "menu:ach", ("ач", "ачивки", "достижение", "достижения")),
@@ -99,8 +99,16 @@ REDIRECT_COOLDOWN = 5.0   # секунд: чтобы повторы в чате 
 # Ссылка t.me/бот?start=ПАРАМЕТР в личке -> какой раздел открыть
 DEEP_LINKS: dict[str, tuple[str, str]] = {
     "menu": ("text", "Меню"), "boss": ("cb", "menu:boss"), "arena": ("text", "Арена"),
+    "pet": ("cb", "menu:pet"),
 }
-_START_RE = re.compile(r"^/start(?:@(\w+))?\s+(menu|boss|arena)\s*$", re.IGNORECASE)
+_START_RE = re.compile(r"^/start(?:@(\w+))?\s+(menu|boss|arena|pet)\s*$", re.IGNORECASE)
+
+# Короткая карточка питомца в группе (уровень, характеристики, кнопка «Перейти»).
+# Функцию ставит main.py: quick_cmds.pet_group_card = ...; она возвращает False, если карточку
+# показать нельзя (игрок без питомца): тогда бот отвечает обычным текстом с кнопкой «Перейти».
+pet_group_card: Callable[..., Awaitable[bool]] | None = None
+PET_REDIRECT_TEXT = ("<b>Мой питомец</b>\n\n"
+                     "<i>В чате питомец не открывается. Нажми кнопку, и он откроется в личных сообщениях с ботом.</i>")
 
 _redirect_last: dict[tuple[int, int, str], float] = {}
 _HANDLED = object()   # сообщение обработано здесь: дальше его передавать не нужно
@@ -231,6 +239,25 @@ class QuickCommands(BaseMiddleware):
         if msg.chat.type != "private" and found in GROUP_REDIRECT:
             param, reply = GROUP_REDIRECT[found]
             await self._redirect(bot, msg, param, reply)
+            return _HANDLED
+
+        if msg.chat.type != "private" and found == ("cb", "menu:pet"):
+            now = time.monotonic()
+            key = (msg.chat.id, msg.from_user.id, "pet")
+            if now - _redirect_last.get(key, 0.0) < REDIRECT_COOLDOWN:
+                return _HANDLED
+            if pet_group_card is not None:
+                me = await bot.me()
+                try:
+                    shown = await pet_group_card(bot, msg.chat.id, msg.from_user.id,
+                                                 f"https://t.me/{me.username}?start=pet")
+                except Exception:
+                    log.exception("quick_cmds: не удалось показать карточку питомца")
+                    shown = False
+                if shown:
+                    _redirect_last[key] = now
+                    return _HANDLED
+            await self._redirect(bot, msg, "pet", PET_REDIRECT_TEXT)
             return _HANDLED
 
         if kind == "text":
