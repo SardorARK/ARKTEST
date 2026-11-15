@@ -47,6 +47,13 @@ def setup(**deps) -> None:
 
 SLOTS = 3   # сколько артефактов можно надеть
 
+# Список «Мои артефакты» листается страницами (как в экспедициях)
+ART_PER_PAGE = 13   # больше этого артефактов на одной странице не бывает; 25 = 12 + 13 (поровну, меньшая страница первая)
+ART_PER_ROW = 5     # кнопок в ряду не больше этого; ряды выравниваются (12 -> 4+4+4, 13 -> 5+4+4)
+ARROW_TEXT = "\u2800"                    # кнопка только со стрелкой: текст невидимый
+ARROW_PREV_ID = "5255703720078879038"    # стрелка «назад» на кнопках страниц
+ARROW_NEXT_ID = "5253767677670862169"    # стрелка «вперёд»
+
 # Виды бонусов: ключ -> (название, знак, эмодзи).
 # Эмодзи None: берём кастомный из STAT_EMOJI (так у характеристик). Строка: обычный эмодзи.
 # atk, hp, spd, luck увеличивают характеристику питомца; cd и regen это боевые умения.
@@ -283,6 +290,47 @@ def _bonus_rows(bonuses: dict[str, int]) -> list[tuple[str, str]]:
     ]
 
 
+# ---------- Страницы списка ----------
+
+def _art_split(total: int) -> list[int]:
+    """Размеры страниц: поровну, лишние артефакты уходят на последние страницы. 25 -> [12, 13], 14 -> [7, 7]."""
+    pages = max(1, -(-total // ART_PER_PAGE))
+    base, extra = divmod(total, pages)
+    return [base] * (pages - extra) + [base + 1] * extra
+
+
+def _art_slice(items: list, page: int) -> tuple[list, int, int]:
+    """(артефакты этой страницы, номер страницы с поправкой на границы, всего страниц)."""
+    sizes = _art_split(len(items))
+    page = min(max(page, 0), len(sizes) - 1)
+    start = sum(sizes[:page])
+    return items[start:start + sizes[page]], page, len(sizes)
+
+
+def _art_page_of(items: list, key: str) -> int:
+    """На какой странице списка лежит артефакт key (чтобы «Назад» из карточки вёл на ту же страницу)."""
+    start = 0
+    for page, size in enumerate(_art_split(len(items))):
+        if any(a["key"] == key for a in items[start:start + size]):
+            return page
+        start += size
+    return 0
+
+
+def _art_btn_rows(buttons: list) -> list[list]:
+    """Кнопки рядами поровну: не больше ART_PER_ROW в ряду, без одинокой кнопки в хвосте."""
+    if not buttons:
+        return []
+    n_rows = -(-len(buttons) // ART_PER_ROW)
+    base, extra = divmod(len(buttons), n_rows)
+    rows, i = [], 0
+    for r in range(n_rows):
+        size = base + (1 if r < extra else 0)    # длинные ряды сверху: 13 -> 5, 4, 4
+        rows.append(buttons[i:i + size])
+        i += size
+    return rows
+
+
 # ---------- Экраны ----------
 
 def equip_html(user_id: int, with_image: bool = False) -> str:
@@ -321,8 +369,8 @@ def equip_html(user_id: int, with_image: bool = False) -> str:
     )
 
 
-def list_html(user_id: int, with_image: bool = False) -> str:
-    """Мои артефакты по редкостям."""
+def list_html(user_id: int, with_image: bool = False, page: int = 0) -> str:
+    """Мои артефакты по редкостям, постранично."""
     user = D.get_user(user_id)
     mine = owned(user)
     head = (
@@ -337,18 +385,20 @@ def list_html(user_id: int, with_image: bool = False) -> str:
             "артефакты выпадают оттуда.</i></blockquote>"
         )
 
+    chunk, page, pages = _art_slice(mine, page)
+    # весь список страницы одной сворачиваемой цитатой: по редкостям, «значок — название»
     blocks = []
     for tier, (_, plural) in TIERS.items():
-        rows = []
-        for a in mine:
-            if a["tier"] != tier:
-                continue
-            kind, pct = next(iter(a["bonus"].items()))
-            rows.append((f"{_icon(a)} {a['name']}",
-                         f"{BONUS_KINDS[kind][0]} {fmt_bonus(kind, pct)}"))
-        if rows:
-            blocks.append(_tree(rows, f"{_tier_icon(tier)} {plural}"))
-    return head + "<blockquote><i>Выбери артефакт, чтобы надеть или снять.</i></blockquote>" + _gap().join(blocks)
+        names = [f"{_icon(a)} — {a['name']}" for a in chunk if a["tier"] == tier]
+        if names:
+            blocks.append(f"<b>{_tier_icon(tier)} {plural}</b><br>" + "<br>".join(names))
+    page_line = f"<p><i>Страница {page + 1} из {pages}.</i></p>" if pages > 1 else ""
+    return (
+        head + page_line
+        + "<blockquote><i>Нажми на значок артефакта, чтобы надеть или снять.</i></blockquote>"
+        + _gap()
+        + "<blockquote expandable>" + "<br><br>".join(blocks) + "</blockquote>"
+    )
 
 
 def item_html(user_id: int, key: str, with_image: bool = False) -> str:
@@ -431,18 +481,27 @@ def equip_kb(user_id: int) -> InlineKeyboardMarkup:
     )
 
 
-def list_kb(user_id: int) -> InlineKeyboardMarkup:
-    """Мои артефакты по два в ряд: надетые зелёные, не надетые синие."""
+def list_kb(user_id: int, page: int = 0) -> InlineKeyboardMarkup:
+    """Мои артефакты: кнопки только со значками, надетые зелёные, не надетые синие; ниже листание."""
     user = D.get_user(user_id)
     worn_keys = {a["key"] for a in equipped(user)}
-    buttons = []
-    for a in owned(user):
-        on = a["key"] in worn_keys
-        buttons.append(_artifact_btn(a, a["name"], f"equip:item:{a['key']}",
-                                     ButtonStyle.SUCCESS if on else ButtonStyle.PRIMARY))
-    rows = [buttons[i:i + 2] for i in range(0, len(buttons), 2)]
+    chunk, page, pages = _art_slice(owned(user), page)
+    buttons = [
+        _artifact_btn(a, "\u2800" if a.get("emoji") else "", f"equip:item:{a['key']}",
+                      ButtonStyle.SUCCESS if a["key"] in worn_keys else ButtonStyle.PRIMARY)
+        for a in chunk
+    ]
+    rows = _art_btn_rows(buttons)
     if not buttons:  # артефактов ещё нет: подсказываем, где их взять
         rows.append([_btn("В сокровищницу", "menu:cases")])
+    if pages > 1:    # листание: ‹ 1/2 ›
+        rows.append([
+            InlineKeyboardButton(text=ARROW_TEXT, callback_data=f"equip:list:{(page - 1) % pages}",
+                                 style=ButtonStyle.PRIMARY, icon_custom_emoji_id=ARROW_PREV_ID),
+            _btn(f"{page + 1}/{pages}", "equip:noop", style=ButtonStyle.PRIMARY),
+            InlineKeyboardButton(text=ARROW_TEXT, callback_data=f"equip:list:{(page + 1) % pages}",
+                                 style=ButtonStyle.PRIMARY, icon_custom_emoji_id=ARROW_NEXT_ID),
+        ])
     rows.append(_back_row("menu:equip"))
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -457,7 +516,8 @@ def item_kb(user_id: int, key: str) -> InlineKeyboardMarkup:
         free = len(worn) < SLOTS
         action = _btn("Надеть", f"equip:wear:{a['key']}",
                       style=ButtonStyle.SUCCESS if free else ButtonStyle.DANGER)
-    return InlineKeyboardMarkup(inline_keyboard=[[action], _back_row("equip:list")])
+    back_page = _art_page_of(owned(D.get_user(user_id)), a["key"])   # «Назад» ведёт на ту же страницу списка
+    return InlineKeyboardMarkup(inline_keyboard=[[action], _back_row(f"equip:list:{back_page}")])
 
 
 # ---------- Отправка ----------
@@ -468,9 +528,10 @@ async def send_equip(bot, chat_id: int, user_id: int) -> None:
     )
 
 
-async def send_list(bot, chat_id: int, user_id: int) -> None:
+async def send_list(bot, chat_id: int, user_id: int, page: int = 0) -> None:
     await D.send_rich_card(
-        bot, chat_id, "equip_list", lambda with_image: list_html(user_id, with_image), list_kb(user_id)
+        bot, chat_id, "equip_list", lambda with_image: list_html(user_id, with_image, page),
+        list_kb(user_id, page),
     )
 
 
@@ -527,13 +588,21 @@ async def on_equip(callback: CallbackQuery):
     await _show(callback, "equip", lambda with_image: equip_html(uid, with_image), equip_kb(uid))
 
 
-@router.callback_query(F.data == "equip:list")
+@router.callback_query(F.data.regexp(r"^equip:list(:\d+)?$"))
 async def on_list(callback: CallbackQuery):
     if await _require_user(callback) is None:
         return
+    parts = callback.data.split(":")
+    page = int(parts[2]) if len(parts) > 2 else 0
     await callback.answer()
     uid = callback.from_user.id
-    await _show(callback, "equip_list", lambda with_image: list_html(uid, with_image), list_kb(uid))
+    await _show(callback, "equip_list", lambda with_image: list_html(uid, with_image, page),
+                list_kb(uid, page))
+
+
+@router.callback_query(F.data == "equip:noop")
+async def on_noop(callback: CallbackQuery):
+    await callback.answer()
 
 
 @router.callback_query(F.data.regexp(r"^equip:item:\w+$"))
