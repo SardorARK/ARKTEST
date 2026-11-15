@@ -1,6 +1,6 @@
 """«Мастерская»: ресурсы, предметы и кузница.
 
-Нижняя кнопка «Мастерская» открывает разделы Ресурсы, Предметы, Боезапас, Снаряжение, Дополнительно и «Кузница».
+Нижняя кнопка «Мастерская» открывает разделы Ресурсы, Предметы, Боезапас, Снаряжение, Дополнительно и «Крафт».
 
 Данные игрока:
     user["res"]      = {ключ_ресурса: количество}
@@ -51,8 +51,8 @@ def setup(**deps) -> None:
 # ---------------------------------------------------------------------------
 
 # Эмодзи: пустой id = обычный эмодзи; впиши id кастомного, когда он будет.
-BUTTON_EMOJI = ("", "🛠")        # кнопка «Мастерская» (нижнее меню)
-CRAFT_EMOJI = ("", "⚒️")         # кнопка «Кузница»
+BUTTON_EMOJI = ("5210696719129392502", "🔧")   # кнопка «Мастерская» (нижнее меню)
+CRAFT_EMOJI = ("6048599681292832729", "🔥")   # кнопка и заголовок «Крафт»
 SLOT_FREE_EMOJI = ("5424972470023104089", "🔥")   # свободный слот
 SLOT_OPEN_EMOJI = ("6037496202990194718", "🔓")   # слот можно открыть
 SLOT_LOCK_EMOJI = ("5778570255555105942", "🔒")   # слот недоступен
@@ -97,7 +97,7 @@ CATEGORIES = {
     "items": ("Предметы", "🎒", "Полезные предметы, которые можно создать и пустить в дело."),
     "ammo": ("Боезапас", "🎯", "Снаряды и заряды для боёв и охоты на боссов."),
     "gear": ("Снаряжение", "🛡", "Оружие и броня для питомца."),
-    "extra": ("Дополнительно", "✨", "Расходники кузницы: камни и печати для эволюции, ускорители, обмен ресурсов и расширение лимитов."),
+    "extra": ("Дополнительно", "✨", "Расходники крафта: камни и печати для эволюции, ускорители, обмен ресурсов и расширение лимитов."),
 }
 
 # Предметы и их рецепты.
@@ -556,7 +556,7 @@ CRATE_ROLLS, CRATE_AMOUNT, CRATE_RARE_CHANCE = 4, (6, 14), 0.20   # Ящик с�
 EXTRA = {
     "stab_stone": {
         "name": "Камень стабильности", "emoji": "🗿", "rarity": "Редкий", "use_kind": "arm",
-        "desc": "Тёплый камень гасит отдачу неудачной эволюции: часть ресурсов возвращается в кузницу.",
+        "desc": "Тёплый камень гасит отдачу неудачной эволюции: часть ресурсов возвращается в крафт.",
         "cost": {"light_essence": 4, "clay": 20, "bone": 15}, "seconds": 30 * 60, "uses": 1,
         "note": "Работает 1 раз",
         "stats": [f"При провале эволюции возвращает {STONE_REFUND:.0%} ресурсов",
@@ -1906,7 +1906,7 @@ def root_html(user: dict, with_image: bool, done: list[str] | None = None) -> st
     text = _img(with_image) + _head(
         "МАСТЕРСКАЯ", BUTTON_EMOJI,
         "Создавай инструменты, снаряжение и боезапас из добытых материалов. "
-        "Выбери раздел или сразу переходи в кузницу.")
+        "Выбери раздел или сразу переходи в крафт.")
     return text + _done_note(done)
 
 
@@ -1916,7 +1916,7 @@ def root_kb() -> InlineKeyboardMarkup:
         [b("res"), b("items")],
         [b("ammo"), b("gear")],
         [b("extra")],
-        [_btn("Кузница", "ws:forge", CRAFT_EMOJI[1], ButtonStyle.SUCCESS)],
+        [_btn("Крафт", "ws:forge", CRAFT_EMOJI, ButtonStyle.SUCCESS)],
     ])
 
 
@@ -1995,7 +1995,7 @@ def category_html(user: dict, key: str, with_image: bool, page: int = 0) -> str:
     if key == "ammo":
         owned = [(k, a) for k, a in AMMO.items() if ammo_count(user, k) > 0]
         if not owned:
-            return text + (f"<p>{DIV}<br><b>Пока пусто</b><br>Зарядов нет. Создай их в «Кузнице»: "
+            return text + (f"<p>{DIV}<br><b>Пока пусто</b><br>Зарядов нет. Создай их в «Крафте»: "
                            "они пригодятся против боссов.</p>")
         pages = _cat_pages(user, key)
         if pages > 1:
@@ -2008,7 +2008,7 @@ def category_html(user: dict, key: str, with_image: bool, page: int = 0) -> str:
         if pages > 1:
             text += f"<p><i>Страница {min(max(page, 0), pages - 1) + 1} из {pages}.</i></p>"
     elif any(i["category"] == key for i in ITEMS.values()):
-        text += f"<p>{DIV}<br><b>Пока пусто</b><br>Предметов нет. Создай что-нибудь в «Кузнице».</p>"
+        text += f"<p>{DIV}<br><b>Пока пусто</b><br>Предметов нет. Создай что-нибудь в «Крафте».</p>"
     else:
         text += f"<p>{DIV}<br><b>Пока пусто</b><br>Рецептов в этом разделе ещё нет. Скоро здесь появятся новые.</p>"
     return text
@@ -2439,7 +2439,7 @@ def item_kb(user: dict, idx: int) -> InlineKeyboardMarkup:
 
 def forge_html(user: dict, with_image: bool, note: str = "") -> str:
     text = _img(with_image) + _head(
-        "КУЗНИЦА", CRAFT_EMOJI,
+        "КРАФТ", CRAFT_EMOJI,
         f"{MAX_SLOTS} слота для создания предметов. Нажми на свободный слот, чтобы выбрать, что ковать.")
     text += note
     return text + _craft_status(user)
@@ -2787,7 +2787,7 @@ async def on_buy(callback: CallbackQuery):
         return
     D.save_users()
     await callback.answer("Слот открыт.")
-    await _show_forge(callback, user, f"<p><b><i>🔓 Слот {slot} открыт</i></b><br><i>Теперь в кузнице доступно больше места.</i></p>")
+    await _show_forge(callback, user, f"<p><b><i>🔓 Слот {slot} открыт</i></b><br><i>Теперь в крафте доступно больше места.</i></p>")
 
 
 @router.callback_query(F.data.startswith("ws:r:"))
@@ -3242,7 +3242,7 @@ def pick_view(user: dict, key: str):
     if key in HOURGLASS:
         jobs = sorted(hourglass_targets(user, key), key=lambda j: j["slot"])
         if not jobs:
-            return ("Сейчас в кузнице нечего ускорять." if HOURGLASS[key] < 1.0
+            return ("Сейчас в крафте нечего ускорять." if HOURGLASS[key] < 1.0
                     else "Мгновенно можно завершить только ковку базовых предметов и боезапаса.")
         now = time.time()
         hint = "Выбери слот, где идёт ковка."
