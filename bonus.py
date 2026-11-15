@@ -362,7 +362,7 @@ def _day_reward_text(day: int) -> str:
     options = reward_options(day)
     if len(options) == 1:
         return _reward_text(options[0][1])
-    return " или ".join(_reward_text(o[1]) for o in options) + " <i>(50/50)</i>"
+    return " / ".join(_reward_text(o[1]) for o in options) + " <i>(50/50)</i>"
 
 
 def daily_summary(user: dict | None) -> str:
@@ -455,7 +455,7 @@ def daily_html(user_id: int, with_image: bool = False, res: dict | None = None) 
     if st["claimed"]:
         today_line = f"{ok} Сегодня: <b>уже получено</b>, возвращайся завтра"
     else:
-        today_line = f"{title_emoji} Сегодня: <b>можно забрать</b> награду за день {st['day']}"
+        today_line = f"{title_emoji} <b>Сегодня: можно забрать</b>"
     sub_line = ""
     if gate_enabled():
         sub_line = f"<br>Условие: подписка на канал <b>{gate_title_html()}</b>"
@@ -464,7 +464,7 @@ def daily_html(user_id: int, with_image: bool = False, res: dict | None = None) 
 
     return (
         f"{image}{head}"
-        f"<p><b>Награды серии</b>{_gap()}{_calendar(st)}</p>"
+        f"<p><b>Награды серии</b></p><blockquote expandable>{_calendar(st)}</blockquote>"
         f"<p><b>Твоя серия: {st['streak']}</b><br>{today_line}{sub_line}</p>"
         f"{note_html}"
         "<p><i>Бонус можно забрать и без кнопок: напиши в чат «еб».</i></p>"
