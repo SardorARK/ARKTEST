@@ -1463,6 +1463,42 @@ def _remember(msg, kind: str, image: str | None) -> None:
         _MSG_STATE.popitem(last=False)
 
 
+# Сообщения, открытые быстрой командой («склад», «исл», «ач», «кейс», «я»): вместо «Назад» в меню у них
+# кнопка «Закрыть». Переходы внутри раздела наследуют это; после перезапуска бота память пуста.
+_CLOSABLE: "OrderedDict[tuple[int, int], bool]" = OrderedDict()
+
+
+def _mark_closable(msg) -> None:
+    if msg is None or not hasattr(msg, "message_id"):
+        return
+    _CLOSABLE[(msg.chat.id, msg.message_id)] = True
+    _CLOSABLE.move_to_end((msg.chat.id, msg.message_id))
+    while len(_CLOSABLE) > _MSG_STATE_MAX:
+        _CLOSABLE.popitem(last=False)
+
+
+def _is_closable(msg) -> bool:
+    return msg is not None and hasattr(msg, "message_id") and (msg.chat.id, msg.message_id) in _CLOSABLE
+
+
+def _close_kb(kb):
+    """Кнопки «Назад» в главное меню (menu:back) заменяет на «Закрыть» (me:close)."""
+    if kb is None or not getattr(kb, "inline_keyboard", None):
+        return kb
+    changed, rows = False, []
+    for row in kb.inline_keyboard:
+        new = []
+        for b in row:
+            if b.callback_data == "menu:back":
+                new.append(InlineKeyboardButton(text="Закрыть", callback_data="me:close",
+                                                style=ButtonStyle.DANGER))
+                changed = True
+            else:
+                new.append(b)
+        rows.append(new)
+    return InlineKeyboardMarkup(inline_keyboard=rows) if changed else kb
+
+
 def _rich_input(pet_key: str, build_html, use_image: bool = True):
     """Собирает rich-сообщение; возвращает (InputRichMessage, file_id или None)."""
     file_id = pet_images.get(pet_key) if use_image else None
@@ -1486,6 +1522,9 @@ async def send_rich_card(
 ):
     """Отправляет rich-сообщение; если у питомца есть фото, ставит его сверху.
     Возвращает отправленное сообщение (нужно «живым» окнам босса)."""
+    closable = quick_cmds.CLOSE_MODE.get()
+    if closable:
+        reply_markup = _close_kb(reply_markup)
     if pet_images.get(pet_key):
         try:
             rich, image = _rich_input(pet_key, build_html)
@@ -1493,6 +1532,8 @@ async def send_rich_card(
                 chat_id=chat_id, rich_message=rich, reply_markup=reply_markup
             )
             _remember(msg, "rich", image)
+            if closable:
+                _mark_closable(msg)
             return msg
         except TelegramBadRequest as e:
             # Например, file_id устарел: показываем без фото
@@ -1503,10 +1544,32 @@ async def send_rich_card(
         chat_id=chat_id, rich_message=rich, reply_markup=reply_markup
     )
     _remember(msg, "rich", None)
+    if closable:
+        _mark_closable(msg)
     return msg
 
 
 async def show_rich_card(
+    callback: CallbackQuery,
+    pet_key: str,
+    build_html,
+    reply_markup: InlineKeyboardMarkup | None = None,
+    force_new: bool = False,
+):
+    """Обёртка: если раздел открыт быстрой командой (или это сообщение уже «закрываемое»),
+    «Назад» в меню заменяется на «Закрыть», и так же дальше по разделу."""
+    if not (quick_cmds.CLOSE_MODE.get() or _is_closable(callback.message)):
+        return await _show_rich_card_impl(callback, pet_key, build_html, reply_markup, force_new)
+    token = quick_cmds.CLOSE_MODE.set(True)
+    try:
+        msg = await _show_rich_card_impl(callback, pet_key, build_html, _close_kb(reply_markup), force_new)
+        _mark_closable(msg)
+        return msg
+    finally:
+        quick_cmds.CLOSE_MODE.reset(token)
+
+
+async def _show_rich_card_impl(
     callback: CallbackQuery,
     pet_key: str,
     build_html,
