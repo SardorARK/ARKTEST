@@ -58,6 +58,7 @@ import underground       # «Шахта» (underground.py): открываетс
 import quick_cmds
 import friends
 import gift              # передача ресурсов игроку: «дать @ник» (gift.py)
+import transfer          # переводы: «перевести» (монеты) и «перечислить» (кристаллы), transfer.py
 import store as market   # раздел «Рынок» (store.py); имя store в main.py занято базой игроков
 from guard import Guard, OwnerTracker, load_owners, on_error, owners_saver, save_owners
 
@@ -996,6 +997,7 @@ def stock_html(user_id: int | None = None, with_image: bool = False) -> str:
         "и эволюцию питомца.</b></p>"
         # как передавать ресурсы другу и какой у игрока лимит (gift.py)
         f"{gift.stock_hint(user if user_id else None)}"
+        f"{transfer.stock_hint(user if user_id else None)}"
         # Синяя кнопка прямо в теле сообщения (Bot API 10.3)
         "<tg-button-row>"
         '<tg-button type="callback_data" data="stock:donate" '
@@ -1797,6 +1799,7 @@ dp.errors.register(on_error)
 gift.install(dp)         # запоминает ники игроков для «дать @ник»
 # Текст «Шахта» (быстрая команда «шахта») открывает раздел шахты. Ловим его ДО остальных обработчиков
 dp.message.outer_middleware(underground.MenuButtonMiddleware())
+transfer.install(dp)        # «перевести» / «перечислить»: раньше остальных роутеров (transfer.py)
 workshop_sets.install(dp)   # команды наборов - раньше всех, чтобы их ничто не перехватило (workshop_sets.py)
 quick_cmds.install(dp)   # быстрые команды: «шахта», «/босс», «арена» и т.д. (quick_cmds.py)
 
@@ -2043,7 +2046,8 @@ workshop.setup(
     BACK_EMOJI_ID=BACK_EMOJI_ID,
 )
 dp.include_router(workshop.router)
-workshop_sets.setup(ADMIN_IDS=ADMIN_IDS, name_html=settings.name_html, users=users)   # ник игрока в заголовке; админам - команда «выдать»
+workshop_sets.setup(ADMIN_IDS=ADMIN_IDS, name_html=settings.name_html, users=users)
+transfer.setup(get_user=get_user, save_users=save_users, fmt=lambda n: _fmt(n), COIN_EMOJI=COIN_EMOJI)   # ник игрока в заголовке; админам - команда «выдать»
 dp.include_router(workshop_sets.router)
 dp.include_router(achives.router)
 settings.install_name_book(boss.STATS)   # топ бойцов босса показывает никнеймы, а не юзернеймы
