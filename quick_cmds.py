@@ -70,7 +70,7 @@ SECTIONS: list[tuple[str, str, tuple[str, ...]]] = [
 
 # Разделы, которые по команде открываются с кнопкой «Закрыть» вместо «Назад» в меню
 # (подмену делает show_rich_card/send_rich_card в main.py, пока CLOSE_MODE = True).
-CLOSE_TARGETS = {"menu:stock", "menu:cases", "menu:exrn", "menu:ach", "me:open", "daily:claim:c"}
+CLOSE_TARGETS = {"menu:stock", "menu:cases", "menu:exrn", "menu:ach", "me:open"}
 CLOSE_MODE: ContextVar[bool] = ContextVar("quick_close_mode", default=False)
 
 ALIASES: dict[str, tuple[str, str]] = {}
@@ -299,7 +299,10 @@ class QuickCommands(BaseMiddleware):
         if target in CLOSE_TARGETS:
             CLOSE_MODE.set(True)   # живёт только в обработке этого сообщения
         try:
-            holder = await bot.send_message(msg.chat.id, "⏳")
+            # ответ на команду «еб» должен быть реплаем на неё: заглушка запоминает, на что отвечать
+            reply = (ReplyParameters(message_id=msg.message_id, allow_sending_without_reply=True)
+                     if target == "daily:claim:c" else None)
+            holder = await bot.send_message(msg.chat.id, "⏳", reply_parameters=reply)
         except TelegramAPIError:
             CLOSE_MODE.set(False)
             return None
