@@ -35,6 +35,7 @@ from aiogram.enums import ButtonStyle
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 from mine import _bar, _gap, fmt, fmt_dur   # оформление как в «Шахтах»
+import period_stats as PS   # статистика по периодам (команда «стата»)
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -708,6 +709,7 @@ def settle(ug: dict, user: dict | None = None) -> bool:
                 ug["pending"][pk] = int(ug["pending"].get(pk, 0)) + 1
                 found = ug.setdefault("found", {})
                 found[str(evs[g][0])] = int(found.get(str(evs[g][0]), 0)) + 1
+                PS.add(ug, "sets", 1, sub=str(evs[g][0]))   # статистика: найденные наборы за период
                 g += 1
                 changed = True
             run["sets_given"] = g
@@ -1577,6 +1579,8 @@ async def on_collect(callback: CallbackQuery):
                 wsets.give_set(user, key, n)
                 got_sets[key] = n
                 pend[k] = 0
+    PS.add(ug, "ore", ore_got)        # статистика: руда и минералы, забранные из шахты
+    PS.add(ug, "min", minerals)
     _ach("on_ug_collect", user, ore_got, minerals)
     D.save_users()
     note = f"Минералов: +{fmt(minerals)}. " if minerals else ""
