@@ -1132,8 +1132,11 @@ def menu_kb() -> InlineKeyboardMarkup:
         inline_keyboard=[
             # Главная кнопка на всю ширину, зелёная
             [btn("Мой питомец", "menu:pet", ButtonStyle.SUCCESS, PET_BTN_EMOJI[0])],
-            [btn("Профиль", "menu:player", ButtonStyle.PRIMARY, settings.EM_USER[0])],
-            [btn("Запасы", "menu:stock", ButtonStyle.PRIMARY, STOCK_BTN_EMOJI[0])],
+            # «Профиль» и «Запасы» в одном ряду, чтобы три кнопки не шли столбиком
+            [
+                btn("Профиль", "menu:player", ButtonStyle.PRIMARY, settings.EM_USER[0]),
+                btn("Запасы", "menu:stock", ButtonStyle.PRIMARY, STOCK_BTN_EMOJI[0]),
+            ],
             # Исследование на всю ширину, зелёная
             [btn("Исследование", "menu:exrn", ButtonStyle.SUCCESS, exrn.EXPLORE_EMOJI[0])],
             [
@@ -2208,6 +2211,13 @@ def player_profile_kb() -> InlineKeyboardMarkup:
                     icon_custom_emoji_id=settings.EM_SKINS_BTN,
                 ),
             ],
+            # «Наборы»: тот же список, что по команде «н-наборы-набор», но с кнопкой «Назад»
+            [InlineKeyboardButton(
+                text="Наборы",
+                callback_data=workshop_sets.OPEN_DATA,
+                style=ButtonStyle.SUCCESS,
+                icon_custom_emoji_id=workshop_sets.SETS_EMOJI[0],
+            )],
             [InlineKeyboardButton(
                 text="Назад",
                 callback_data="menu:back",
