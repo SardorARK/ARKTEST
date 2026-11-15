@@ -1442,7 +1442,7 @@ _MSG_STATE_MAX = 20000
 # Экраны из LIVE_EDIT_KEYS обновляются часто (кадры боя, поиск), их удалять и слать заново нельзя:
 # упрёмся в лимиты Telegram, поэтому они всегда правятся на месте.
 RESEND_IN_GROUPS = True
-LIVE_EDIT_KEYS = {"arena_battle", "arena_find", "player", "exrn"} | set(cases.IMG_TARGETS) | {underground.NOIMG_KEY}   # шахта: без картинок, всегда правка на месте
+LIVE_EDIT_KEYS = {"arena_battle", "arena_find", "player", "exrn"} | set(cases.IMG_TARGETS) | {underground.NOIMG_KEY, "workshop"}   # шахта (без картинок) и мастерская: всегда правка на месте
 # «player»: профиль, «exrn»: исследователи, ключи cases.IMG_TARGETS: «Сокровищница» — всегда правятся на месте
 
 
@@ -1604,7 +1604,10 @@ async def _show_rich_card_impl(
     cur = _MSG_STATE.get((chat_id, msg.message_id))
     holder_ok = (cur is None and not pet_images.get(pet_key) and getattr(msg, "text", None) == "⏳"
                  and _edit_in_place_ok(msg, pet_key))   # заглушка быстрой команды: правим её в нужный экран
-    if (not force_new and (holder_ok or (cur is not None and cur[0] == "rich"
+    # бот не помнит сообщение (перезапуск), но экран из LIVE_EDIT_KEYS: всё равно пробуем правку на месте,
+    # а если Telegram откажет (например, это сообщение с фото), ниже шлётся новое
+    unknown_ok = cur is None and pet_key in LIVE_EDIT_KEYS
+    if (not force_new and (holder_ok or unknown_ok or (cur is not None and cur[0] == "rich"
             and cur[1] == pet_images.get(pet_key))) and _edit_in_place_ok(msg, pet_key)):
         try:
             rich, image = _rich_input(pet_key, build_html)
