@@ -1409,6 +1409,7 @@ async def send_pet_short(bot: Bot, chat_id: int, user_id: int, url: str) -> bool
 quick_cmds.pet_group_card = send_pet_short   # «пет», «питомец», «я» в группе (quick_cmds.py)
 # «шахта» и «кейс» в группе: текст раздела и кнопка «Перейти» (quick_cmds.py)
 quick_cmds.group_cards[("text", "Шахта")] = ("ug", lambda *a: underground.send_group_card(*a))
+quick_cmds.group_cards[("cb", "menu:donate")] = ("donate", lambda *a: donate.send_group_card(*a))
 quick_cmds.group_cards[("cb", "menu:cases")] = ("cases", lambda *a: cases.send_group_card(*a))
 
 
@@ -1828,6 +1829,8 @@ donate.setup(
     BACK_EMOJI_ID=BACK_EMOJI_ID,
     ADMIN_IDS=ADMIN_IDS,        # админам приходит сообщение о каждом платеже (и о платеже без начисления)
     pet_images=pet_images,      # чтобы экраны доната брали своё фото или общее фото раздела
+    MINERAL_EMOJI=MINERAL_EMOJI,    # «Лавка»: паки с минералами
+    MINERALS_FIELD=MINERALS_FIELD,
 )
 dp.include_router(donate.router)
 
