@@ -436,7 +436,7 @@ def _crystal() -> str:
 
 
 def _cr(n: int, cur: str = "crystals") -> str:
-    return f"{_cur_em(cur)} <b>{donate._fmt(n)}</b>"
+    return f"{_cur_em(cur)} <b>{_fmt(n)}</b>"
 
 
 def _lot_cur(lot: dict) -> str:
@@ -519,21 +519,41 @@ def _fee(price: int) -> int:
     return price * FEE_PERCENT // 100
 
 
+NUMBER_SUFFIXES = ("", "K", "M", "B", "T", "Qa", "Qi", "Sx", "Sp", "Oc", "No", "Dc")
+
+
+def _fmt(n) -> str:
+    """Короткая запись чисел, как в main.py: 999, 1K, 1.5K, 1M, 2.35B, 1T и так далее.
+    Без округления вверх: 999 999 это 999.99K, а не 1000K."""
+    n = int(n)
+    sign = "\u2212" if n < 0 else ""
+    a = abs(n)
+    if a < 1000:
+        return f"{sign}{a}"
+    idx = 1
+    while idx < len(NUMBER_SUFFIXES) - 1 and a >= 1000 ** (idx + 1):
+        idx += 1
+    div = 1000 ** idx
+    whole, frac = divmod(a, div)
+    text = f"{whole}.{frac * 100 // div:02d}".rstrip("0").rstrip(".")
+    return f"{sign}{text}{NUMBER_SUFFIXES[idx]}"
+
+
 def _unit(lot_price: int, n: int) -> str:
     v = lot_price / max(1, n)
-    return donate._fmt(int(v)) if v == int(v) else f"{v:.1f}"
+    return _fmt(int(v)) if v == int(v) or v >= 1000 else f"{v:.1f}"   # дробная цена за штуку только до 1K
 
 
 def _lot_label(lot: dict) -> str:
-    qty = f" ×{donate._fmt(lot['n'])}" if lot["n"] > 1 else ""
+    qty = f" ×{_fmt(lot['n'])}" if lot["n"] > 1 else ""
     sub = f" ({escape(lot['sub'])})" if lot.get("sub") else ""
     return (f"{_icon(lot['kind'])} {escape(lot['name'])}{sub}{qty}  ·  "
-            f"{_cur_em(_lot_cur(lot))} {donate._fmt(lot['price'])}")
+            f"{_cur_em(_lot_cur(lot))} {_fmt(lot['price'])}")
 
 
 def _item_text(lot: dict) -> str:
     sub = f" ({escape(lot['sub'])})" if lot.get("sub") else ""
-    qty = f" ×{donate._fmt(lot['n'])}" if lot["n"] > 1 else ""
+    qty = f" ×{_fmt(lot['n'])}" if lot["n"] > 1 else ""
     return f"{_icon(lot['kind'])} <b>{escape(lot['name'])}</b>{sub}{qty}"
 
 
@@ -598,8 +618,8 @@ def home_html(uid: int, with_image: bool = False) -> str:
         + donate._tree("Сейчас", [
             f"Лотов на рынке: <b>{len(lots)}</b>",
             mine_line,
-            f"{_cur_em('coins')} Монеты: <b>{donate._fmt(_bal(user, 'coins'))}</b>",
-            f"{_cur_em('crystals')} Кристаллы: <b>{donate._fmt(_bal(user, 'crystals'))}</b>",
+            f"{_cur_em('coins')} Монеты: <b>{_fmt(_bal(user, 'coins'))}</b>",
+            f"{_cur_em('crystals')} Кристаллы: <b>{_fmt(_bal(user, 'crystals'))}</b>",
         ])
         + _GAP
         + donate._tree("Правила", [
@@ -750,10 +770,10 @@ def lot_html(uid: int, lot: dict, with_image: bool = False) -> str:
              f"Осталось: <b>{donate._left(int(lot['expires']))}</b>"]
     p = _prov(lot["kind"])
     info = p.info(lot) if p and p.info else []
-    wallet = [f"{_cur_em(cur)} У тебя: <b>{donate._fmt(have)}</b>",
-              f"{_cur_em(cur)} После покупки: <b>{donate._fmt(max(0, have - price))}</b>"]
+    wallet = [f"{_cur_em(cur)} У тебя: <b>{_fmt(have)}</b>",
+              f"{_cur_em(cur)} После покупки: <b>{_fmt(max(0, have - price))}</b>"]
     if have < price:
-        wallet.append(f"{donate._ce(donate.EM_STATUS)} Не хватает: <b>{donate._fmt(price - have)} "
+        wallet.append(f"{donate._ce(donate.EM_STATUS)} Не хватает: <b>{_fmt(price - have)} "
                       f"{_cur_word(price - have, cur)}</b>")
     err = _provider_error(user, lot) if user else None
     return (
@@ -766,7 +786,7 @@ def lot_html(uid: int, lot: dict, with_image: bool = False) -> str:
         + donate._tree(_cur_name(cur), wallet)
         + (_GAP + donate._tree("Нельзя купить сейчас", [escape(err)]) if err else "")
         + _GAP
-        + _rows([_b(f"{donate._ce(donate.EM_BUY)} Купить за {_cur_em(cur)} {donate._fmt(price)}",
+        + _rows([_b(f"{donate._ce(donate.EM_BUY)} Купить за {_cur_em(cur)} {_fmt(price)}",
                     f"market:bgo:{lot['id']}", "success" if have >= price else "danger")])
     )
 
@@ -794,7 +814,7 @@ def done_html(lot: dict, paid: int, balance: int) -> str:
         + donate._tree("Итог", [
             f"Куплено: {_item_text(lot)}",
             f"Потрачено: {_cr(paid, cur)}",
-            f"{_cur_em(cur)} Осталось: <b>{donate._fmt(balance)}</b>",
+            f"{_cur_em(cur)} Осталось: <b>{_fmt(balance)}</b>",
         ])
         + _GAP
         + _rows([_b(f"{donate._ce(donate.EM_BUY)} Купить ещё", "market:buy"),
@@ -828,7 +848,7 @@ async def on_buy_go(callback: CallbackQuery):
     have = _bal(buyer, cur)
     if have < price:
         await callback.answer(
-            f"Не хватает: нужно {donate._fmt(price)} {_cur_word(price, cur)}, у тебя {donate._fmt(have)}.",
+            f"Не хватает: нужно {_fmt(price)} {_cur_word(price, cur)}, у тебя {_fmt(have)}.",
             show_alert=True)
         return
     seller = donate._cfg["get_user"](lot["seller"])
@@ -867,9 +887,9 @@ async def on_buy_go(callback: CallbackQuery):
     qty = f" ×{lot['n']}" if lot["n"] > 1 else ""
     await _notify(
         callback.bot, lot["seller"],
-        f"Рынок: твой лот №{lot['id']} продан.\n{lot['name']}{qty} за {donate._fmt(price)} "
-        f"{_cur_word(price, cur)}.\nКомиссия {FEE_PERCENT}%: {donate._fmt(fee)}. "
-        f"Начислено: {donate._fmt(payout)} {_cur_word(payout, cur)}.")
+        f"Рынок: твой лот №{lot['id']} продан.\n{lot['name']}{qty} за {_fmt(price)} "
+        f"{_cur_word(price, cur)}.\nКомиссия {FEE_PERCENT}%: {_fmt(fee)}. "
+        f"Начислено: {_fmt(payout)} {_cur_word(payout, cur)}.")
 
 
 # ---------- Мои лоты ----------
@@ -1008,9 +1028,9 @@ def sell_html(uid: int, with_image: bool = False) -> str:
     for k in _kinds():
         items = _prov(k).items(user)
         total = sum(_int(i.get("count")) for i in items)
-        lines.append(f"{_icon(k)} <b>{_title(k)}</b>: {donate._fmt(total)} шт.")
+        lines.append(f"{_icon(k)} <b>{_title(k)}</b>: {_fmt(total)} шт.")
         if total:
-            buttons.append(_b(f"{_icon(k)} {_title(k)} ({donate._fmt(total)})", f"market:sp:{k}:0"))
+            buttons.append(_b(f"{_icon(k)} {_title(k)} ({_fmt(total)})", f"market:sp:{k}:0"))
     body = _rows(buttons, 2) if buttons else _quote("Пока нечего продавать.")
     full = used >= MAX_LOTS
     return (
@@ -1046,7 +1066,7 @@ def items_html(uid: int, kind: str, page: int, with_image: bool = False) -> str:
     else:
         buttons = []
         for idx, it in chunk:
-            qty = f" ×{donate._fmt(it['count'])}" if _prov(kind).stackable or it["count"] > 1 else ""
+            qty = f" ×{_fmt(it['count'])}" if _prov(kind).stackable or it["count"] > 1 else ""
             sub = f" ({escape(str(it['sub']))})" if it.get("sub") else ""
             buttons.append(_b(f"{_icon(kind)} {escape(str(it['name']))}{sub}{qty}", f"market:si:{kind}:{idx}"))
         body = (_quote("Выбери предмет, дальше настроишь количество и цену.")
@@ -1085,14 +1105,14 @@ def draft_html(uid: int, d: dict, with_image: bool = False) -> str:
     if prov.stackable and d["max"] > 1:
         buttons.append(_rows([_b("−10", "market:q:-10", "primary"), _b("−1", "market:q:-1", "primary"),
                               _b("+1", "market:q:1", "primary"), _b("+10", "market:q:10", "primary")], 4))
-        buttons.append(_rows([_b(f"Всё ({donate._fmt(d['max'])})", "market:qmax", "primary"),
+        buttons.append(_rows([_b(f"Всё ({_fmt(d['max'])})", "market:qmax", "primary"),
                               _b(f"{donate._ce(EM_EDIT)} Своё количество", "market:in:n", "primary")], 2))
     steps = STEPS[cur]
     buttons.append(_rows([_b(f"−{_short(x)}", f"market:p:-{x}", "danger") for x in reversed(steps)], 4))
     buttons.append(_rows([_b(f"+{_short(x)}", f"market:p:{x}", "success") for x in steps], 4))
     own = _b(f"{donate._ce(EM_EDIT)} Своя цена", "market:in:p", "primary")
     if sug and sug != price:
-        buttons.append(_rows([_b(f"По рынку: {donate._fmt(sug)}", f"market:pset:{sug}", "primary"), own], 2))
+        buttons.append(_rows([_b(f"По рынку: {_fmt(sug)}", f"market:pset:{sug}", "primary"), own], 2))
     else:
         buttons.append(_rows([own]))
     buttons.append(_rows([_b("✅ Выставить на рынок", "market:go")]))
@@ -1204,7 +1224,7 @@ async def on_price(callback: CallbackQuery):
     lo, hi = LIMITS[d["cur"]]
     new = min(hi, max(lo, d["price"] + int(callback.data.rsplit(":", 1)[-1])))
     if new == d["price"]:
-        await callback.answer(f"Цена от {lo} до {donate._fmt(hi)}.")
+        await callback.answer(f"Цена от {lo} до {_fmt(hi)}.")
         return
     d["price"] = new
     await callback.answer()
@@ -1269,13 +1289,13 @@ def input_html(d: dict, field: str, error: str = "", with_image: bool = False) -
     cur = d["cur"]
     if field == "n":
         title, lo, hi = "СВОЁ КОЛИЧЕСТВО", 1, d["max"]
-        hint = f"Отправь сообщением, сколько штук выставить (от {lo} до {donate._fmt(hi)})."
-        now = f"Сейчас: <b>{donate._fmt(d['n'])}</b> шт."
+        hint = f"Отправь сообщением, сколько штук выставить (от {lo} до {_fmt(hi)})."
+        now = f"Сейчас: <b>{_fmt(d['n'])}</b> шт."
     else:
         title = "СВОЯ ЦЕНА"
         lo, hi = LIMITS[cur]
         hint = (f"Отправь сообщением цену за весь лот в валюте «{_cur_name(cur)}» "
-                f"(от {donate._fmt(lo)} до {donate._fmt(hi)}). Можно писать 1500, 1 500 или 1.5к.")
+                f"(от {_fmt(lo)} до {_fmt(hi)}). Можно писать 1500, 1 500 или 1.5к.")
         now = f"Сейчас: {_cr(d['price'], cur)}"
     lines = [f"Предмет: {_item_text({'kind': d['kind'], 'name': d['name'], 'sub': d.get('sub'), 'n': d['n']})}", now]
     return (
@@ -1373,7 +1393,7 @@ async def on_input_text(message: Message):
     if val is None:
         res = await _show_input(fake, d, field, "Это не похоже на целое число. Попробуй ещё раз.")
     elif not lo <= val <= hi:
-        res = await _show_input(fake, d, field, f"Допустимо от {donate._fmt(lo)} до {donate._fmt(hi)}.")
+        res = await _show_input(fake, d, field, f"Допустимо от {_fmt(lo)} до {_fmt(hi)}.")
     else:
         d["n" if field == "n" else "price"] = val
         _AWAIT.pop(uid, None)
