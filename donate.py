@@ -72,7 +72,7 @@ from aiogram.types import (
     PreCheckoutQuery,
 )
 
-from storage import commit_now, ledger
+from storage import atomic_write_json, commit_now, ledger, read_json_safe
 
 log = logging.getLogger("donate")
 router = Router(name="donate")
@@ -2236,23 +2236,23 @@ def _xr_key() -> str:
 
 
 def _xr_load() -> None:
+    """Неоплаченные счета лежат документом в общей базе (users.db, таблица docs); старый файл
+    переносится туда один раз при первом чтении (так устроен storage.read_json_safe)."""
     try:
-        data = json.loads(XROCKET_FILE.read_text(encoding="utf-8"))
+        data = read_json_safe(XROCKET_FILE)
         if isinstance(data, dict):
             _XR.update({str(k): v for k, v in data.items() if isinstance(v, dict)})
-    except FileNotFoundError:
-        pass
-    except (OSError, ValueError):
-        log.exception("не удалось прочитать %s", XROCKET_FILE)
+    except Exception:
+        log.exception("не удалось прочитать %s", XROCKET_FILE.name)
 
 
 def _xr_save() -> None:
+    """Ставит документ в очередь общей записи (раз в секунду вместе с игроками, а при платеже его
+    сразу уносит commit_now). Ни диска, ни SQL в этом вызове нет."""
     try:
-        tmp = XROCKET_FILE.with_suffix(".tmp")
-        tmp.write_text(json.dumps(_XR, ensure_ascii=False), encoding="utf-8")
-        os.replace(tmp, XROCKET_FILE)
-    except OSError:
-        log.exception("не удалось записать %s", XROCKET_FILE)
+        atomic_write_json(XROCKET_FILE, _XR)
+    except Exception:
+        log.exception("не удалось записать %s", XROCKET_FILE.name)
 
 
 _xr_load()
@@ -2480,23 +2480,23 @@ def _cb_key() -> str:
 
 
 def _cb_load() -> None:
+    """Неоплаченные счета лежат документом в общей базе (users.db, таблица docs); старый файл
+    переносится туда один раз при первом чтении (так устроен storage.read_json_safe)."""
     try:
-        data = json.loads(CRYPTOBOT_FILE.read_text(encoding="utf-8"))
+        data = read_json_safe(CRYPTOBOT_FILE)
         if isinstance(data, dict):
             _CB.update({str(k): v for k, v in data.items() if isinstance(v, dict)})
-    except FileNotFoundError:
-        pass
-    except (OSError, ValueError):
-        log.exception("не удалось прочитать %s", CRYPTOBOT_FILE)
+    except Exception:
+        log.exception("не удалось прочитать %s", CRYPTOBOT_FILE.name)
 
 
 def _cb_save() -> None:
+    """Ставит документ в очередь общей записи (раз в секунду вместе с игроками, а при платеже его
+    сразу уносит commit_now). Ни диска, ни SQL в этом вызове нет."""
     try:
-        tmp = CRYPTOBOT_FILE.with_suffix(".tmp")
-        tmp.write_text(json.dumps(_CB, ensure_ascii=False), encoding="utf-8")
-        os.replace(tmp, CRYPTOBOT_FILE)
-    except OSError:
-        log.exception("не удалось записать %s", CRYPTOBOT_FILE)
+        atomic_write_json(CRYPTOBOT_FILE, _CB)
+    except Exception:
+        log.exception("не удалось записать %s", CRYPTOBOT_FILE.name)
 
 
 _cb_load()
