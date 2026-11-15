@@ -1924,9 +1924,6 @@ def _pages(total: int) -> int:
     return max(1, -(-total // (ITEMS_PER_ROW * ROWS_PER_PAGE)))
 
 
-RES_PER_PAGE = 10   # строк со ресурсами на одной странице раздела «Ресурсы»
-
-
 def _owned_res(user: dict) -> list:
     """Ресурсы, которые есть у игрока сейчас: [(ключ, название, эмодзи, количество)]."""
     return [(k, n, e, have(user, k)) for k, (n, e) in RESOURCES.items() if have(user, k) > 0]
@@ -1939,7 +1936,7 @@ def _owned_ammo(user: dict) -> list:
 def _cat_pages(user: dict, key: str) -> int:
     """Сколько страниц в разделе: у ресурсов свой размер страницы, у боезапаса и предметов 3 x 3."""
     if key == "res":
-        return max(1, -(-len(_owned_res(user)) // RES_PER_PAGE))
+        return 1          # ресурсы одним списком в сворачиваемой цитате
     if key == "ammo":
         return _pages(len(_owned_ammo(user)))
     return _pages(len(groups_of(user, key)))
@@ -1992,14 +1989,9 @@ def category_html(user: dict, key: str, with_image: bool, page: int = 0) -> str:
         if not owned:
             return text + ("<p><b>Запасы пусты</b><br>Пока у тебя нет ни одного материала. "
                            "Добывай их, и они появятся здесь.</p>")
-        pages = _cat_pages(user, key)
-        pg = min(max(page, 0), pages - 1)
-        lines = [f"{e} <b>{escape(n)}</b> — <code>{_f(c)}</code>"
-                 for _, n, e, c in owned[pg * RES_PER_PAGE:(pg + 1) * RES_PER_PAGE]]
-        text += "<p>⠀<br>" + "<br>".join(lines) + "</p>"
-        if pages > 1:
-            text += f"<p><i>Страница {pg + 1} из {pages}.</i></p>"
-        return text
+        # все ресурсы одним списком в сворачиваемой цитате (без страниц)
+        lines = [f"{e} <b>{escape(n)}</b> — <code>{_f(c)}</code>" for _, n, e, c in owned]
+        return text + "<blockquote expandable><b>Твои ресурсы</b><br>" + "<br>".join(lines) + "</blockquote>"
     if key == "ammo":
         owned = [(k, a) for k, a in AMMO.items() if ammo_count(user, k) > 0]
         if not owned:
@@ -2043,14 +2035,8 @@ def category_kb(user: dict, key: str, page: int = 0) -> InlineKeyboardMarkup:
 
 
 def _res_kb(user: dict, page: int = 0) -> InlineKeyboardMarkup:
-    """Раздел «Ресурсы»: листание (если страниц больше одной), кнопки разделов и «Назад»."""
-    pages = _cat_pages(user, "res")
-    page = min(max(page, 0), pages - 1)
-    rows = []
-    pager = _pager_row("ws:cat:res", page, pages)
-    if pager:
-        rows.append(pager)
-    return InlineKeyboardMarkup(inline_keyboard=rows + [_section_tabs("res"), _back("ws:open")])
+    """Раздел «Ресурсы»: кнопки разделов и «Назад» (список ресурсов в тексте, без страниц)."""
+    return InlineKeyboardMarkup(inline_keyboard=[_section_tabs("res"), _back("ws:open")])
 
 
 def group_html(user: dict, key: str, with_image: bool, page: int = 0) -> str:
