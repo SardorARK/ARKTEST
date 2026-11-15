@@ -87,6 +87,12 @@ COOLDOWN_MIN = 10        # пауза после окончания запуск
 TICK_SEC = 5             # раз в сколько секунд добыча попадает в «Добыто»
 AUTO_REFRESH_SEC = 30    # раз в сколько секунд открытый экран шахты обновляется сам
 AUTO_REFRESH_MIN = 120   # предохранитель: сколько минут максимум (0 = совсем не обновлять сам)
+# Telegram при правке сообщения (editMessageText) подменяет кастомные эмодзи обычными, если у бота нет
+# дополнительных юзернеймов на Fragment. Поэтому в группах (и любых не личных чатах) есть выбор:
+#   True  - сообщение удаляется и отправляется заново: кастомные эмодзи сохраняются, но сообщение новое;
+#   False - всегда правка на месте: сообщение одно, но в группе эмодзи после правки становятся обычными.
+# В личке всегда правка на месте. Купишь юзернеймы на Fragment - ставь False.
+GROUP_RESEND = True
 MINERAL_CHANCE = 35      # шанс (%), что добыча окажется минералом; всё остальное руда
 
 # Руда: цена за штуку и вес (шанс при выборе руды, всего 100). Порядок = порядок в рюкзаке.
@@ -424,6 +430,15 @@ def short(n: float) -> str:
     whole, frac = divmod(a, div)
     text = f"{whole}.{frac * 100 // div:02d}".rstrip("0").rstrip(".")
     return f"{text}{NUMBER_SUFFIXES[idx]}"
+
+
+NUM_SHORT_FROM = 1_000_000   # с какого числа руда округляется (K, M, B...); меньше показывается целиком с пробелами
+
+
+def num(n: float) -> str:
+    """Руда и минералы: 123 456 целиком, а огромные числа округляются как монеты (86.19B)."""
+    n = int(n)
+    return fmt(n) if abs(n) < NUM_SHORT_FROM else short(n)
 
 
 def rng(lo: int, hi: int) -> str:
@@ -839,16 +854,16 @@ def selected(ug: dict) -> int:
 
 
 def _found_rows(ug: dict) -> list:
-    rows = [(f"{_oi(k)} {o['name']}", short(ug['pending'][k])) for k, o in ORES.items()]
-    rows.append((f"{D.MINERAL_EMOJI} Минералы", short(ug['pending']['mineral'])))
+    rows = [(f"{_oi(k)} {o['name']}", num(ug['pending'][k])) for k, o in ORES.items()]
+    rows.append((f"{D.MINERAL_EMOJI} Минералы", num(ug['pending']['mineral'])))
     return rows
 
 
 def _sets_found_block(ug: dict) -> str:
     """Отдельная строка «Найдено»: наборы, найденные в этом запуске. Пусто, если ничего не найдено."""
     found = ug.get("found") or {}
-    rows = [(set_name(k), "×" + short(n)) for k, n in found.items() if int(n) > 0]
-    return (_gap() + _quote("Найдено", rows)) if rows else ""
+    rows = [(set_name(k), "×" + num(n)) for k, n in found.items() if int(n) > 0]
+    return _quote("Найдено", rows) if rows else ""
 
 
 def _dur_label(minutes: int) -> str:
@@ -871,7 +886,7 @@ def _used_block(run: dict | None) -> str:
         rows = [ws.mine_item_label(e) for e in run["used"]]
     except Exception:
         return ""
-    return _quote("Используемые предметы", rows) + _gap()
+    return _quote("Используемые предметы", rows)
 
 
 def ug_html(user_id: int, with_image: bool = False) -> str:
@@ -900,7 +915,6 @@ def ug_html(user_id: int, with_image: bool = False) -> str:
     return (
         f"{_image(with_image)}"
         + _tree(state, "Состояние", mono=False)
-        + _gap()
         + _used_block(run)
         + _quote("Добыто", _found_rows(ug), expandable=True)
         + _sets_found_block(ug)
@@ -989,13 +1003,13 @@ def bag_html(user_id: int, with_image: bool = False) -> str:
     """Рюкзак: сколько штук руды и на сколько монет. Монеты вне моно: эмодзи в нём не работает."""
     user, ug = load(user_id)
     lines = "<br>".join(
-        f"<b>{_oi(k)} {o['name']}</b>: <code>{short(int(ug['ores'][k]))}</code> "
+        f"<b>{_oi(k)} {o['name']}</b>: <code>{num(int(ug['ores'][k]))}</code> "
         f"(<code>{short(int(ug['ores'][k]) * o['price'])}</code> {_coin()})"
         for k, o in ORES.items()
     )
     total = [
-        (f"{_coin()} Стоимость рюкзака", short(bag_value(ug))),
-        (f"{D.MINERAL_EMOJI} Минералы на счёте", short(int(user.get(D.MINERALS_FIELD, 0) or 0))),
+        (f"{_coin()} Стоимость рюкзака", num(bag_value(ug))),
+        (f"{D.MINERAL_EMOJI} Минералы на счёте", num(int(user.get(D.MINERALS_FIELD, 0) or 0))),
     ]
     return (
         f"{_image(with_image)}"
@@ -1245,6 +1259,11 @@ async def _live_loop(bot, chat_id: int, message_id: int, uid: int, token: int) -
             return                              # запуск закончился: последнее обновление уже показано
 
 
+def _edit_ok(msg) -> bool:
+    """Можно ли обновлять это сообщение правкой (в личке всегда; в группе, если GROUP_RESEND выключен)."""
+    return not (GROUP_RESEND and getattr(getattr(msg, "chat", None), "type", "private") != "private")
+
+
 def _start_live(bot, chat_id: int, message_id: int, uid: int) -> None:
     token = _live.get(uid, 0) + 1
     _live[uid] = token
@@ -1262,7 +1281,7 @@ async def _show(callback: CallbackQuery, key: str) -> None:
     msg = callback.message
     closable = _is_closable(msg)
     kb = _build_kb(key, uid, closable)
-    if hasattr(msg, "message_id"):
+    if hasattr(msg, "message_id") and _edit_ok(msg):
         try:
             ok = await D.refresh_rich_card(callback.bot, msg.chat.id, msg.message_id, img_key(key),
                                            lambda wi: html(uid, wi), kb, require_state=False)
@@ -1274,11 +1293,19 @@ async def _show(callback: CallbackQuery, key: str) -> None:
                 if user is not None and get_ug(user)["run"] is not None:
                     _start_live(callback.bot, msg.chat.id, msg.message_id, uid)
             return
-    msg = await D.send_rich_card(callback.bot, callback.from_user.id, img_key(key),
-                                 lambda wi: html(uid, wi), kb)
+    old = callback.message
+    new = await D.send_rich_card(callback.bot, old.chat.id if hasattr(old, "chat") else callback.from_user.id,
+                                 img_key(key), lambda wi: html(uid, wi), kb)
+    if hasattr(old, "message_id"):              # группа: старое сообщение убираем, чтобы не копились
+        _closable.pop((old.chat.id, old.message_id), None)
+        try:
+            await old.delete()
+        except Exception:
+            pass
+    msg = new
     if closable:
         _mark_closable(msg)
-    if key == "ug" and AUTO_REFRESH_MIN > 0 and hasattr(msg, "message_id"):
+    if key == "ug" and AUTO_REFRESH_MIN > 0 and hasattr(msg, "message_id") and _edit_ok(msg):
         user = D.get_user(uid)
         if user is not None and get_ug(user)["run"] is not None:
             _start_live(callback.bot, msg.chat.id, msg.message_id, uid)
@@ -1303,10 +1330,50 @@ def _index(callback: CallbackQuery, pos: int = 2) -> int | None:
 
 # ---------- Хендлеры ----------
 
+_BOT_USERNAME: str | None = None
+
+
+async def bot_link(bot, payload: str) -> str:
+    """Ссылка в личку с ботом: t.me/<бот>?start=<payload> (в main.py /start ug открывает шахту)."""
+    global _BOT_USERNAME
+    if not _BOT_USERNAME:
+        _BOT_USERNAME = (await bot.get_me()).username
+    return f"https://t.me/{_BOT_USERNAME}?start={payload}"
+
+
+async def send_group_stub(bot, chat_id: int) -> None:
+    """В группе шахту не открываем: только текст и кнопка «Перейти» в личку с ботом."""
+    url = await bot_link(bot, "ug")
+    kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(
+        text="Перейти", url=url, style=ButtonStyle.PRIMARY, icon_custom_emoji_id=MINES_EMOJI_ID)]])
+    html = (f"<p><b>{_ug()} Шахта</b></p>"
+            "<blockquote><i>Шахта открывается только в личных сообщениях с ботом. "
+            "Нажми «Перейти», чтобы копать.</i></blockquote>")
+    await D.send_rich_card(bot, chat_id, NOIMG_KEY, lambda wi: html, kb)
+
+
+async def open_private(bot, chat_id: int, uid: int) -> None:
+    """Главный экран шахты в личке (из /start ug): «Назад» ведёт в «Заработать»."""
+    if D.get_user(uid) is None:
+        await bot.send_message(chat_id, "Сначала выбери питомца: /start")
+        return
+    _live.pop(uid, None)
+    html, _ = SCREENS["ug"]
+    msg = await D.send_rich_card(bot, chat_id, img_key("ug"), lambda wi: html(uid, wi),
+                                 _build_kb("ug", uid, False))
+    if AUTO_REFRESH_MIN > 0 and hasattr(msg, "message_id"):
+        user = D.get_user(uid)
+        if user is not None and get_ug(user)["run"] is not None:
+            _start_live(bot, msg.chat.id, msg.message_id, uid)
+
+
 async def open_from_menu(message: Message) -> None:
     """Кнопка «Шахта» в нижнем (reply) меню: присылает главный экран шахты новым сообщением.
     Вызывается из MenuButtonMiddleware (подключается в main.py до quick_cmds)."""
     uid = message.from_user.id
+    if message.chat.type != "private":          # группа: только «Перейти» в личку, шахту не открываем
+        await send_group_stub(message.bot, message.chat.id)
+        return
     if D.get_user(uid) is None:
         await message.answer("Сначала выбери питомца: /start")
         return
@@ -1321,7 +1388,7 @@ async def open_from_menu(message: Message) -> None:
     )
     if closable:
         _mark_closable(msg)
-    if AUTO_REFRESH_MIN > 0 and hasattr(msg, "message_id"):
+    if AUTO_REFRESH_MIN > 0 and hasattr(msg, "message_id") and _edit_ok(msg):
         user = D.get_user(uid)
         if user is not None and get_ug(user)["run"] is not None:
             _start_live(message.bot, msg.chat.id, msg.message_id, uid)
@@ -1344,6 +1411,9 @@ async def on_open(callback: CallbackQuery):
     if await _require_user(callback) is None:
         return
     await callback.answer()
+    if getattr(getattr(callback.message, "chat", None), "type", "private") != "private":
+        await send_group_stub(callback.bot, callback.message.chat.id)
+        return
     await _show(callback, "ug")
 
 
