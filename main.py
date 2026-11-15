@@ -2043,7 +2043,7 @@ workshop.setup(
     BACK_EMOJI_ID=BACK_EMOJI_ID,
 )
 dp.include_router(workshop.router)
-workshop_sets.setup(ADMIN_IDS=ADMIN_IDS, name_html=settings.name_html)   # ник игрока в заголовке; админам - команда «выдать»
+workshop_sets.setup(ADMIN_IDS=ADMIN_IDS, name_html=settings.name_html, users=users)   # ник игрока в заголовке; админам - команда «выдать»
 dp.include_router(workshop_sets.router)
 dp.include_router(achives.router)
 settings.install_name_book(boss.STATS)   # топ бойцов босса показывает никнеймы, а не юзернеймы
