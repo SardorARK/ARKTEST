@@ -1,12 +1,12 @@
 """Раздел «Бонус»: всё в одном модуле (бывшие bonus.py + daily.py + channel_gate.py).
 
 Что внутри:
-  1. Обязательная подписка на канал (gate_*): канал задаёт админ в /admin -> «Канал». Бот должен быть
+  1. Подписка на канал для «Бонуса за описание» (gate_*): канал задаёт админ в /admin -> «Канал». Бот должен быть
      администратором канала. Настройки: channel_gate.json рядом с ботом (формат прежний, переносить не надо).
   2. «Ежедневный бонус»: серия из 7 дней, награда наборами из «Мастерской» (workshop_sets.py).
        дни 1-3 Базовый · день 4 Базовый или Элитный (50/50) · дни 5-6 Элитный · день 7 2 Элитных ·
        день 8+ каждый день: 2 Базовых или 1 Элитный (50/50).
-     Раз в сутки (день по времени сервера); пропустил день: серия с 1-го. Нужна подписка, если канал задан.
+     Раз в сутки (день по времени сервера); пропустил день: серия с 1-го. Подписка на канал НЕ нужна (она только для бонуса за описание).
      Данные игрока: user["daily"] = {"streak", "last", "total", "best"}.
      Как получить: «Бонус» -> «Ежедневный бонус» -> «Забрать бонус», либо в чате «еб», «еб-бонус-ежедневный»,
      «ежедневный бонус» (с «/» и без). Слова описаны в quick_cmds.py (SECTIONS): команда открывает карточку
@@ -232,7 +232,7 @@ async def set_channel(bot: Bot, raw) -> tuple[bool, str]:
     GATE.update(chat_id=chat.id, title=chat.title or username or "Канал", username=username, link=link)
     _gate_ok_cache.clear()
     _gate_save()
-    return True, f"Канал <b>{escape(GATE['title'])}</b> подключён. Подписка теперь обязательна для бонусов.{link_note}"
+    return True, f"Канал <b>{escape(GATE['title'])}</b> подключён. Подписка теперь обязательна для бонуса за описание.{link_note}"
 
 
 async def check_bot_rights(bot: Bot) -> tuple[bool, str]:
@@ -322,7 +322,7 @@ def _apply_claim(user: dict) -> dict:
 
 
 async def claim(bot, user_id: int) -> dict:
-    """Пытается выдать бонус. status: ok / already / nosub / error / busy / nouser."""
+    """Пытается выдать бонус. status: ok / already / busy / nouser. Подписка на канал здесь НЕ нужна: она только для бонуса за описание."""
     user = D.get_user(user_id)
     if user is None:
         return {"status": "nouser"}
@@ -332,11 +332,6 @@ async def claim(bot, user_id: int) -> dict:
     try:
         if get_state(user)["claimed"]:
             return {"status": "already"}
-        gate = await gate_status(bot, user_id)
-        if gate == "no":
-            return {"status": "nosub"}
-        if gate == "error":
-            return {"status": "error"}
         return _apply_claim(user)
     finally:
         _busy.discard(user_id)
@@ -412,11 +407,6 @@ def _calendar(st: dict) -> str:
 
 def _note_for(res: dict | None) -> str:
     status = (res or {}).get("status")
-    if status == "nosub":
-        return (f"Сначала подпишись на канал <b>{gate_title_html()}</b>: "
-                "нажми «Подписаться на канал», затем снова «Забрать бонус».")
-    if status == "error":
-        return "Не удалось проверить подписку на канал. Попробуй чуть позже."
     if status == "busy":
         return "Подожди секунду: награда уже выдаётся."
     return ""
@@ -456,16 +446,13 @@ def daily_html(user_id: int, with_image: bool = False, res: dict | None = None) 
         today_line = f"{ok} Сегодня: <b>уже получено</b>, возвращайся завтра"
     else:
         today_line = f"{title_emoji} <b>Сегодня: можно забрать</b>"
-    sub_line = ""
-    if gate_enabled():
-        sub_line = f"<br>Условие: подписка на канал <b>{gate_title_html()}</b>"
     note = _note_for(res)
     note_html = f"<p><b>{note}</b></p>" if note else ""
 
     return (
         f"{image}{head}"
         f"<p><b>Награды серии</b></p><blockquote expandable>{_calendar(st)}</blockquote>"
-        f"<p><b>Твоя серия: {st['streak']}</b><br>{today_line}{sub_line}</p>"
+        f"<p><b>Твоя серия: {st['streak']}</b><br>{today_line}</p>"
         f"{note_html}"
         "<p><i>Бонус можно забрать и без кнопок: напиши в чат «еб».</i></p>"
     )
@@ -477,9 +464,6 @@ def daily_kb(user_id: int, mode: str = "m", res: dict | None = None) -> InlineKe
     st = get_state(user)
     rows = []
     if not st["claimed"]:
-        sub = gate_button()
-        if sub is not None:
-            rows.append([sub])
         rows.append([InlineKeyboardButton(
             text="Забрать бонус", callback_data=f"daily:claim:{mode}",
             style=ButtonStyle.SUCCESS, icon_custom_emoji_id=DAILY_EMOJI[0])])
@@ -536,7 +520,7 @@ def _compact_ok_html(res: dict) -> str:
 
 
 async def _daily_reply(callback: CallbackQuery, res: dict) -> None:
-    """Ответ на команду «еб»: новое сообщение-ответ на саму команду, без кнопок (кнопки только если нужна подписка).
+    """Ответ на команду «еб»: новое сообщение-ответ на саму команду, без кнопок.
     Исходное сообщение (заглушка «⏳» или прошлый ответ с кнопками) удаляется."""
     bot, msg = callback.bot, callback.message
     chat_id = msg.chat.id
@@ -551,14 +535,6 @@ async def _daily_reply(callback: CallbackQuery, res: dict) -> None:
         text = "<i>Вы сегодня уже получили бонус!</i>"
     else:
         text = f"<i>{_note_for(res) or 'Не получилось выдать бонус. Попробуй чуть позже.'}</i>"
-        if status == "nosub":
-            rows = []
-            sub = gate_button()
-            if sub is not None:
-                rows.append([sub])
-            rows.append([InlineKeyboardButton(text="Забрать бонус", callback_data="daily:claim:c",
-                                              style=ButtonStyle.SUCCESS, icon_custom_emoji_id=DAILY_EMOJI[0])])
-            kb = InlineKeyboardMarkup(inline_keyboard=rows)
     try:
         await msg.delete()
     except TelegramAPIError:
@@ -589,7 +565,7 @@ async def on_daily(callback: CallbackQuery):
         await callback.answer("Сначала выбери питомца: /start", show_alert=True)
         return
     if action == "claim" and mode == "c":
-        # Команда «еб» (или кнопка «Забрать бонус» под сообщением о подписке): короткий ответ без кнопок
+        # Команда «еб» короткий ответ без кнопок
         res = await claim(callback.bot, uid)
         await callback.answer()
         await _daily_reply(callback, res)
