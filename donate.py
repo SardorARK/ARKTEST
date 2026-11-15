@@ -128,7 +128,9 @@ PACKS: dict[str, tuple[int, int, str]] = {
 # ---------- Оплата через xRocket Pay ----------
 EM_ROCKET = ("5798534328698805312", "🚀")    # xRocket Pay
 XROCKET_API_KEY = os.getenv("XROCKET_API_KEY", "")
-XROCKET_API_URL = os.getenv("XROCKET_API_URL", "https://pay.xrocket.tg").rstrip("/")
+# Legacy API xRocket Pay (ключ из старого кабинета, заголовок Rocket-Pay-Key, пути /tg-invoices).
+# Адрес можно поменять в .env: XROCKET_API_URL=...
+XROCKET_API_URL = os.getenv("XROCKET_API_URL", "https://pay.xrocket.exchange").rstrip("/")
 XROCKET_CURRENCY = "USDT"          # валюта счёта
 USD_CENTS_PER_100 = 130            # курс: 100 кристаллов = 1,30 $ (в центах)
 XROCKET_TTL = 30 * 60              # сколько секунд счёт можно оплатить
