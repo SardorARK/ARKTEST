@@ -33,7 +33,7 @@ from types import SimpleNamespace
 from aiogram import Bot, F, Router
 from aiogram.enums import ButtonStyle
 from aiogram.exceptions import TelegramAPIError, TelegramBadRequest, TelegramRetryAfter
-from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup
+from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, InputRichMessage, ReplyParameters
 
 from storage import atomic_write_json, read_json_safe
 
@@ -435,15 +435,15 @@ def daily_html(user_id: int, with_image: bool = False, res: dict | None = None) 
         cycle_text = f"День <b>{day}</b> из {CYCLE}" if day <= CYCLE else f"День <b>{day}</b> серии"
         try:
             code = _ws().CODES[next(iter(res["reward"]))]
-            open_hint = (f"<p><i>Открыть награду: напиши в чат <b>«отк {code}»</b> "
-                         "или посмотри свои наборы командой <b>«н»</b>.</i></p>")
+            open_hint = (f"<br>&nbsp;<br>Открыть награду: напиши в чат <b>«отк {code}»</b> "
+                         "или посмотри свои наборы командой <b>«н»</b>.")
         except Exception:
             open_hint = ""
         head = (
             f"<p><b>{title_emoji} БОНУС ПОЛУЧЕН</b></p>"
             f"<blockquote><i>{ok} {cycle_text}. Награда уже лежит в твоих наборах.</i></blockquote>"
-            f"<p><b>Твоя награда</b>{_gap()}{_reward_text(res['reward'])}</p>"
-            f"{open_hint}"
+            f"<p><b>Твоя награда</b></p>"
+            f"<blockquote expandable><i>{_reward_text(res['reward'])}{open_hint}</i></blockquote>"
         )
     else:
         head = (
@@ -517,12 +517,82 @@ async def _daily_show(callback: CallbackQuery, mode: str, res: dict | None) -> N
             raise
 
 
+def _compact_ok_html(res: dict) -> str:
+    """Ответ на команду «еб», когда бонус выдан: заголовок и всё остальное в сворачиваемой цитате, без кнопок."""
+    ok = D.custom_emoji(CHECK_EMOJI)
+    day = res["day"]
+    cycle_text = f"День <b>{day}</b> из {CYCLE}" if day <= CYCLE else f"День <b>{day}</b> серии"
+    try:
+        code = _ws().CODES[next(iter(res["reward"]))]
+        hint = (f"<br>&nbsp;<br>Открыть награду: напиши в чат <b>«отк {code}»</b> "
+                "или посмотри свои наборы командой <b>«н»</b>.")
+    except Exception:
+        hint = ""
+    return (
+        f"<p><b>{D.custom_emoji(DAILY_EMOJI)} БОНУС ПОЛУЧЕН</b></p>"
+        f"<blockquote expandable><i>{ok} {cycle_text}. Награда уже лежит в твоих наборах."
+        f"<br>&nbsp;<br>{_reward_text(res['reward'])}{hint}</i></blockquote>"
+    )
+
+
+async def _daily_reply(callback: CallbackQuery, res: dict) -> None:
+    """Ответ на команду «еб»: новое сообщение-ответ на саму команду, без кнопок (кнопки только если нужна подписка).
+    Исходное сообщение (заглушка «⏳» или прошлый ответ с кнопками) удаляется."""
+    bot, msg = callback.bot, callback.message
+    chat_id = msg.chat.id
+    rt = getattr(msg, "reply_to_message", None)
+    reply = ReplyParameters(message_id=rt.message_id, allow_sending_without_reply=True) if rt is not None else None
+    status = res["status"]
+    kb = None
+    if status == "ok":
+        rich = _compact_ok_html(res)
+        text = None
+    elif status == "already":
+        text = "<i>Вы сегодня уже получили бонус!</i>"
+    else:
+        text = f"<i>{_note_for(res) or 'Не получилось выдать бонус. Попробуй чуть позже.'}</i>"
+        if status == "nosub":
+            rows = []
+            sub = gate_button()
+            if sub is not None:
+                rows.append([sub])
+            rows.append([InlineKeyboardButton(text="Забрать бонус", callback_data="daily:claim:c",
+                                              style=ButtonStyle.SUCCESS, icon_custom_emoji_id=DAILY_EMOJI[0])])
+            kb = InlineKeyboardMarkup(inline_keyboard=rows)
+    try:
+        await msg.delete()
+    except TelegramAPIError:
+        pass
+    try:
+        if text is None:
+            try:
+                await bot.send_rich_message(chat_id=chat_id, rich_message=InputRichMessage(html=rich),
+                                            reply_parameters=reply)
+            except TypeError:   # в этой версии send_rich_message нет reply_parameters: шлём без ответа
+                await D.send_rich_card(bot, chat_id, "menu", lambda with_image: rich, None)
+        else:
+            await bot.send_message(chat_id, text, reply_markup=kb, reply_parameters=reply)
+    except Exception:
+        # награда уже выдана и сохранена: если красивое сообщение не ушло, сообщаем простым текстом
+        log.exception("daily: не удалось отправить ответ игроку %s", callback.from_user.id)
+        try:
+            await bot.send_message(chat_id, _plain(res))
+        except Exception:
+            log.exception("daily: и простой ответ не отправился")
+
+
 @router.callback_query(F.data.regexp(r"^daily:(open|claim):[mc]$"))
 async def on_daily(callback: CallbackQuery):
     _, action, mode = callback.data.split(":")
     uid = callback.from_user.id
     if D.get_user(uid) is None:
         await callback.answer("Сначала выбери питомца: /start", show_alert=True)
+        return
+    if action == "claim" and mode == "c":
+        # Команда «еб» (или кнопка «Забрать бонус» под сообщением о подписке): короткий ответ без кнопок
+        res = await claim(callback.bot, uid)
+        await callback.answer()
+        await _daily_reply(callback, res)
         return
     res = None
     if action == "claim":
@@ -727,9 +797,9 @@ def _active_html(with_image: bool) -> str:
         f"{ok} Действует на всех боссов<br>"
         f"{sub_line}"
         f"{ok} Проверка описания: раз в 2 часа</p>"
-        f"<p><b>{D.custom_emoji(D.INFO_EMOJI)} Важно</b>{_gap()}"
-        f"Пока юзернейм стоит в описании{cond}, бонус с тобой. "
-        f"Если {off_by}, бонус отключится при ближайшей проверке.</p>"
+        f"<p><b>{D.custom_emoji(D.INFO_EMOJI)} Важно</b></p>"
+        f"<blockquote expandable><i>Пока юзернейм стоит в описании{cond}, бонус с тобой. "
+        f"Если {off_by}, бонус отключится при ближайшей проверке.</i></blockquote>"
     )
 
 
