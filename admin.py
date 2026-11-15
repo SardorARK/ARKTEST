@@ -26,6 +26,8 @@
     владельцы привилегий, журнал донатов, выдача и снятие кристаллов, выдача и снятие привилегий,
     сброс эликсиров игрока, выгрузка donations.jsonl. О новом платеже админам приходит сообщение.
   * Изображения (/img): фото экранов, питомцев, шахт, боссов, сундуков, донат-экранов.
+  * Канал: канал обязательной подписки для бонусов (ежедневный бонус, бонус за описание). Бот должен быть
+    администратором канала. Канал можно указать @юзернеймом, ссылкой, ID или пересланным постом.
   * Команды: /admin, /img, /donate, /give, /stats, /find, /ban, /unban, /cancel.
 
 Работа с данными:
@@ -82,6 +84,7 @@ import cases
 import donate
 import store as market   # раздел «Рынок» (store.py)
 import arena
+import channel_gate   # обязательная подписка на канал (channel_gate.py)
 import equipment
 import exrn
 import friends
@@ -878,7 +881,8 @@ def _main_kb() -> InlineKeyboardMarkup:
         [_b("Выдача", "adm:give", S), _b("Рассылка", "adm:bc", S)],
         [_b("Боссы", "adm:bs", G), _b("Журнал", "adm:lg:0:0", G)],
         [_b("Реклама", "adm:ads", S), _b("Изображения", "adm:img", G)],
-        [_b("Донат", "adm:dn", S), _b("Управление", "adm:sys", P)],
+        [_b("Донат", "adm:dn", S), _b("Канал", "adm:ch", S)],
+        [_b("Управление", "adm:sys", P)],
     )
 
 
@@ -904,6 +908,120 @@ async def adm_main(cb: CallbackQuery, state: FSMContext):
 @router.callback_query(F.data == "adm:noop")
 async def adm_noop(cb: CallbackQuery):
     await cb.answer()
+
+
+# ---------- Канал обязательной подписки ----------
+
+class ChStates(StatesGroup):
+    waiting_channel = State()   # ждём @юзернейм, ссылку, ID или пересланный пост канала
+
+
+def _ch_text() -> str:
+    if not channel_gate.is_enabled():
+        return (
+            "<b>Канал подписки</b>\n\n"
+            "Сейчас канал <b>не задан</b>: подписка нигде не требуется.\n\n"
+            "Когда канал задан, подписка нужна для <b>ежедневного бонуса</b> и для "
+            "<b>бонуса за описание</b> (+% к урону). Бот должен быть <b>администратором</b> канала, "
+            "иначе Telegram не позволит проверить подписку."
+        )
+    cfg = channel_gate.CONFIG
+    link = channel_gate.url()
+    lines = [
+        "<b>Канал подписки</b>",
+        "",
+        f"Канал: <b>{escape(channel_gate.title())}</b>",
+        f"ID: <code>{cfg['chat_id']}</code>",
+    ]
+    if cfg.get("username"):
+        lines.append(f"Юзернейм: @{escape(cfg['username'])}")
+    lines.append(f"Ссылка для игроков: {escape(link) if link else 'нет (кнопки «Подписаться» не будет)'}")
+    lines += ["", "Подписка <b>обязательна</b> для ежедневного бонуса и бонуса за описание."]
+    return "\n".join(lines)
+
+
+def _ch_kb() -> InlineKeyboardMarkup:
+    S, G, P = ButtonStyle.SUCCESS, ButtonStyle.PRIMARY, ButtonStyle.DANGER
+    rows = [[_b("Сменить канал" if channel_gate.is_enabled() else "Указать канал", "adm:chset", S)]]
+    if channel_gate.is_enabled():
+        rows.append([_b("Проверить права бота", "adm:chchk", G)])
+        rows.append([_b("Отключить подписку", "adm:chdel", P)])
+    rows.append(_back())
+    return _kb(*rows)
+
+
+@router.callback_query(F.data == "adm:ch")
+async def adm_channel(cb: CallbackQuery, state: FSMContext):
+    await state.clear()
+    await _show(cb, _ch_text(), _ch_kb())
+    await cb.answer()
+
+
+@router.callback_query(F.data == "adm:chset")
+async def adm_channel_set(cb: CallbackQuery, state: FSMContext):
+    await state.set_state(ChStates.waiting_channel)
+    await _show(
+        cb,
+        "<b>Какой канал нужен?</b>\n\nСначала добавь бота в канал <b>администратором</b>, затем пришли одно из:\n"
+        "• @юзернейм канала или ссылку <code>t.me/имя</code>\n"
+        "• числовой ID (<code>-100…</code>)\n"
+        "• любой пост из канала, переслав его сюда (подойдёт и для приватного канала)",
+        _cancel_kb("adm:ch"),
+    )
+    await cb.answer()
+
+
+async def _channel_apply(message: Message, state: FSMContext, raw) -> None:
+    ok, text = await channel_gate.set_channel(message.bot, raw)
+    if ok:
+        ledger("admin_channel_set", admin=message.from_user.id, chat_id=channel_gate.CONFIG["chat_id"],
+               title=channel_gate.CONFIG["title"])
+        await state.clear()
+        await message.answer(text, reply_markup=_ch_kb())
+    else:
+        await message.answer(text + "\n\n<i>Попробуй ещё раз или нажми «Отмена».</i>", reply_markup=_cancel_kb("adm:ch"))
+
+
+@router.message(ChStates.waiting_channel, F.forward_origin)
+async def channel_receive_forward(message: Message, state: FSMContext):
+    origin = message.forward_origin
+    chat = getattr(origin, "chat", None)
+    if chat is None:
+        await message.answer("<i>Это не пост из канала. Перешли пост именно из канала или пришли @юзернейм.</i>")
+        return
+    await _channel_apply(message, state, chat.id)
+
+
+@router.message(ChStates.waiting_channel, F.text, _not_cmd)
+async def channel_receive_text(message: Message, state: FSMContext):
+    await _channel_apply(message, state, message.text)
+
+
+@router.message(ChStates.waiting_channel)
+async def channel_receive_other(message: Message):
+    await message.answer("<i>Пришли @юзернейм, ссылку, ID или перешли пост из канала.</i>")
+
+
+@router.callback_query(F.data == "adm:chchk")
+async def adm_channel_check(cb: CallbackQuery):
+    ok, text = await channel_gate.check_bot_rights(cb.bot)
+    await cb.answer("Бот администратор канала" if ok else "Проблема с правами бота", show_alert=not ok)
+    await _show(cb, _ch_text() + "\n\n" + ("<b>Проверка:</b> " if ok else "<b>Проверка:</b> ⚠ ") + text, _ch_kb())
+
+
+@router.callback_query(F.data == "adm:chdel")
+async def adm_channel_del(cb: CallbackQuery):
+    await _show(cb, "<b>Отключить обязательную подписку?</b>\n\nБонусы снова будут доступны без подписки.",
+                _confirm_kb("adm:chdel2", "adm:ch", "Да, отключить"))
+    await cb.answer()
+
+
+@router.callback_query(F.data == "adm:chdel2")
+async def adm_channel_del_do(cb: CallbackQuery):
+    channel_gate.clear()
+    ledger("admin_channel_clear", admin=cb.from_user.id)
+    await cb.answer("Подписка отключена")
+    await _show(cb, _ch_text(), _ch_kb())
 
 
 # ---------- Игроки: поиск, списки, карточка ----------
