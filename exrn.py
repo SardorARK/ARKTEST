@@ -101,7 +101,7 @@ def _ws_line(user: dict) -> str:
     return ""
 
 # Куда админ может добавить фото
-IMG_TARGETS: dict[str, str] = {"exrn": "Исследователи"}
+IMG_TARGETS: dict[str, str] = {"exrn": "Исследователи (одно фото на весь раздел)"}
 
 # ---------------------------------------------------------------------------
 # Настройки баланса: всё, что нужно крутить, собрано здесь
@@ -434,12 +434,7 @@ for _a in ARTIFACTS:
 BY_ART = {a["key"]: a for a in ARTIFACTS}
 _TIER_LIST = list(TIERS)
 
-# Куда админ может добавить фото
-IMG_TARGETS.update({
-    "exrn_arts": "Исследователи: снаряжение",
-    "exrn_arts_list": "Исследователи: мои артефакты",
-    "exrn_art_item": "Исследователи: карточка артефакта",
-})
+# Одно общее фото на все экраны раздела: ключ всегда "exrn" (см. _show)
 
 
 # ---------------------------------------------------------------------------
@@ -1675,7 +1670,8 @@ async def _need_user(callback: CallbackQuery):
 
 async def _show(callback: CallbackQuery, html_fn, kb: InlineKeyboardMarkup,
                 force_new: bool = False, key: str = "exrn"):
-    await _show_rich_card(callback, key, html_fn, kb, force_new=force_new)
+    # key оставлен для совместимости: у раздела одно общее фото, поэтому всегда "exrn"
+    await _show_rich_card(callback, "exrn", html_fn, kb, force_new=force_new)
 
 
 async def _show_main(callback: CallbackQuery, user: dict):
@@ -2091,13 +2087,8 @@ async def on_art_take(callback: CallbackQuery):
 async def send_preview(bot, chat_id: int, user_id: int, key: str) -> None:
     user = _get_user(user_id) or {"coins": 0, "meat": 0, "fruit": 0}
     _state(user)
-    builders = {
-        "exrn": lambda wi: main_html(user, wi),
-        "exrn_arts": lambda wi: arts_html(user, wi),
-        "exrn_arts_list": lambda wi: alist_html(user, wi),
-        "exrn_art_item": lambda wi: art_item_html(user, ARTIFACTS[0]["key"], wi),
-    }
-    await _send_rich_card(bot, chat_id, key, builders[key])
+    builders = {"exrn": lambda wi: main_html(user, wi)}
+    await _send_rich_card(bot, chat_id, "exrn", builders["exrn"])
 
 
 @router.callback_query(F.data == "exrn:noop")
