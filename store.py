@@ -81,7 +81,8 @@ DEFAULT_PRICE = {"coins": 100, "crystals": 10}   # цена по умолчан�
 STEPS = {"coins": (10, 100, 1000, 10000), "crystals": (1, 10, 100, 1000)}   # шаги кнопок цены
 
 # Кастомные эмодзи раздела: (id, запасной значок)
-EM_COIN = ("5449418135381759397", "🪙")    # монеты
+MY_LOTS_ICON = "📋"    # значок кнопки «Мои лоты» (и строки «Мои лоты» на главном экране рынка)
+EM_COIN = ("5433631991675244306", "🤑")    # монеты (новый значок, как COIN_EMOJI в main.py)
 EM_ALL = ("5854908544712707500", "📦")     # «Все лоты»
 EM_BOOST = ("5438571934210082705", "⚡")   # бусты
 EM_ART = ("5339290256174770336", "🍴")     # артефакты
@@ -539,6 +540,21 @@ def _fmt(n) -> str:
     return f"{sign}{text}{NUMBER_SUFFIXES[idx]}"
 
 
+def _rules_html() -> str:
+    """Правила рынка: курсив, в сворачиваемой цитате, в заголовке значок монеты."""
+    rules = [
+        "Валюту лота (монеты или кристаллы) выбирает продавец",
+        f"Комиссия с продажи: <b>{FEE_PERCENT}%</b>",
+        f"Лот живёт <b>{LOT_DAYS}</b> дн., потом предмет ждёт тебя в «Моих лотах»",
+        "Снять лот можно в любой момент",
+        f"Не больше <b>{MAX_LOTS}</b> лотов у одного игрока",
+    ]
+    last = len(rules) - 1
+    lines = [f"{'└' if i == last else '├'} <i>{text}</i>" for i, text in enumerate(rules)]
+    return (f"<blockquote expandable>{donate._ce(EM_COIN)} <b>Правила</b><br>"
+            + "<br>".join(lines) + "</blockquote>")
+
+
 def _unit(lot_price: int, n: int) -> str:
     v = lot_price / max(1, n)
     return _fmt(int(v)) if v == int(v) or v >= 1000 else f"{v:.1f}"   # дробная цена за штуку только до 1K
@@ -607,32 +623,27 @@ def home_html(uid: int, with_image: bool = False) -> str:
     lots = _active(exclude=uid)
     mine = _mine(uid)
     expired = sum(1 for l in mine if l["state"] == "expired")
-    mine_line = f"Мои лоты: <b>{len(mine)}/{MAX_LOTS}</b>"
+    # подписи жирные, значения моно (по нажатию копируются); значки: «Купить» для рынка, «Мои лоты» для своих
+    mine_line = f"{MY_LOTS_ICON} <b>Мои лоты:</b> <code>{len(mine)}/{MAX_LOTS}</code>"
     if expired:
-        mine_line += f" (ждут возврата: <b>{expired}</b>)"
+        mine_line += f" <b>(ждут возврата:</b> <code>{expired}</code><b>)</b>"
     return (
         f"{donate._image(with_image)}"
         + _head("РЫНОК")
         + _quote("Здесь игроки продают и покупают артефакты, мясо, фрукты и временные бусты. "
                  "Цену можно назначить в монетах или в кристаллах.")
         + donate._tree("Сейчас", [
-            f"Лотов на рынке: <b>{len(lots)}</b>",
+            f"{donate._ce(donate.EM_BUY)} <b>Лотов на рынке:</b> <code>{len(lots)}</code>",
             mine_line,
-            f"{_cur_em('coins')} Монеты: <b>{_fmt(_bal(user, 'coins'))}</b>",
-            f"{_cur_em('crystals')} Кристаллы: <b>{_fmt(_bal(user, 'crystals'))}</b>",
+            f"{_cur_em('coins')} <b>Монеты:</b> <code>{_fmt(_bal(user, 'coins'))}</code>",
+            f"{_cur_em('crystals')} <b>Кристаллы:</b> <code>{_fmt(_bal(user, 'crystals'))}</code>",
         ])
         + _GAP
-        + donate._tree("Правила", [
-            f"Валюту лота (монеты или кристаллы) выбирает продавец",
-            f"Комиссия с продажи: <b>{FEE_PERCENT}%</b>",
-            f"Лот живёт <b>{LOT_DAYS}</b> дн., потом предмет ждёт тебя в «Моих лотах»",
-            "Снять лот можно в любой момент",
-            f"Не больше <b>{MAX_LOTS}</b> лотов у одного игрока",
-        ])
+        + _rules_html()
         + _GAP
         + _rows([_b(f"{donate._ce(donate.EM_BUY)} Купить", "market:buy"),
                  _b(f"{donate._ce(EM_SELL)} Продать", "market:sell"),
-                 _b(f"📋 Мои лоты ({len(mine)})", "market:my", "primary")], 2)
+                 _b(f"{MY_LOTS_ICON} Мои лоты ({len(mine)})", "market:my", "primary")], 2)
     )
 
 
