@@ -695,23 +695,30 @@ _BOT_USERNAME: str | None = None
 TREASURY_BTN_EMOJI = "6192975148681793540"      # значок кнопки «Перейти» (как у «Сокровищницы» в меню)
 
 
-async def send_group_stub(bot, chat_id: int) -> None:
-    """В группе сундуки не открываем: текст и кнопка «Перейти» в личку с ботом (/start cases)."""
+async def send_group_card(bot, chat_id: int, user_id: int, url: str) -> bool:
+    """В группе сундуки не открываются: показываем текст самой сокровищницы и одну кнопку «Перейти»
+    в личку с ботом. False: у игрока нет питомца."""
+    if D.get_user(user_id) is None:
+        return False
+    kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(
+        text="Перейти", url=url, style=ButtonStyle.PRIMARY, icon_custom_emoji_id=TREASURY_BTN_EMOJI)]])
+    await D.send_rich_card(bot, chat_id, "cases", lambda wi: cases_html(user_id, wi), kb)
+    return True
+
+
+async def send_group_stub(bot, chat_id: int, user_id: int | None = None) -> None:
+    """Запасной путь (если команду не перехватил quick_cmds)."""
     global _BOT_USERNAME
     if not _BOT_USERNAME:
         _BOT_USERNAME = (await bot.get_me()).username
-    kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(
-        text="Перейти", url=f"https://t.me/{_BOT_USERNAME}?start=cases",
-        style=ButtonStyle.PRIMARY, icon_custom_emoji_id=TREASURY_BTN_EMOJI)]])
-    html = ("<p><b>Сокровищница</b></p>"
-            "<blockquote><i>Сундуки нельзя открывать в чате. "
-            "Нажми «Перейти», чтобы открыть их в личных сообщениях с ботом.</i></blockquote>")
-    await D.send_rich_card(bot, chat_id, "cases_stub", lambda wi: html, kb)
+    url = f"https://t.me/{_BOT_USERNAME}?start=cases"
+    if user_id is None or not await send_group_card(bot, chat_id, user_id, url):
+        await bot.send_message(chat_id, "Сначала выбери питомца: /start")
 
 
 async def send_cases(bot, chat_id: int, user_id: int) -> None:
     if chat_id < 0:                             # группа или супергруппа
-        await send_group_stub(bot, chat_id)
+        await send_group_stub(bot, chat_id, user_id)
         return
     await D.send_rich_card(
         bot, chat_id, "cases", lambda with_image: cases_html(user_id, with_image), cases_kb(user_id)
@@ -720,7 +727,7 @@ async def send_cases(bot, chat_id: int, user_id: int) -> None:
 
 async def send_case(bot, chat_id: int, user_id: int, n: int) -> None:
     if chat_id < 0:
-        await send_group_stub(bot, chat_id)
+        await send_group_stub(bot, chat_id, user_id)
         return
     n = _case_index(n)
     await D.send_rich_card(
@@ -771,7 +778,7 @@ async def on_open(callback: CallbackQuery):
     if callback.message.chat.id < 0:            # группа: вместо сундуков заглушка «Перейти»
         if getattr(callback.message, "text", None) == "⏳":   # заглушка быстрой команды больше не нужна
             await _delete(callback)
-        await send_group_stub(callback.bot, callback.message.chat.id)
+        await send_group_stub(callback.bot, callback.message.chat.id, callback.from_user.id)
         return
     await _delete(callback)
     await send_cases(callback.bot, callback.message.chat.id, callback.from_user.id)
