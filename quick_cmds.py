@@ -85,6 +85,9 @@ GROUP_REDIRECT: dict[tuple[str, str], tuple[str, str]] = {
         "<i>В чате раздел боссов не открывается. Нажми кнопку, и он откроется в личных сообщениях с ботом.</i>",
     ),
 }
+START_TEXT = ("<b>Старт</b>\n\n"
+              "<i>В чате бот не запускается. Нажми кнопку, и он откроется в личных сообщениях.</i>")
+_GROUP_START_RE = re.compile(r"^/start(?:@(\w+))?(?:\s+\S+)*\s*$", re.IGNORECASE)
 REDIRECT_BUTTON = "Перейти"
 REDIRECT_COOLDOWN = 5.0   # секунд: чтобы повторы в чате не засыпали его одинаковыми ответами
 
@@ -151,7 +154,7 @@ class QuickCommands(BaseMiddleware):
     async def _redirect(self, bot, msg, param: str, text: str) -> None:
         """В группе: ответ с кнопкой «Перейти» в личный чат с ботом (раздел там откроется по ссылке)."""
         now = time.monotonic()
-        key = (msg.chat.id, msg.from_user.id, param)
+        key = (msg.chat.id, msg.from_user.id, param or "start")
         if now - _redirect_last.get(key, 0.0) < REDIRECT_COOLDOWN:
             return
         if len(_redirect_last) > 2000:
@@ -159,7 +162,7 @@ class QuickCommands(BaseMiddleware):
         _redirect_last[key] = now
         me = await bot.me()
         kb = InlineKeyboardMarkup(inline_keyboard=[[
-            InlineKeyboardButton(text=REDIRECT_BUTTON, url=f"https://t.me/{me.username}?start={param}")
+            InlineKeyboardButton(text=REDIRECT_BUTTON, url=f"https://t.me/{me.username}" + (f"?start={param}" if param else ""))
         ]])
         try:
             await bot.send_message(
@@ -195,6 +198,15 @@ class QuickCommands(BaseMiddleware):
                 me = (await bot.me()).username or ""
                 if to != me.lower():
                     return None   # команда адресована другому боту
+
+        if msg.chat.type != "private":   # /start в группе: ответ с кнопкой «Перейти» в личку, бот в чате не запускаем
+            st = _GROUP_START_RE.match((msg.text or "").strip())
+            if st:
+                me_name = ((await bot.me()).username or "").lower()
+                if st.group(1) and st.group(1).lower() != me_name:
+                    return None   # команда адресована другому боту
+                await self._redirect(bot, msg, "", START_TEXT)
+                return _HANDLED
 
         found = None
         if msg.chat.type == "private":   # ссылка из группы: /start menu, /start boss
