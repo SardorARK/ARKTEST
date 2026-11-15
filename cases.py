@@ -691,13 +691,37 @@ def _key_index(key: str) -> int:
     return _case_index(int(key.split("_")[1]) - 1)
 
 
+_BOT_USERNAME: str | None = None
+TREASURY_BTN_EMOJI = "6192975148681793540"      # значок кнопки «Перейти» (как у «Сокровищницы» в меню)
+
+
+async def send_group_stub(bot, chat_id: int) -> None:
+    """В группе сундуки не открываем: текст и кнопка «Перейти» в личку с ботом (/start cases)."""
+    global _BOT_USERNAME
+    if not _BOT_USERNAME:
+        _BOT_USERNAME = (await bot.get_me()).username
+    kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(
+        text="Перейти", url=f"https://t.me/{_BOT_USERNAME}?start=cases",
+        style=ButtonStyle.PRIMARY, icon_custom_emoji_id=TREASURY_BTN_EMOJI)]])
+    html = ("<p><b>Сокровищница</b></p>"
+            "<blockquote><i>Сундуки нельзя открывать в чате. "
+            "Нажми «Перейти», чтобы открыть их в личных сообщениях с ботом.</i></blockquote>")
+    await D.send_rich_card(bot, chat_id, "cases_stub", lambda wi: html, kb)
+
+
 async def send_cases(bot, chat_id: int, user_id: int) -> None:
+    if chat_id < 0:                             # группа или супергруппа
+        await send_group_stub(bot, chat_id)
+        return
     await D.send_rich_card(
         bot, chat_id, "cases", lambda with_image: cases_html(user_id, with_image), cases_kb(user_id)
     )
 
 
 async def send_case(bot, chat_id: int, user_id: int, n: int) -> None:
+    if chat_id < 0:
+        await send_group_stub(bot, chat_id)
+        return
     n = _case_index(n)
     await D.send_rich_card(
         bot, chat_id, IMG_KEY, lambda with_image: case_html(user_id, n, with_image),
@@ -744,6 +768,11 @@ async def on_open(callback: CallbackQuery):
     if await _require_user(callback) is None:
         return
     await callback.answer()
+    if callback.message.chat.id < 0:            # группа: вместо сундуков заглушка «Перейти»
+        if getattr(callback.message, "text", None) == "⏳":   # заглушка быстрой команды больше не нужна
+            await _delete(callback)
+        await send_group_stub(callback.bot, callback.message.chat.id)
+        return
     await _delete(callback)
     await send_cases(callback.bot, callback.message.chat.id, callback.from_user.id)
 
