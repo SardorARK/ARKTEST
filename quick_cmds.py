@@ -83,6 +83,8 @@ for _kind, _target, _words in SECTIONS:
 MENU_EMOJI = ("5208782954716733247", "🏠")   # значок «Главное меню» в тексте ответа
 BOSS_EMOJI = ("5228962845672096235", "😈")   # значок кнопки «Босс» (как BOSS_EMOJI в boss.py)
 ARENA_EMOJI = ("5454014806950429357", "⚔️")  # значок кнопки «Арена» (WINS_EMOJI в main.py)
+MINE_EMOJI = ("5461047575379466857", "⛏")    # значок «Шахта» (UG_EMOJI в underground.py)
+TREASURY_EMOJI = ("6192975148681793540", "💰")   # значок «Сокровищница» (TREASURY_EMOJI в main.py)
 
 
 def _emoji(pair: tuple[str, str]) -> str:
@@ -100,6 +102,16 @@ GROUP_REDIRECT: dict[tuple[str, str], tuple[str, str]] = {
         f"{_emoji(ARENA_EMOJI)} <b>Арена</b>\n\n"
         "<i>В чате арена не открывается. Нажми кнопку, и она откроется в личных сообщениях с ботом.</i>",
     ),
+    ("text", "Шахта"): (
+        "ug",
+        f"{_emoji(MINE_EMOJI)} <b>Шахта</b>\n\n"
+        "<i>В чате шахта не открывается. Нажми кнопку, и она откроется в личных сообщениях с ботом.</i>",
+    ),
+    ("cb", "menu:cases"): (
+        "cases",
+        f"{_emoji(TREASURY_EMOJI)} <b>Сокровищница</b>\n\n"
+        "<i>Сундуки нельзя открывать в чате. Нажми кнопку, и они откроются в личных сообщениях с ботом.</i>",
+    ),
     ("cb", "menu:boss"): (
         "boss",
         f"{_emoji(BOSS_EMOJI)} <b>Боссы</b>\n\n"
@@ -115,8 +127,9 @@ REDIRECT_COOLDOWN = 5.0   # секунд: чтобы повторы в чате 
 DEEP_LINKS: dict[str, tuple[str, str]] = {
     "menu": ("text", "Меню"), "boss": ("cb", "menu:boss"), "arena": ("text", "Арена"),
     "pet": ("cb", "menu:pet"),
+    "ug": ("text", "Шахта"), "cases": ("cb", "menu:cases"),
 }
-_START_RE = re.compile(r"^/start(?:@(\w+))?\s+(menu|boss|arena|pet)\s*$", re.IGNORECASE)
+_START_RE = re.compile(r"^/start(?:@(\w+))?\s+(menu|boss|arena|pet|ug|cases)\s*$", re.IGNORECASE)
 
 # Короткая карточка питомца в группе (уровень, характеристики, кнопка «Перейти»).
 # Функцию ставит main.py: quick_cmds.pet_group_card = ...; она возвращает False, если карточку
