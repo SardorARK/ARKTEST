@@ -61,6 +61,12 @@ import gift              # передача ресурсов игроку: «д�
 import store as market   # раздел «Рынок» (store.py); имя store в main.py занято базой игроков
 from guard import Guard, OwnerTracker, load_owners, on_error, owners_saver, save_owners
 
+# Новые кастомные эмодзи разделов «Друзья» и «Мастерская»: подменяем в модулях, чтобы везде был один значок
+FRIENDS_EMOJI = ("6048629956517303265", "👥")
+WORKSHOP_EMOJI = ("5210696719129392502", "🔧")
+friends.BUTTON_EMOJI_ID = FRIENDS_EMOJI[0]
+workshop.BUTTON_EMOJI = WORKSHOP_EMOJI
+
 BOT_TOKEN = "8867617327:AAGP427kiEOg1aI8hRIUOyiH3Mu7eQGaEbE"
 
 # Telegram ID админов (свой ID можно узнать у @userinfobot)
@@ -764,12 +770,12 @@ def main_menu() -> ReplyKeyboardMarkup:
                 KeyboardButton(
                     text=friends.BUTTON_TEXT,
                     style=ButtonStyle.PRIMARY,
-                    icon_custom_emoji_id=friends.BUTTON_EMOJI_ID,
+                    icon_custom_emoji_id=FRIENDS_EMOJI[0],
                 ),
                 KeyboardButton(
                     text="Мастерская",
                     style=ButtonStyle.PRIMARY,
-                    icon_custom_emoji_id=workshop.BUTTON_EMOJI[0] or None,
+                    icon_custom_emoji_id=WORKSHOP_EMOJI[0],
                 ),
             ],
         ],
