@@ -1,3 +1,27 @@
+# ---------- Загрузка .env (до импорта остальных модулей: donate.py читает ключи при импорте) ----------
+import os as _os
+from pathlib import Path as _Path
+
+
+def _load_env(path: _Path) -> None:
+    """Читает KEY=VALUE из .env рядом с ботом, не перезаписывая уже заданные переменные окружения."""
+    try:
+        text = path.read_text(encoding="utf-8-sig")
+    except OSError:
+        return
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, val = line.partition("=")
+        key, val = key.strip().removeprefix("export ").strip(), val.strip()
+        if len(val) >= 2 and val[0] == val[-1] and val[0] in "\"'":
+            val = val[1:-1]
+        _os.environ.setdefault(key, val)
+
+
+_load_env(_Path(__file__).with_name(".env"))
+
 import asyncio
 import copy
 from types import SimpleNamespace
@@ -69,7 +93,9 @@ WORKSHOP_EMOJI = ("5210696719129392502", "🔧")
 friends.BUTTON_EMOJI_ID = FRIENDS_EMOJI[0]
 workshop.BUTTON_EMOJI = WORKSHOP_EMOJI
 
-BOT_TOKEN = "8867617327:AAGP427kiEOg1aI8hRIUOyiH3Mu7eQGaEbE"
+BOT_TOKEN = os.getenv("BOT_TOKEN", "")
+if not BOT_TOKEN:
+    raise SystemExit("Не задан BOT_TOKEN: добавь его в файл .env рядом с main.py")
 
 # Telegram ID админов (свой ID можно узнать у @userinfobot)
 ADMIN_IDS: set[int] = {8118184388, 5655417455}
