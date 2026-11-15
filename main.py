@@ -55,6 +55,7 @@ import mine
 import workshop          # «Мастерская»: ресурсы, предметы, крафт (workshop.py)
 import workshop_sets     # наборы-кейсы, открываются командой «н-наборы-набор» (workshop_sets.py)
 import underground       # «Шахта» (underground.py): открывается из «Заработать»
+import period_stats      # статистика по периодам: команда «стата» (period_stats.py)
 import quick_cmds
 import friends
 import gift              # передача ресурсов игроку: «дать @ник» (gift.py)
@@ -414,6 +415,7 @@ def track_player_stats(user: dict, now: float | None = None) -> None:
             st["l"][res] = cur
     if not any(earned):
         return
+    period_stats.add(user, "coins", earned[0], ts=now)   # для команды «стата»: монеты по дням
 
     for i, res in enumerate(PSTAT_KEYS):
         st["t"][res] = _pstat_num(st["t"].get(res, 0)) + earned[i]
@@ -2467,6 +2469,90 @@ async def on_me_stats(callback: CallbackQuery):
         callback, "player",
         lambda with_image: player_stats_html(callback.from_user.id, with_image),
         player_me_back_kb(),
+    )
+
+
+# ---------- Команда «стата» / «статы» / «статистика»: заработок и добыча по периодам ----------
+# Открывается из quick_cmds (stat:open), переключает период правкой на месте (stat:p:<период>),
+# «Закрыть» удаляет сообщение (me:close). Данные: period_stats.py + хуки в track_player_stats
+# и underground.py; урон по боссам берётся из boss.STATS.
+STAT_CMD_ROWS = (("today", "yday"), ("week", "month", "all"))
+
+
+def stat_cmd_kb(period: str) -> InlineKeyboardMarkup:
+    rows = []
+    for group in STAT_CMD_ROWS:
+        rows.append([
+            InlineKeyboardButton(
+                text=period_stats.PERIODS[p][0],
+                callback_data=f"stat:p:{p}",
+                style=ButtonStyle.SUCCESS if p == period else ButtonStyle.PRIMARY,
+                icon_custom_emoji_id=boss.PERIOD_EMOJI[0],
+            )
+            for p in group
+        ])
+    rows.append([InlineKeyboardButton(text="Закрыть", callback_data="me:close", style=ButtonStyle.DANGER)])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def stat_cmd_html(user_id: int, period: str, with_image: bool = False) -> str:
+    """Rich-карточка статистики за выбранный период."""
+    user = get_user(user_id)
+    track_player_stats(user)          # чтобы только что полученное уже было видно
+    ug = underground.get_ug(user)
+    PS = period_stats
+    image = '<img src="tg://photo?id=pet"/>' if with_image else ""
+    title = PS.PERIODS[period][0]
+
+    coins = PS.get(user, "coins", period)
+    if period == "all":                # за всё время монеты считает старый счётчик «Статистики» профиля
+        coins = max(coins, player_earned(user, "all")[0])
+    bs = PS.boss_totals(boss.STATS, user_id, period)
+    minerals = PS.get(ug, "min", period)
+    ore = PS.get(ug, "ore", period)
+    found = PS.get_map(ug, "sets", period)
+
+    boss_rows = [
+        (f"{custom_emoji(boss.BLOOD_EMOJI)} Урон по боссам", _fmt(bs["dmg"])),
+        (f"{custom_emoji(boss.KILL_EMOJI)} Боссов убито", _fmt(bs["kills"])),
+        (f"{custom_emoji(boss.LAST_HIT_EMOJI)} Добивающих ударов", _fmt(bs["last"])),
+    ]
+    mine_rows = [
+        (f"{MINERAL_EMOJI} Минералов добыто", _fmt(minerals)),
+        (f"{custom_emoji(underground.UG_EMOJI)} Руды добыто", _fmt(ore)),
+    ]
+    html = (
+        f"{image}"
+        f"<p><b>{settings.name_html(user)}</b></p>"
+        f"<blockquote><i>Статистика: {title}</i></blockquote>"
+        f"{GAP}"
+        f"<p><b>{custom_emoji(COIN_EMOJI)} Монет заработано:</b> {_fmt(coins)}</p>"
+        f"{GAP}"
+        + underground._tree(boss_rows, "Боссы")
+        + GAP
+        + underground._tree(mine_rows, "Шахта")
+    )
+    if found:                          # блок наборов показываем, только если за период что-то найдено
+        rows = [(underground.set_name(k), "×" + _fmt(n))
+                for k, n in sorted(found.items(), key=lambda kv: kv[1], reverse=True)]
+        rows.append(("Всего", "×" + _fmt(sum(found.values()))))
+        html += GAP + underground._quote("Найденные наборы", rows)
+    return html
+
+
+@dp.callback_query(F.data.startswith("stat:"))
+async def on_stat_cmd(callback: CallbackQuery):
+    """stat:open: открыть со вкладкой «Сегодня». stat:p:<период>: переключить период."""
+    if get_user(callback.from_user.id) is None:
+        await callback.answer("Сначала выбери питомца: /start", show_alert=True)
+        return
+    parts = (callback.data or "").split(":")
+    period = parts[2] if len(parts) > 2 and parts[2] in period_stats.PERIODS else "today"
+    await callback.answer()
+    await show_rich_card(
+        callback, "player",
+        lambda with_image: stat_cmd_html(callback.from_user.id, period, with_image),
+        stat_cmd_kb(period),
     )
 
 
