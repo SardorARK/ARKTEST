@@ -1341,15 +1341,23 @@ async def bot_link(bot, payload: str) -> str:
     return f"https://t.me/{_BOT_USERNAME}?start={payload}"
 
 
-async def send_group_stub(bot, chat_id: int) -> None:
-    """В группе шахту не открываем: только текст и кнопка «Перейти» в личку с ботом."""
-    url = await bot_link(bot, "ug")
+async def send_group_card(bot, chat_id: int, user_id: int, url: str) -> bool:
+    """В группе шахта не открывается: показываем текст самого раздела шахты (состояние, добыто)
+    и одну кнопку «Перейти» в личку с ботом. False: у игрока нет питомца, шахты для него нет."""
+    if D.get_user(user_id) is None:
+        return False
+    html, _ = SCREENS["ug"]
     kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(
         text="Перейти", url=url, style=ButtonStyle.PRIMARY, icon_custom_emoji_id=MINES_EMOJI_ID)]])
-    html = (f"<p><b>{_ug()} Шахта</b></p>"
-            "<blockquote><i>Шахта открывается только в личных сообщениях с ботом. "
-            "Нажми «Перейти», чтобы копать.</i></blockquote>")
-    await D.send_rich_card(bot, chat_id, NOIMG_KEY, lambda wi: html, kb)
+    await D.send_rich_card(bot, chat_id, NOIMG_KEY, lambda wi: html(user_id, wi), kb)
+    return True
+
+
+async def send_group_stub(bot, chat_id: int, user_id: int | None = None) -> None:
+    """Запасной путь (если команду не перехватил quick_cmds): то же, что в группе по команде."""
+    url = await bot_link(bot, "ug")
+    if user_id is None or not await send_group_card(bot, chat_id, user_id, url):
+        await bot.send_message(chat_id, "Сначала выбери питомца: /start")
 
 
 async def open_private(bot, chat_id: int, uid: int) -> None:
@@ -1372,7 +1380,7 @@ async def open_from_menu(message: Message) -> None:
     Вызывается из MenuButtonMiddleware (подключается в main.py до quick_cmds)."""
     uid = message.from_user.id
     if message.chat.type != "private":          # группа: только «Перейти» в личку, шахту не открываем
-        await send_group_stub(message.bot, message.chat.id)
+        await send_group_stub(message.bot, message.chat.id, uid)
         return
     if D.get_user(uid) is None:
         await message.answer("Сначала выбери питомца: /start")
@@ -1412,7 +1420,7 @@ async def on_open(callback: CallbackQuery):
         return
     await callback.answer()
     if getattr(getattr(callback.message, "chat", None), "type", "private") != "private":
-        await send_group_stub(callback.bot, callback.message.chat.id)
+        await send_group_stub(callback.bot, callback.message.chat.id, callback.from_user.id)
         return
     await _show(callback, "ug")
 
