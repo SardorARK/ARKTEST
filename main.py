@@ -2087,6 +2087,15 @@ friends.install(dp)   # следит за ссылками, выбором пи�
 
 @dp.message(CommandStart())
 async def cmd_start(message: Message):
+    # Ссылки «Перейти» из группы: /start ug открывает шахту, /start cases — сокровищницу (только в личке)
+    parts = (message.text or "").split(maxsplit=1)
+    payload = parts[1].strip() if len(parts) > 1 else ""
+    if payload in ("ug", "cases") and message.chat.type == "private" and get_user(message.from_user.id):
+        if payload == "ug":
+            await underground.open_private(message.bot, message.chat.id, message.from_user.id)
+        else:
+            await cases.send_cases(message.bot, message.chat.id, message.from_user.id)
+        return
     # Если питомец уже выбран, сразу меню
     if get_user(message.from_user.id):
         await message.answer("<b>С возвращением</b>", reply_markup=main_menu())
