@@ -1434,7 +1434,8 @@ _MSG_STATE_MAX = 20000
 # Экраны из LIVE_EDIT_KEYS обновляются часто (кадры боя, поиск), их удалять и слать заново нельзя:
 # упрёмся в лимиты Telegram, поэтому они всегда правятся на месте.
 RESEND_IN_GROUPS = True
-LIVE_EDIT_KEYS = {"arena_battle", "arena_find"}
+LIVE_EDIT_KEYS = {"arena_battle", "arena_find", "player", "exrn"} | set(cases.IMG_TARGETS)
+# «player»: профиль, «exrn»: исследователи, ключи cases.IMG_TARGETS: «Сокровищница» — всегда правятся на месте
 
 
 # Экраны, которые ВСЕГДА удаляются и отправляются заново, даже в личке (правка на месте у них
@@ -1587,8 +1588,10 @@ async def _show_rich_card_impl(
         return await send_rich_card(callback.bot, callback.from_user.id, pet_key, build_html, reply_markup)
     bot, chat_id = callback.bot, msg.chat.id
     cur = _MSG_STATE.get((chat_id, msg.message_id))
-    if (not force_new and cur is not None and cur[0] == "rich"
-            and cur[1] == pet_images.get(pet_key) and _edit_in_place_ok(msg, pet_key)):
+    holder_ok = (cur is None and not pet_images.get(pet_key) and getattr(msg, "text", None) == "⏳"
+                 and _edit_in_place_ok(msg, pet_key))   # заглушка быстрой команды: правим её в нужный экран
+    if (not force_new and (holder_ok or (cur is not None and cur[0] == "rich"
+            and cur[1] == pet_images.get(pet_key))) and _edit_in_place_ok(msg, pet_key)):
         try:
             rich, image = _rich_input(pet_key, build_html)
             edited = await bot.edit_message_text(
@@ -2419,7 +2422,6 @@ async def on_menu_player(callback: CallbackQuery, state: FSMContext):
         "player",
         lambda with_image: player_profile_html(callback.from_user.id, with_image),
         player_profile_kb(),
-        force_new=True,
     )
 
 
@@ -2436,7 +2438,6 @@ async def on_me_open(callback: CallbackQuery, state: FSMContext):
         "player",
         lambda with_image: player_profile_html(callback.from_user.id, with_image),
         player_me_kb(),
-        force_new=callback.data == "me:open",
     )
 
 
