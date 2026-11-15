@@ -433,16 +433,22 @@ class _TrackUsernames(BaseMiddleware):
 
 
 def _find_uid(username: str) -> int | None:
-    """Ищет игрока по @нику среди известных боту (кто хоть раз писал после запуска учёта ников)."""
-    users, name = _USERS[0], username.lower()
-    if users is None:
+    """Ищет игрока по @нику через индекс базы (UserStore.find_by_username): один запрос по ключу,
+    без перебора всех игроков. Ник в базе ведёт admin.track_user (user["username"]) при каждом действии игрока."""
+    users, name = _USERS[0], username.lstrip("@").lower()
+    if users is None or not name:
         return None
     try:
+        finder = getattr(users, "find_by_username", None)
+        if finder is not None:
+            found = finder(name)
+            return int(found[0]) if found else None
+        # запасной путь для обычного словаря (тесты): без хранилища перебор безопасен
         for uid, u in list(users.items()):
-            if isinstance(u, dict) and (u.get("tg_username") or "") == name:
+            if isinstance(u, dict) and ((u.get("username") or u.get("tg_username") or "").lower() == name):
                 return int(uid)
     except Exception:
-        log.exception("workshop_sets: не удалось перебрать игроков")
+        log.exception("workshop_sets: не удалось найти игрока по нику")
     return None
 
 
