@@ -10,6 +10,9 @@
   * Сами разделы (mine.py, boss.py, ...) не меняются.
   * Срабатывает, только если сообщение целиком состоит из команды и игрок не находится
     в FSM-состоянии (ввод ника и т.п.).
+  * Меню и боссы в группах не открываются: вместо них бот отвечает текстом и кнопкой «Перейти»,
+    которая открывает личный чат с ботом (ссылка t.me/бот?start=menu или ?start=boss). В личке
+    такая ссылка (/start menu, /start boss) открывает нужный раздел.
   * В личке работают и «/шахта», и просто «шахта». В группах по умолчанию только со слэшем
     («/шахта» или «/шахта@имя_бота»), чтобы бот не реагировал на обычную болтовню; команда,
     адресованная другому боту, игнорируется. Чтобы в группах работали и слова без слэша,
@@ -20,11 +23,13 @@ from __future__ import annotations
 
 import logging
 import re
+import time
 from typing import Any, Awaitable, Callable
 
 from aiogram import BaseMiddleware
 from aiogram.exceptions import TelegramAPIError
-from aiogram.types import CallbackQuery, TelegramObject, Update
+from aiogram.types import (CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, ReplyParameters,
+                           TelegramObject, Update)
 
 from guard import current_owner
 
@@ -58,6 +63,27 @@ for _kind, _target, _words in SECTIONS:
     for _w in _words:
         assert _w not in ALIASES, f"слово {_w!r} указано дважды"
         ALIASES[_w] = (_kind, _target)
+
+# В группах эти разделы не открываются. Раздел (как в SECTIONS) -> (параметр ссылки /start, текст ответа).
+GROUP_REDIRECT: dict[tuple[str, str], tuple[str, str]] = {
+    ("text", "Меню"): (
+        "menu",
+        "<b>Главное меню</b>\n\nВ чате меню не открывается. Нажми кнопку, и оно откроется в личных сообщениях с ботом.",
+    ),
+    ("cb", "menu:boss"): (
+        "boss",
+        "<b>Боссы</b>\n\nВ чате раздел боссов не открывается. Нажми кнопку, и он откроется в личных сообщениях с ботом.",
+    ),
+}
+REDIRECT_BUTTON = "Перейти"
+REDIRECT_COOLDOWN = 5.0   # секунд: чтобы повторы в чате не засыпали его одинаковыми ответами
+
+# Ссылка t.me/бот?start=ПАРАМЕТР в личке -> какой раздел открыть
+DEEP_LINKS: dict[str, tuple[str, str]] = {"menu": ("text", "Меню"), "boss": ("cb", "menu:boss")}
+_START_RE = re.compile(r"^/start(?:@(\w+))?\s+(menu|boss)\s*$", re.IGNORECASE)
+
+_redirect_last: dict[tuple[int, int, str], float] = {}
+_HANDLED = object()   # сообщение обработано здесь: дальше его передавать не нужно
 
 # Реагировать в группах на слова без «/» (нужен выключенный Group Privacy у бота)
 GROUP_PLAIN_WORDS = True
@@ -108,9 +134,33 @@ class QuickCommands(BaseMiddleware):
         except Exception:  # быстрые команды не должны ронять бота
             log.exception("quick_cmds: не удалось разобрать сообщение")
             new_event = None
+        if new_event is _HANDLED:
+            return None
         return await handler(new_event or event, data)
 
-    async def _rewrite(self, event: TelegramObject, data: dict[str, Any]) -> Update | None:
+    async def _redirect(self, bot, msg, param: str, text: str) -> None:
+        """В группе: ответ с кнопкой «Перейти» в личный чат с ботом (раздел там откроется по ссылке)."""
+        now = time.monotonic()
+        key = (msg.chat.id, msg.from_user.id, param)
+        if now - _redirect_last.get(key, 0.0) < REDIRECT_COOLDOWN:
+            return
+        if len(_redirect_last) > 2000:
+            _redirect_last.clear()
+        _redirect_last[key] = now
+        me = await bot.me()
+        kb = InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton(text=REDIRECT_BUTTON, url=f"https://t.me/{me.username}?start={param}")
+        ]])
+        try:
+            await bot.send_message(
+                msg.chat.id, text, reply_markup=kb,
+                message_thread_id=msg.message_thread_id if msg.is_topic_message else None,
+                reply_parameters=ReplyParameters(message_id=msg.message_id, allow_sending_without_reply=True),
+            )
+        except TelegramAPIError:
+            log.warning("quick_cmds: не удалось ответить в чате %s", msg.chat.id, exc_info=True)
+
+    async def _rewrite(self, event: TelegramObject, data: dict[str, Any]):
         if not isinstance(event, Update) or event.message is None:
             return None
         msg = event.message
@@ -136,10 +186,23 @@ class QuickCommands(BaseMiddleware):
                 if to != me.lower():
                     return None   # команда адресована другому боту
 
-        found = resolve(msg.text)
+        found = None
+        if msg.chat.type == "private":   # ссылка из группы: /start menu, /start boss
+            link = _START_RE.match((msg.text or "").strip())
+            if link:
+                to = (link.group(1) or "").lower()
+                if not to or to == ((await bot.me()).username or "").lower():
+                    found = DEEP_LINKS[link.group(2).lower()]
+        if found is None:
+            found = resolve(msg.text)
         if found is None:
             return None
         kind, target = found
+
+        if msg.chat.type != "private" and found in GROUP_REDIRECT:
+            param, reply = GROUP_REDIRECT[found]
+            await self._redirect(bot, msg, param, reply)
+            return _HANDLED
 
         if kind == "text":
             new_msg = msg.model_copy(update={"text": target, "entities": None})
