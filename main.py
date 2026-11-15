@@ -1407,6 +1407,9 @@ async def send_pet_short(bot: Bot, chat_id: int, user_id: int, url: str) -> bool
 
 
 quick_cmds.pet_group_card = send_pet_short   # «пет», «питомец», «я» в группе (quick_cmds.py)
+# «шахта» и «кейс» в группе: текст раздела и кнопка «Перейти» (quick_cmds.py)
+quick_cmds.group_cards[("text", "Шахта")] = ("ug", lambda *a: underground.send_group_card(*a))
+quick_cmds.group_cards[("cb", "menu:cases")] = ("cases", lambda *a: cases.send_group_card(*a))
 
 
 def back_kb() -> InlineKeyboardMarkup:
@@ -1446,11 +1449,17 @@ LIVE_EDIT_KEYS = {"arena_battle", "arena_find", "player", "exrn"} | set(cases.IM
 # теряет кастомные эмодзи). Впиши сюда ключи экранов (те же, что в IMG_TARGETS: "menu", "stock",
 # "lab", "market", "boss" ...). Ключи из LIVE_EDIT_KEYS сюда добавлять нельзя.
 ALWAYS_RESEND_KEYS: set[str] = set()
+# Экраны из LIVE_EDIT_KEYS, которые в группах всё же шлются заново (иначе пропадают кастомные эмодзи)
+GROUP_RESEND_LIVE_KEYS: set[str] = {"player", "exrn"}
 
 
 def _edit_in_place_ok(msg, key: str) -> bool:
     """Можно ли обновить сообщение правкой (а не удалять и слать новое)."""
     if key in LIVE_EDIT_KEYS:
+        # «player» (профиль, команда «я») и «exrn» в группе правка на месте превращает кастомные эмодзи
+        # в обычные (команда сперва шлёт заглушку «⏳» и правит её): там шлём заново, как остальные экраны
+        if key in GROUP_RESEND_LIVE_KEYS and RESEND_IN_GROUPS and getattr(msg.chat, "type", "private") != "private":
+            return False
         return True
     if key in ALWAYS_RESEND_KEYS:
         return False
