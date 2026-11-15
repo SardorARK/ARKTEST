@@ -332,13 +332,9 @@ MINES_EMOJI_ID = "5465589000783812364"       # кнопка «Шахты»
 REFRESH_EMOJI_ID = "4940489017889129308"     # кнопка «Обновить»           # замок в списке времени запуска
 
 # Куда админ может добавить фото через /img
-IMG_TARGETS: dict[str, str] = {
-    "ug": "Шахта",
-    "ug_list": "Шахта: выбор шахты",
-    "ug_mine": "Шахта: карточка шахты (общее фото)",
-    "ug_time": "Шахта: время запуска",
-    "ug_bag": "Шахта: рюкзак",
-}
+# Картинки в шахте не используются: экраны шахты всегда без фото, поэтому /img для них не нужен.
+IMG_TARGETS: dict[str, str] = {}
+NOIMG_KEY = "ug_noimg"          # ключ без фото; main.py правит такие экраны только на месте (LIVE_EDIT_KEYS)
 
 
 # ---------- Данные игрока ----------
@@ -801,7 +797,7 @@ def _oi(key: str) -> str:
 
 
 def _image(with_image: bool) -> str:
-    return '<img src="tg://photo?id=pet"/>' if with_image else ""
+    return ""                     # картинки в шахте не нужны
 
 
 def _line(label: str, value: str, mono: bool = True) -> str:
@@ -843,15 +839,15 @@ def selected(ug: dict) -> int:
 
 
 def _found_rows(ug: dict) -> list:
-    rows = [(f"{_oi(k)} {o['name']}", fmt(ug['pending'][k])) for k, o in ORES.items()]
-    rows.append((f"{D.MINERAL_EMOJI} Минералы", fmt(ug['pending']['mineral'])))
+    rows = [(f"{_oi(k)} {o['name']}", short(ug['pending'][k])) for k, o in ORES.items()]
+    rows.append((f"{D.MINERAL_EMOJI} Минералы", short(ug['pending']['mineral'])))
     return rows
 
 
 def _sets_found_block(ug: dict) -> str:
     """Отдельная строка «Найдено»: наборы, найденные в этом запуске. Пусто, если ничего не найдено."""
     found = ug.get("found") or {}
-    rows = [(set_name(k), "×" + fmt(n)) for k, n in found.items() if int(n) > 0]
+    rows = [(set_name(k), "×" + short(n)) for k, n in found.items() if int(n) > 0]
     return (_gap() + _quote("Найдено", rows)) if rows else ""
 
 
@@ -936,7 +932,7 @@ def mine_html(user_id: int, i: int, with_image: bool = False) -> str:
     stats = [
         (f"{D.custom_emoji(DIG_EMOJI)} Копаний", short(round(p["digs_h"] * STAT_MIN / 60))),
         (f"{D.custom_emoji(LOOT_EMOJI)} Добыча", rng(dlo, dhi)),
-        ("🪨 Руды", rng(olo, ohi)),
+        (f"{_oi('stone')} Руды", rng(olo, ohi)),
         (f"{_coin()} Монет", rng(clo, chi)),
         (f"{D.MINERAL_EMOJI} Минералов", rng(mlo, mhi)),
     ]
@@ -993,13 +989,13 @@ def bag_html(user_id: int, with_image: bool = False) -> str:
     """Рюкзак: сколько штук руды и на сколько монет. Монеты вне моно: эмодзи в нём не работает."""
     user, ug = load(user_id)
     lines = "<br>".join(
-        f"<b>{_oi(k)} {o['name']}</b>: <code>{fmt(int(ug['ores'][k]))}</code> "
+        f"<b>{_oi(k)} {o['name']}</b>: <code>{short(int(ug['ores'][k]))}</code> "
         f"(<code>{short(int(ug['ores'][k]) * o['price'])}</code> {_coin()})"
         for k, o in ORES.items()
     )
     total = [
-        (f"{_coin()} Стоимость рюкзака", fmt(bag_value(ug))),
-        (f"{D.MINERAL_EMOJI} Минералы на счёте", fmt(int(user.get(D.MINERALS_FIELD, 0) or 0))),
+        (f"{_coin()} Стоимость рюкзака", short(bag_value(ug))),
+        (f"{D.MINERAL_EMOJI} Минералы на счёте", short(int(user.get(D.MINERALS_FIELD, 0) or 0))),
     ]
     return (
         f"{_image(with_image)}"
@@ -1032,8 +1028,38 @@ def _checked(text: str, data: str) -> InlineKeyboardButton:
     return _btn(text if eid else f"✅ {text}", data, ButtonStyle.SUCCESS, eid)
 
 
+_closable: "dict[tuple[int, int], bool]" = {}      # сообщения шахты, открытые командой в чате
+_CLOSABLE_MAX = 5000
+
+
+def _mark_closable(msg) -> None:
+    if msg is None or not hasattr(msg, "message_id"):
+        return
+    _closable[(msg.chat.id, msg.message_id)] = True
+    while len(_closable) > _CLOSABLE_MAX:
+        _closable.pop(next(iter(_closable)))
+
+
+def _is_closable(msg) -> bool:
+    return msg is not None and hasattr(msg, "message_id") and (msg.chat.id, msg.message_id) in _closable
+
+
+_CLOSE_NOW = False        # на время сборки клавиатуры: у главного экрана вместо «Назад» «Закрыть»
+
+
 def _back(data: str) -> list[InlineKeyboardButton]:
+    if _CLOSE_NOW and data == "earn:open":
+        return [_btn("Закрыть", "me:close", ButtonStyle.DANGER)]
     return [_btn("Назад", data, ButtonStyle.PRIMARY, D.BACK_EMOJI_ID)]
+
+
+def _build_kb(key: str, uid: int, closable: bool) -> InlineKeyboardMarkup:
+    global _CLOSE_NOW
+    _CLOSE_NOW = closable
+    try:
+        return SCREENS[key][1](uid)
+    finally:
+        _CLOSE_NOW = False
 
 
 def _collect_btn(ug: dict, suffix: str = "") -> InlineKeyboardButton:
@@ -1152,12 +1178,8 @@ for _i in range(len(PICKS)):
 
 
 def img_key(key: str) -> str:
-    """Общие фото: у всех карточек шахт одно, у всех страниц выбора одно, у всех окон времени одно."""
-    if key.startswith("ug_mine_"):
-        return "ug_mine"
-    if key.startswith("ug_list_"):
-        return "ug_list"
-    return key
+    """Шахта без картинок: у всех экранов один ключ, у которого фото быть не может."""
+    return NOIMG_KEY
 
 
 async def send_screen(bot, chat_id: int, user_id: int, key: str) -> None:
@@ -1168,6 +1190,8 @@ async def send_screen(bot, chat_id: int, user_id: int, key: str) -> None:
 async def send_preview(bot, chat_id: int, user_id: int, key: str) -> None:
     """Предпросмотр для /img: без кнопок под сообщением."""
     key = {"ug_mine": "ug_mine_0", "ug_list": "ug_list_0"}.get(key, key)
+    if key not in SCREENS:
+        key = "ug"
     html, _ = SCREENS[key]
     await D.send_rich_card(bot, chat_id, img_key(key), lambda wi: html(user_id, wi))
 
@@ -1206,10 +1230,12 @@ async def _live_loop(bot, chat_id: int, message_id: int, uid: int, token: int) -
         await asyncio.sleep(AUTO_REFRESH_SEC)
         if _live.get(uid) != token:
             return
-        html, kb = SCREENS["ug"]
+        html, _ = SCREENS["ug"]
         try:
             ok = await D.refresh_rich_card(bot, chat_id, message_id, img_key("ug"),
-                                           lambda wi: html(uid, wi), kb(uid))
+                                           lambda wi: html(uid, wi),
+                                           _build_kb("ug", uid, (chat_id, message_id) in _closable),
+                                           require_state=False)
         except Exception:
             return
         if not ok:
@@ -1228,10 +1254,30 @@ def _start_live(bot, chat_id: int, message_id: int, uid: int) -> None:
 
 
 async def _show(callback: CallbackQuery, key: str) -> None:
+    """Любая кнопка шахты правит ТО ЖЕ сообщение. Новое шлётся, только если правка невозможна
+    (сообщение слишком старое или удалено)."""
     uid = callback.from_user.id
-    html, kb = SCREENS[key]
+    html, _ = SCREENS[key]
     _live.pop(uid, None)                        # старое само-обновление больше не нужно
-    msg = await D.show_rich_card(callback, img_key(key), lambda wi: html(uid, wi), kb(uid))
+    msg = callback.message
+    closable = _is_closable(msg)
+    kb = _build_kb(key, uid, closable)
+    if hasattr(msg, "message_id"):
+        try:
+            ok = await D.refresh_rich_card(callback.bot, msg.chat.id, msg.message_id, img_key(key),
+                                           lambda wi: html(uid, wi), kb, require_state=False)
+        except Exception:
+            ok = False
+        if ok:
+            if key == "ug" and AUTO_REFRESH_MIN > 0:
+                user = D.get_user(uid)
+                if user is not None and get_ug(user)["run"] is not None:
+                    _start_live(callback.bot, msg.chat.id, msg.message_id, uid)
+            return
+    msg = await D.send_rich_card(callback.bot, callback.from_user.id, img_key(key),
+                                 lambda wi: html(uid, wi), kb)
+    if closable:
+        _mark_closable(msg)
     if key == "ug" and AUTO_REFRESH_MIN > 0 and hasattr(msg, "message_id"):
         user = D.get_user(uid)
         if user is not None and get_ug(user)["run"] is not None:
@@ -1265,10 +1311,16 @@ async def open_from_menu(message: Message) -> None:
         await message.answer("Сначала выбери питомца: /start")
         return
     _live.pop(uid, None)                        # старое само-обновление больше не нужно
-    html, kb = SCREENS["ug"]
+    html, _ = SCREENS["ug"]
+    # Нижняя кнопка «Шахта» (личка, точно «Шахта») ведёт «Назад» в «Заработать»; команда в чате
+    # («шахта», в группе и т.п.) получает «Закрыть», которое удаляет сообщение.
+    closable = message.chat.type != "private" or (message.text or "").strip() != "Шахта"
     msg = await D.send_rich_card(
-        message.bot, message.chat.id, img_key("ug"), lambda wi: html(uid, wi), kb(uid)
+        message.bot, message.chat.id, img_key("ug"), lambda wi: html(uid, wi),
+        _build_kb("ug", uid, closable),
     )
+    if closable:
+        _mark_closable(msg)
     if AUTO_REFRESH_MIN > 0 and hasattr(msg, "message_id"):
         user = D.get_user(uid)
         if user is not None and get_ug(user)["run"] is not None:
@@ -1281,7 +1333,7 @@ class MenuButtonMiddleware(BaseMiddleware):
 
     async def __call__(self, handler, event, data):
         text = getattr(event, "text", None)
-        if isinstance(event, Message) and text and text.strip() == "Шахта":
+        if isinstance(event, Message) and text and text.strip().lower().lstrip("/").split("@")[0] == "шахта":
             await open_from_menu(event)
             return None
         return await handler(event, data)
@@ -1304,17 +1356,6 @@ async def on_refresh(callback: CallbackQuery):
     await callback.answer()
     uid = callback.from_user.id
     msg = callback.message
-    if hasattr(msg, "message_id"):
-        html, kb = SCREENS["ug"]
-        try:
-            ok = await D.refresh_rich_card(callback.bot, msg.chat.id, msg.message_id, img_key("ug"),
-                                           lambda wi: html(uid, wi), kb(uid), require_state=False)
-        except Exception:
-            ok = False
-        if ok:
-            if AUTO_REFRESH_MIN > 0 and get_ug(user)["run"] is not None:
-                _start_live(callback.bot, msg.chat.id, msg.message_id, uid)
-            return
     await _show(callback, "ug")
 
 
