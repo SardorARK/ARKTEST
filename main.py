@@ -1337,6 +1337,64 @@ async def send_menu(bot: Bot, chat_id: int, user_id: int) -> None:
     )
 
 
+def pet_short_html(user_id: int, with_image: bool = False) -> str:
+    """Короткая карточка питомца для чата: уровень и характеристики (без боёв и способности)."""
+    user = get_user(user_id)
+    pet = PETS[user["pet"]]
+    level = user["level"]
+    base_stats = pet_stats(pet, level)
+    stats_rows = "".join(
+        "<tr>"
+        f"<td><b>{custom_emoji(STAT_EMOJI[key])} {escape(STAT_LABELS[key])}</b></td>"
+        f'<td align="center"><b>{val}'
+        f'{f" (+{val - base_stats[key]})" if val > base_stats[key] else ""}</b></td>'
+        "</tr>"
+        for key, val in lab_user_stats(user).items()
+    )
+    image = '<img src="tg://photo?id=pet"/>' if with_image else ""
+    element_emoji = custom_emoji(ELEMENT_EMOJI[pet["element"]])
+    return (
+        f"{image}"
+        f"<p><b>{settings.name_html(user)}</b><br>&nbsp;<br>"
+        f"<b>{escape(pet['name'].upper())} · {escape(pet['rarity'])}</b>"
+        "<br>&nbsp;<br>"
+        f"<b>{custom_emoji(ELEMENT_LABEL_EMOJI)} Стихия: "
+        f"{escape(pet['element'])} {element_emoji}</b></p>"
+        f"<p><b>{custom_emoji(LEVEL_EMOJI)} Уровень {level}/{MAX_LEVEL}</b></p>"
+        "<p><b>Характеристики</b></p>"
+        "<table bordered striped>"
+        "<tr><th><b>Параметр</b></th><th><b>Значение</b></th></tr>"
+        f"{stats_rows}"
+        "</table>"
+    )
+
+
+def pet_short_kb() -> InlineKeyboardMarkup:
+    """Одна кнопка «Перейти»: открывает полный профиль питомца со всеми кнопками (menu:pet)."""
+    return InlineKeyboardMarkup(
+        inline_keyboard=[[
+            InlineKeyboardButton(
+                text="Перейти", callback_data="menu:pet", style=ButtonStyle.PRIMARY,
+                icon_custom_emoji_id=PET_BTN_EMOJI[0],
+            )
+        ]]
+    )
+
+
+async def send_pet_short(bot: Bot, chat_id: int, user_id: int) -> None:
+    """Вызов из чата: короткая карточка питомца с кнопкой «Перейти»."""
+    if get_user(user_id) is None:
+        await bot.send_message(chat_id, "Сначала выбери питомца: /start")
+        return
+    await send_rich_card(
+        bot,
+        chat_id,
+        get_user(user_id)["pet"],   # фото питомца, как в полном профиле
+        lambda with_image: pet_short_html(user_id, with_image),
+        pet_short_kb(),
+    )
+
+
 def back_kb() -> InlineKeyboardMarkup:
     # Обычная инлайн-кнопка под сообщением: синяя, с кастомным эмодзи
     return InlineKeyboardMarkup(
@@ -2119,6 +2177,12 @@ async def on_pet_pick(callback: CallbackQuery):
 @dp.message(F.text == "Меню")
 async def open_menu(message: Message):
     await send_menu(message.bot, message.chat.id, message.from_user.id)
+
+
+@dp.message(F.text.regexp(r"(?i)^/?(мой\s+)?(питомец|pet)(@\w+)?$"))
+async def open_pet_short(message: Message):
+    """«питомец», «мой питомец», «/pet» в чате: короткая карточка + кнопка «Перейти»."""
+    await send_pet_short(message.bot, message.chat.id, message.from_user.id)
 
 
 @dp.message(F.text == "Заработать")
