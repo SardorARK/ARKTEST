@@ -21,6 +21,7 @@
 """
 from __future__ import annotations
 
+import itertools
 import logging
 import re
 import time
@@ -59,12 +60,17 @@ SECTIONS: list[tuple[str, str, tuple[str, ...]]] = [
     ("text", "Настройки", ("настройки",)),
     ("text", "Меню", ("меню", "главная", "кнопки")),
     ("text", "Мастерская", ("мастерская", "крафт", "создать")),   # «Мастерская» (workshop.py)
+    # «Ежедневный бонус» (bonus.py): сразу пытается выдать награду и показывает карточку с кнопкой «Закрыть».
+    # Слова из нескольких частей пишутся через дефис: «ежедневный бонус» и «еб-бонус-ежедневный» тоже работают (см. resolve).
+    ("cb", "daily:claim:c", ("еб",) + tuple(
+        "-".join(p) for n in (2, 3) for p in itertools.permutations(("еб", "бонус", "ежедневный"), n)
+        if "еб" in p or set(p) == {"бонус", "ежедневный"})),
     ("text", "Друзья", ("друзья", "друг", "реф", "пригласить")),
 ]
 
 # Разделы, которые по команде открываются с кнопкой «Закрыть» вместо «Назад» в меню
 # (подмену делает show_rich_card/send_rich_card в main.py, пока CLOSE_MODE = True).
-CLOSE_TARGETS = {"menu:stock", "menu:cases", "menu:exrn", "menu:ach", "me:open"}
+CLOSE_TARGETS = {"menu:stock", "menu:cases", "menu:exrn", "menu:ach", "me:open", "daily:claim:c"}
 CLOSE_MODE: ContextVar[bool] = ContextVar("quick_close_mode", default=False)
 
 ALIASES: dict[str, tuple[str, str]] = {}
@@ -147,9 +153,25 @@ def mention_of(text: str | None) -> str | None:
     return m.group(2).lower() if m and m.group(2) else None
 
 
+_PHRASE_SPLIT = re.compile(r"[\s\-_\u2010-\u2015\u2212]+")
+
+
+def _phrase(text: str | None) -> str | None:
+    """«/Ежедневный  бонус@bot!» -> «ежедневный-бонус» (несколько слов через пробел или дефис -> слова через дефис)."""
+    if not text:
+        return None
+    t = re.sub(r"@\w+", "", text.strip()).lstrip("/").strip(".,!?…:;").lower().replace("ё", "е")
+    parts = [p for p in _PHRASE_SPLIT.split(t) if p]
+    return "-".join(parts) if 1 < len(parts) <= 3 else None
+
+
 def resolve(text: str | None) -> tuple[str, str] | None:
     word = normalize(text)
-    return ALIASES.get(word) if word else None
+    found = ALIASES.get(word) if word else None
+    if found is None:
+        phrase = _phrase(text)
+        found = ALIASES.get(phrase) if phrase else None
+    return found
 
 
 class _QuickCallback(CallbackQuery):
