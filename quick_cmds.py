@@ -24,6 +24,7 @@ from __future__ import annotations
 import logging
 import re
 import time
+from contextvars import ContextVar
 from typing import Any, Awaitable, Callable
 
 from aiogram import BaseMiddleware
@@ -46,7 +47,7 @@ SECTIONS: list[tuple[str, str, tuple[str, ...]]] = [
     ("cb", "menu:exrn", ("исл", "исследование", "иследование", "экспедиция",
                          "экспидиция", "эксп")),
     ("cb", "menu:pet", ("пет", "pet", "питомец", "петомец")),
-    ("cb", "me:open", ("я",)),   # профиль игрока с кнопкой «Закрыть» вместо «Назад» (main.py)
+    ("cb", "me:open", ("я", "проф", "профиль")),   # профиль игрока с кнопкой «Закрыть» вместо «Назад» (main.py)
     ("cb", "menu:stock", ("склад", "ящик", "хранение")),
     ("cb", "menu:cases", ("кейс", "кейсы", "сундук", "сундуки")),
     ("cb", "menu:ach", ("ач", "ачивки", "достижение", "достижения")),
@@ -59,6 +60,11 @@ SECTIONS: list[tuple[str, str, tuple[str, ...]]] = [
     ("text", "Мастерская", ("мастерская", "крафт", "создать")),   # «Мастерская» (workshop.py)
     ("text", "Друзья", ("друзья", "друг", "реф", "пригласить")),
 ]
+
+# Разделы, которые по команде открываются с кнопкой «Закрыть» вместо «Назад» в меню
+# (подмену делает show_rich_card/send_rich_card в main.py, пока CLOSE_MODE = True).
+CLOSE_TARGETS = {"menu:stock", "menu:cases", "menu:exrn", "menu:ach", "me:open"}
+CLOSE_MODE: ContextVar[bool] = ContextVar("quick_close_mode", default=False)
 
 ALIASES: dict[str, tuple[str, str]] = {}
 for _kind, _target, _words in SECTIONS:
@@ -267,9 +273,12 @@ class QuickCommands(BaseMiddleware):
             return event.model_copy(update={"message": new_msg}).as_(bot)
 
         # Инлайн-кнопка: нужна «живая» карточка бота, её раздел заменит новым сообщением
+        if target in CLOSE_TARGETS:
+            CLOSE_MODE.set(True)   # живёт только в обработке этого сообщения
         try:
             holder = await bot.send_message(msg.chat.id, "⏳")
         except TelegramAPIError:
+            CLOSE_MODE.set(False)
             return None
         cb = _QuickCallback(
             id=f"quick{event.update_id}",
