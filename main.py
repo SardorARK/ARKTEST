@@ -1438,7 +1438,7 @@ _MSG_STATE_MAX = 20000
 # Экраны из LIVE_EDIT_KEYS обновляются часто (кадры боя, поиск), их удалять и слать заново нельзя:
 # упрёмся в лимиты Telegram, поэтому они всегда правятся на месте.
 RESEND_IN_GROUPS = True
-LIVE_EDIT_KEYS = {"arena_battle", "arena_find", "player", "exrn"} | set(cases.IMG_TARGETS)
+LIVE_EDIT_KEYS = {"arena_battle", "arena_find", "player", "exrn"} | set(cases.IMG_TARGETS) | {underground.NOIMG_KEY}   # шахта: без картинок, всегда правка на месте
 # «player»: профиль, «exrn»: исследователи, ключи cases.IMG_TARGETS: «Сокровищница» — всегда правятся на месте
 
 
@@ -1636,7 +1636,7 @@ async def refresh_rich_card(
     if require_state:
         if cur is None or cur[0] != "rich" or cur[1] != pet_images.get(pet_key):
             return False
-    elif chat_id < 0 and RESEND_IN_GROUPS:       # в группах экраны всегда шлются заново
+    elif chat_id < 0 and RESEND_IN_GROUPS and pet_key not in LIVE_EDIT_KEYS:       # в группах экраны всегда шлются заново (кроме LIVE_EDIT_KEYS)
         return False
     try:
         rich, image = _rich_input(pet_key, build_html)
