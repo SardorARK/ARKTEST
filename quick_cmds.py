@@ -118,6 +118,11 @@ GROUP_FALLBACK: dict[tuple[str, str], tuple[str, str]] = {
         f"{_emoji(MINE_EMOJI)} <b>Шахта</b>\n\n"
         "<i>В чате шахта не открывается. Нажми кнопку, и она откроется в личных сообщениях с ботом.</i>",
     ),
+    ("cb", "menu:donate"): (
+        "donate",
+        "<b>Донат</b>\n\n"
+        "<i>В чате донат не открывается. Нажми кнопку, и он откроется в личных сообщениях с ботом.</i>",
+    ),
     ("cb", "menu:cases"): (
         "cases",
         f"{_emoji(TREASURY_EMOJI)} <b>Сокровищница</b>\n\n"
@@ -133,9 +138,9 @@ REDIRECT_COOLDOWN = 5.0   # секунд: чтобы повторы в чате 
 DEEP_LINKS: dict[str, tuple[str, str]] = {
     "menu": ("text", "Меню"), "boss": ("cb", "menu:boss"), "arena": ("text", "Арена"),
     "pet": ("cb", "menu:pet"),
-    "ug": ("text", "Шахта"), "cases": ("cb", "menu:cases"),
+    "ug": ("text", "Шахта"), "cases": ("cb", "menu:cases"), "donate": ("cb", "menu:donate"),
 }
-_START_RE = re.compile(r"^/start(?:@(\w+))?\s+(menu|boss|arena|pet|ug|cases)\s*$", re.IGNORECASE)
+_START_RE = re.compile(r"^/start(?:@(\w+))?\s+(menu|boss|arena|pet|ug|cases|donate)\s*$", re.IGNORECASE)
 
 # Короткая карточка питомца в группе (уровень, характеристики, кнопка «Перейти»).
 # Функцию ставит main.py: quick_cmds.pet_group_card = ...; она возвращает False, если карточку
