@@ -33,7 +33,7 @@ from html import escape
 
 from aiogram import BaseMiddleware, F, Router
 from aiogram.enums import ButtonStyle
-from aiogram.exceptions import TelegramAPIError, TelegramNetworkError
+from aiogram.exceptions import TelegramAPIError, TelegramBadRequest, TelegramNetworkError
 from aiogram.types import (CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message,
                            ReplyParameters)
 
@@ -68,6 +68,11 @@ def _nick(user: dict) -> str:
     except Exception:
         log.exception("workshop_sets: не удалось получить ник")
     return escape(str(user.get("tg_name") or "Игрок"))
+
+
+def _plain_nick(user: dict) -> str:
+    """Ник без разметки (запасной вариант текста)."""
+    return re.sub(r"<[^>]+>", "", _nick(user)).replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">") or "Игрок"
 
 
 def install(dp) -> None:
@@ -500,11 +505,21 @@ async def _send_sets(message: Message, cmd: tuple) -> None:
         sets_of(sender).pop(key, None)
     give_set(target, key, n)
     W.D.save_users()
-    text = (f"<p>{W._em(SETS_EMOJI)} <b>Игрок {_nick(sender)}</b> отправил игроку <b>{_nick(target)}</b></p>"
-            f"<p>{SETS[key]['emoji']} <b>{escape(name)}</b> ×{n}</p>")
+    text = (f"{W._em(SETS_EMOJI)} <b>Игрок {_nick(sender)}</b> отправил игроку <b>{_nick(target)}</b>\n\n"
+            f"{SETS[key]['emoji']} <b>{escape(name)}</b> ×{n}")
+    plain = (f"Игрок {_plain_nick(sender)} отправил игроку {_plain_nick(target)}\n\n"
+             f"{SETS[key]['emoji']} {name} ×{n}")
+
+    async def _deliver(chat_id: int, **kw) -> None:
+        try:
+            await bot.send_message(chat_id, text, **kw)
+        except TelegramBadRequest:   # ник с разметкой, которую обычное сообщение не принимает: шлём без тегов
+            log.warning("workshop_sets: разметка не принята, шлю простым текстом", exc_info=True)
+            await bot.send_message(chat_id, escape(plain), **kw)
+
     try:
-        await bot.send_message(
-            message.chat.id, text,
+        await _deliver(
+            message.chat.id,
             message_thread_id=message.message_thread_id if message.is_topic_message else None,
             reply_parameters=ReplyParameters(message_id=message.message_id, allow_sending_without_reply=True),
         )
@@ -512,7 +527,7 @@ async def _send_sets(message: Message, cmd: tuple) -> None:
         log.warning("workshop_sets: не удалось отправить сообщение о передаче", exc_info=True)
     if message.chat.type == "private":   # передали в личке по @нику: получатель должен узнать
         try:
-            await bot.send_message(tid, text)
+            await _deliver(tid)
         except TelegramAPIError:
             pass
 
