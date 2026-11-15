@@ -102,6 +102,17 @@ GROUP_REDIRECT: dict[tuple[str, str], tuple[str, str]] = {
         f"{_emoji(ARENA_EMOJI)} <b>Арена</b>\n\n"
         "<i>В чате арена не открывается. Нажми кнопку, и она откроется в личных сообщениях с ботом.</i>",
     ),
+    ("cb", "menu:boss"): (
+        "boss",
+        f"{_emoji(BOSS_EMOJI)} <b>Боссы</b>\n\n"
+        "<i>В чате раздел боссов не открывается. Нажми кнопку, и он откроется в личных сообщениях с ботом.</i>",
+    ),
+}
+# Шахта и сокровищница в группе: показываем текст самого раздела и кнопку «Перейти» (карточку строят
+# underground.send_group_card и cases.send_group_card, ставит их main.py). Если карточку показать нельзя
+# (у игрока нет питомца), отвечаем обычным текстом с кнопкой «Перейти».
+group_cards: dict[tuple[str, str], tuple[str, Callable[..., Awaitable[bool]]]] = {}
+GROUP_FALLBACK: dict[tuple[str, str], tuple[str, str]] = {
     ("text", "Шахта"): (
         "ug",
         f"{_emoji(MINE_EMOJI)} <b>Шахта</b>\n\n"
@@ -111,11 +122,6 @@ GROUP_REDIRECT: dict[tuple[str, str], tuple[str, str]] = {
         "cases",
         f"{_emoji(TREASURY_EMOJI)} <b>Сокровищница</b>\n\n"
         "<i>Сундуки нельзя открывать в чате. Нажми кнопку, и они откроются в личных сообщениях с ботом.</i>",
-    ),
-    ("cb", "menu:boss"): (
-        "boss",
-        f"{_emoji(BOSS_EMOJI)} <b>Боссы</b>\n\n"
-        "<i>В чате раздел боссов не открывается. Нажми кнопку, и он откроется в личных сообщениях с ботом.</i>",
     ),
 }
 START_TEXT = "<i>В чате бот не запускается. Нажми кнопку, и он откроется в личных сообщениях.</i>"
@@ -279,6 +285,25 @@ class QuickCommands(BaseMiddleware):
         if found is None:
             return None
         kind, target = found
+
+        if msg.chat.type != "private" and found in group_cards:
+            param, card = group_cards[found]
+            now = time.monotonic()
+            key = (msg.chat.id, msg.from_user.id, param)
+            if now - _redirect_last.get(key, 0.0) < REDIRECT_COOLDOWN:
+                return _HANDLED
+            me = await bot.me()
+            try:
+                shown = await card(bot, msg.chat.id, msg.from_user.id, f"https://t.me/{me.username}?start={param}")
+            except Exception:
+                log.exception("quick_cmds: не удалось показать карточку %s", param)
+                shown = False
+            if shown:
+                _redirect_last[key] = now
+                return _HANDLED
+            if found in GROUP_FALLBACK:
+                await self._redirect(bot, msg, *GROUP_FALLBACK[found])
+            return _HANDLED
 
         if msg.chat.type != "private" and found in GROUP_REDIRECT:
             param, reply = GROUP_REDIRECT[found]
