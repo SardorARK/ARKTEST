@@ -1192,13 +1192,6 @@ def _onoff(value: bool, on: str = "включено", off: str = "выключе
 
 def settings_html(user: dict, uid: int, with_image: bool = False, note: str = "") -> str:
     notify = get_setting(user, "notify_exrn")
-    profile = [
-        (f"{_em(EM_NICK)} Никнейм", name_html(user)),
-        (f"{_em(EM_ID)} ID", f"<code>{uid}</code>"),
-        (f"{_em(EM_DATE)} В игре с", _date(user.get("joined", 0))),
-        (f"{_ic('level')} Уровень питомца", str(user.get("level", 1))),
-        (f"{_ic('wins')} Бои", f"{user.get('wins', 0)} побед · {user.get('losses', 0)} поражений"),
-    ]
     alerts = [
         (f"{_ic('expedition')} Возвращение экспедиции", _onoff(notify)),
         (f"{_em(EM_PRIV)} Режим скрытости", _onoff(is_hidden(user), "включён", "выключен")),
@@ -1207,9 +1200,7 @@ def settings_html(user: dict, uid: int, with_image: bool = False, note: str = ""
         f"{_image(with_image)}"
         f"<p><b>{_em(SETTINGS_EMOJI)} НАСТРОЙКИ</b></p>"
         "<blockquote><i>Здесь ты можешь настроить уведомления "
-        "и посмотреть данные своего профиля.</i></blockquote>"
-        + _tree(profile, "Профиль")
-        + _gap()
+        "и приватность.</i></blockquote>"
         + _tree(alerts, "Параметры")
         + (f"<p>{note}</p>" if note else "")
     )
