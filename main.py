@@ -1072,7 +1072,7 @@ def player_stats_html(user_id: int, with_image: bool = False) -> str:
     )
 
 
-def player_level_html(user_id: int, with_image: bool = False) -> str:
+def player_level_html(user_id: int, with_image: bool = False, mode: str = "") -> str:
     """Rich-карточка «Уровень»: уровень игрока и что нужно для следующего."""
     user = get_user(user_id)
     level = player_level(user)
@@ -1115,7 +1115,7 @@ def player_level_html(user_id: int, with_image: bool = False) -> str:
         # абзацами и показывает конечную пустую строку, компьютер нет, поэтому лишнего нет
         f"<p>{rows}<br>{status}</p>"
         "<tg-button-row>"
-        '<tg-button type="callback_data" data="plv:do" '
+        f'<tg-button type="callback_data" data="{"me:lvlup" if mode == "me" else "plv:do"}" '
         f'style="{"danger" if lack else "success"}">'
         f'{custom_emoji(PLAYER_UP_EMOJI)} Повысить</tg-button>'
         "</tg-button-row>"
@@ -2296,6 +2296,31 @@ def player_profile_kb() -> InlineKeyboardMarkup:
     )
 
 
+def player_me_kb() -> InlineKeyboardMarkup:
+    """Профиль по команде «я»: те же кнопки, но вместо «Назад» — «Закрыть» (в меню не возвращает)."""
+    kb = player_profile_kb()
+    rows = [list(r) for r in kb.inline_keyboard[:-1]]
+    # «Уровень» и «Статистика» открываются в режиме «я», чтобы «Назад» вёл в этот же профиль
+    for b in rows[0]:
+        b.callback_data = {"plv:open": "me:lvl", "pst:open": "me:stat"}.get(b.callback_data, b.callback_data)
+    rows.append([InlineKeyboardButton(
+        text="Закрыть", callback_data="me:close", style=ButtonStyle.DANGER,
+    )])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def player_me_back_kb() -> InlineKeyboardMarkup:
+    """Из «Уровня» и «Статистики» в режиме «я»: «Назад» возвращает в профиль с кнопкой «Закрыть»."""
+    return InlineKeyboardMarkup(
+        inline_keyboard=[[
+            InlineKeyboardButton(
+                text="Назад", callback_data="me:back", style=ButtonStyle.PRIMARY,
+                icon_custom_emoji_id=BACK_EMOJI_ID,
+            )
+        ]]
+    )
+
+
 def player_back_kb() -> InlineKeyboardMarkup:
     """Из экрана уровня «Назад» возвращает в профиль."""
     return InlineKeyboardMarkup(
@@ -2332,6 +2357,88 @@ async def on_menu_player(callback: CallbackQuery, state: FSMContext):
         lambda with_image: player_profile_html(callback.from_user.id, with_image),
         player_profile_kb(),
         force_new=True,
+    )
+
+
+@dp.callback_query(F.data.in_({"me:open", "me:back"}))
+async def on_me_open(callback: CallbackQuery, state: FSMContext):
+    """Команда «я»: полный профиль, внизу «Закрыть». me:open — новое сообщение, me:back — правка на месте."""
+    await state.clear()
+    if get_user(callback.from_user.id) is None:
+        await callback.answer("Сначала выбери питомца: /start", show_alert=True)
+        return
+    await callback.answer()
+    await show_rich_card(
+        callback,
+        "player",
+        lambda with_image: player_profile_html(callback.from_user.id, with_image),
+        player_me_kb(),
+        force_new=callback.data == "me:open",
+    )
+
+
+@dp.callback_query(F.data == "me:close")
+async def on_me_close(callback: CallbackQuery):
+    """«Закрыть»: удаляет сообщение профиля."""
+    await callback.answer()
+    if isinstance(callback.message, Message):
+        _MSG_STATE.pop((callback.message.chat.id, callback.message.message_id), None)
+        try:
+            await callback.message.delete()
+        except TelegramAPIError:
+            pass
+
+
+@dp.callback_query(F.data == "me:stat")
+async def on_me_stats(callback: CallbackQuery):
+    if get_user(callback.from_user.id) is None:
+        await callback.answer("Сначала выбери питомца: /start", show_alert=True)
+        return
+    await callback.answer()
+    await show_rich_card(
+        callback, "player",
+        lambda with_image: player_stats_html(callback.from_user.id, with_image),
+        player_me_back_kb(),
+    )
+
+
+@dp.callback_query(F.data == "me:lvl")
+async def on_me_level(callback: CallbackQuery):
+    if get_user(callback.from_user.id) is None:
+        await callback.answer("Сначала выбери питомца: /start", show_alert=True)
+        return
+    await callback.answer()
+    await show_rich_card(
+        callback, "player",
+        lambda with_image: player_level_html(callback.from_user.id, with_image, "me"),
+        player_me_back_kb(),
+    )
+
+
+@dp.callback_query(F.data == "me:lvlup")
+async def on_me_upgrade(callback: CallbackQuery):
+    user = get_user(callback.from_user.id)
+    if user is None:
+        await callback.answer("Сначала выбери питомца: /start", show_alert=True)
+        return
+    level = player_level(user)
+    if level >= PLAYER_MAX_LEVEL:
+        await callback.answer("Достигнут максимальный уровень", show_alert=True)
+        return
+    lack = player_lack(user)
+    if lack:
+        await callback.answer("Не хватает " + ", ".join(lack), show_alert=True)
+        return
+    need_min, need_coins = player_upgrade_cost(level)
+    user[MINERALS_FIELD] = player_minerals(user) - need_min
+    user["coins"] -= need_coins
+    user["plevel"] = level + 1
+    save_users()
+    await callback.answer(f"Уровень игрока повышен до {level + 1}!", show_alert=True)
+    await show_rich_card(
+        callback, "player",
+        lambda with_image: player_level_html(callback.from_user.id, with_image, "me"),
+        player_me_back_kb(),
     )
 
 
