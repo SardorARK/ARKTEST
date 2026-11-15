@@ -1399,7 +1399,8 @@ def lavka_item_kb(user_id: int, key: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [_btn(f"Купить · {_fmt(p['price'])}", f"donate:lvgo:{key}",
               ButtonStyle.SUCCESS if ok else ButtonStyle.DANGER, EM_BUY[0])],
-        _back_btn("donate:lavka"),
+        [_btn("Обновить", "donate:lavka", ButtonStyle.PRIMARY)],
+        _back_btn("donate:home"),
     ])
 
 
@@ -1425,14 +1426,21 @@ def lavka_done_kb(key: str) -> InlineKeyboardMarkup:
     ])
 
 
+async def _show_lavka(callback: CallbackQuery) -> None:
+    """Экран лавки: сразу карточка пака, который лежит в лавке сейчас (в окне он один)."""
+    uid = callback.from_user.id
+    _lv_roll()
+    key = lavka_stock()[0]
+    await _cfg["show_rich_card"](callback, IMG_KEY, lambda wi: lavka_item_html(uid, key, wi),
+                                 lavka_item_kb(uid, key))
+
+
 @router.callback_query(F.data == "donate:lavka")
 async def on_lavka(callback: CallbackQuery):
     if await _require_user(callback) is None:
         return
     await callback.answer()
-    uid = callback.from_user.id
-    _lv_roll()
-    await _cfg["show_rich_card"](callback, IMG_KEY, lambda wi: lavka_html(uid, wi), lavka_kb(uid))
+    await _show_lavka(callback)
 
 
 @router.callback_query(F.data.regexp(r"^donate:lv:\w+$"))
@@ -1442,8 +1450,7 @@ async def on_lavka_item(callback: CallbackQuery):
     key = callback.data.split(":")[2]
     if key not in LAVKA_PACKS or key not in lavka_stock():
         await callback.answer("Этот пак уже ушёл из лавки: товар обновился.", show_alert=True)
-        uid = callback.from_user.id
-        await _cfg["show_rich_card"](callback, IMG_KEY, lambda wi: lavka_html(uid, wi), lavka_kb(uid))
+        await _show_lavka(callback)
         return
     await callback.answer()
     uid = callback.from_user.id
@@ -1464,7 +1471,7 @@ async def on_lavka_buy(callback: CallbackQuery):
     if err:
         await callback.answer(err, show_alert=True)
         if key not in LAVKA_PACKS or key not in lavka_stock():
-            await _cfg["show_rich_card"](callback, IMG_KEY, lambda wi: lavka_html(uid, wi), lavka_kb(uid))
+            await _show_lavka(callback)
         return
     p = LAVKA_PACKS[key]
     have = get_balance(user)
