@@ -9,6 +9,9 @@
     user["ws_ammo"]  = {ключ_заряда: сколько всего}; user["ws_ammo_lv"] = {ключ_заряда: {"уровень": сколько}} (улучшенные заряды)
     user["ws_items"] = [{"key": ключ_предмета, "dur": прочность_или_остаток_использований, "lvl": уровень, "evo": этап_эволюции}, ...]
 
+Быстрые команды (текстом): ресы / ресурсы, прд / предметы, снар / снаряжение, запас / припасы / боезапас,
+доп / дополнительно открывают нужный раздел. Внизу каждого раздела кнопки всех пяти разделов.
+
 В разделе предметы одного вида показываются одной кнопкой «⛏️ | 4х» независимо от уровня и эволюции;
 по нажатию открываются стопки по уровню и этапу эволюции (ключ + уровень + этап).
 Иметь можно не больше STACK_MAX одинаковых предметов. Внутри это обычные записи, каждая со своей прочностью.
@@ -1921,6 +1924,49 @@ def _pages(total: int) -> int:
     return max(1, -(-total // (ITEMS_PER_ROW * ROWS_PER_PAGE)))
 
 
+RES_PER_PAGE = 10   # строк со ресурсами на одной странице раздела «Ресурсы»
+
+
+def _owned_res(user: dict) -> list:
+    """Ресурсы, которые есть у игрока сейчас: [(ключ, название, эмодзи, количество)]."""
+    return [(k, n, e, have(user, k)) for k, (n, e) in RESOURCES.items() if have(user, k) > 0]
+
+
+def _owned_ammo(user: dict) -> list:
+    return [k for k in AMMO if ammo_count(user, k) > 0]
+
+
+def _cat_pages(user: dict, key: str) -> int:
+    """Сколько страниц в разделе: у ресурсов свой размер страницы, у боезапаса и предметов 3 x 3."""
+    if key == "res":
+        return max(1, -(-len(_owned_res(user)) // RES_PER_PAGE))
+    if key == "ammo":
+        return _pages(len(_owned_ammo(user)))
+    return _pages(len(groups_of(user, key)))
+
+
+def _pager_row(prefix: str, page: int, pages: int) -> list | None:
+    """Строка «‹ 1/N ›» для листания; только если страниц больше одной. prefix: callback без номера страницы."""
+    if pages <= 1:
+        return None
+    return [
+        _ebtn(f"{prefix}:{(page - 1) % pages}", PAGE_PREV_EMOJI),
+        InlineKeyboardButton(text=f"{page + 1} / {pages}", callback_data="ws:noop", style=ButtonStyle.PRIMARY),
+        _ebtn(f"{prefix}:{(page + 1) % pages}", PAGE_NEXT_EMOJI),
+    ]
+
+
+def _section_tabs(cur: str) -> list:
+    """Быстрый переход между пятью разделами: только значки, синие, перед текущим точка (как в выборе рецепта кузницы)."""
+    tabs = []
+    for k, (_, emoji, _) in CATEGORIES.items():
+        if k == cur:
+            tabs.append(InlineKeyboardButton(text=f"• {emoji}", callback_data="ws:noop", style=ButtonStyle.PRIMARY))
+        else:
+            tabs.append(InlineKeyboardButton(text=emoji, callback_data=f"ws:cat:{k}:0", style=ButtonStyle.PRIMARY))
+    return tabs
+
+
 def group_page_after(user: dict, category: str) -> int:
     """После удаления последней группы возвращаем на последнюю страницу раздела."""
     return max(0, _pages(len(groups_of(user, category))) - 1)
@@ -1942,17 +1988,26 @@ def category_html(user: dict, key: str, with_image: bool, page: int = 0) -> str:
     text = _img(with_image) + _head(title.upper(), emoji, desc)
     if key == "res":
         # показываем только то, что у игрока есть прямо сейчас; значение моно, по нажатию копируется
-        owned = [(k, n, e, have(user, k)) for k, (n, e) in RESOURCES.items() if have(user, k) > 0]
+        owned = _owned_res(user)
         if not owned:
             return text + ("<p><b>Запасы пусты</b><br>Пока у тебя нет ни одного материала. "
                            "Добывай их, и они появятся здесь.</p>")
-        lines = [f"{e} <b>{escape(n)}</b> — <code>{_f(c)}</code>" for _, n, e, c in owned]
-        return text + "<p>⠀<br>" + "<br>".join(lines) + "</p>"
+        pages = _cat_pages(user, key)
+        pg = min(max(page, 0), pages - 1)
+        lines = [f"{e} <b>{escape(n)}</b> — <code>{_f(c)}</code>"
+                 for _, n, e, c in owned[pg * RES_PER_PAGE:(pg + 1) * RES_PER_PAGE]]
+        text += "<p>⠀<br>" + "<br>".join(lines) + "</p>"
+        if pages > 1:
+            text += f"<p><i>Страница {pg + 1} из {pages}.</i></p>"
+        return text
     if key == "ammo":
         owned = [(k, a) for k, a in AMMO.items() if ammo_count(user, k) > 0]
         if not owned:
             return text + (f"<p>{DIV}<br><b>Пока пусто</b><br>Зарядов нет. Создай их в «Кузнице»: "
                            "они пригодятся против боссов.</p>")
+        pages = _cat_pages(user, key)
+        if pages > 1:
+            text += f"<p><i>Страница {min(max(page, 0), pages - 1) + 1} из {pages}.</i></p>"
         return text   # заряды показаны кнопками «значок | 12х»: списка с описаниями под заголовком нет
     groups = groups_of(user, key)
     mine = list(groups)
@@ -1968,7 +2023,12 @@ def category_html(user: dict, key: str, with_image: bool, page: int = 0) -> str:
 
 
 def category_kb(user: dict, key: str, page: int = 0) -> InlineKeyboardMarkup:
-    """Раздел: стопки предметов кнопками «значок | 5х», по 3 в ряд, 3 ряда на странице; дальше листание страниц."""
+    """Раздел: стопки предметов кнопками «значок | 5х», по 3 в ряд, 3 ряда на странице; дальше листание страниц.
+    Внизу всегда кнопки пяти разделов для быстрого перехода."""
+    if key == "res":
+        return _res_kb(user, page)
+    if key == "ammo":
+        return ammo_list_kb(user, page)
     mine = list(groups_of(user, key).items())
     per = ITEMS_PER_ROW * ROWS_PER_PAGE
     pages = _pages(len(mine))
@@ -1976,13 +2036,21 @@ def category_kb(user: dict, key: str, page: int = 0) -> InlineKeyboardMarkup:
     btns = [_btn(f"| {cnt}х", f"ws:grp:{k}:0", ITEMS[k]["emoji"], None)   # например: ⛏️ | 4х (все уровни вместе)
             for k, cnt in mine[page * per:(page + 1) * per]]
     rows = _rows(btns, ITEMS_PER_ROW)
-    if pages > 1:
-        rows.append([
-            _ebtn(f"ws:cat:{key}:{(page - 1) % pages}", PAGE_PREV_EMOJI),
-            InlineKeyboardButton(text=f"{page + 1} / {pages}", callback_data="ws:noop", style=ButtonStyle.PRIMARY),
-            _ebtn(f"ws:cat:{key}:{(page + 1) % pages}", PAGE_NEXT_EMOJI),
-        ])
-    return InlineKeyboardMarkup(inline_keyboard=rows + [_back("ws:open")])
+    pager = _pager_row(f"ws:cat:{key}", page, pages)
+    if pager:
+        rows.append(pager)
+    return InlineKeyboardMarkup(inline_keyboard=rows + [_section_tabs(key), _back("ws:open")])
+
+
+def _res_kb(user: dict, page: int = 0) -> InlineKeyboardMarkup:
+    """Раздел «Ресурсы»: листание (если страниц больше одной), кнопки разделов и «Назад»."""
+    pages = _cat_pages(user, "res")
+    page = min(max(page, 0), pages - 1)
+    rows = []
+    pager = _pager_row("ws:cat:res", page, pages)
+    if pager:
+        rows.append(pager)
+    return InlineKeyboardMarkup(inline_keyboard=rows + [_section_tabs("res"), _back("ws:open")])
 
 
 def group_html(user: dict, key: str, with_image: bool, page: int = 0) -> str:
@@ -2214,11 +2282,19 @@ def recon_kb(user: dict, idx: int) -> InlineKeyboardMarkup:
     ])
 
 
-def ammo_list_kb(user: dict) -> InlineKeyboardMarkup:
-    """Раздел «Боезапас»: кнопка «значок | 12х» на каждый вид зарядов (все уровни вместе)."""
+def ammo_list_kb(user: dict, page: int = 0) -> InlineKeyboardMarkup:
+    """Раздел «Боезапас»: кнопка «значок | 12х» на каждый вид зарядов (все уровни вместе), 3 x 3 на странице."""
+    owned = _owned_ammo(user)
+    per = ITEMS_PER_ROW * ROWS_PER_PAGE
+    pages = _pages(len(owned))
+    page = min(max(page, 0), pages - 1)
     btns = [_btn(f"| {ammo_count(user, k)}х", f"ws:am:{k}", ITEMS[k]["emoji"], None)
-            for k in AMMO if ammo_count(user, k) > 0]
-    return InlineKeyboardMarkup(inline_keyboard=_rows(btns, ITEMS_PER_ROW) + [_back("ws:open")])
+            for k in owned[page * per:(page + 1) * per]]
+    rows = _rows(btns, ITEMS_PER_ROW)
+    pager = _pager_row("ws:cat:ammo", page, pages)
+    if pager:
+        rows.append(pager)
+    return InlineKeyboardMarkup(inline_keyboard=rows + [_section_tabs("ammo"), _back("ws:open")])
 
 
 def ammo_group_html(user: dict, key: str, with_image: bool) -> str:
@@ -2228,14 +2304,21 @@ def ammo_group_html(user: dict, key: str, with_image: bool) -> str:
               f"<i>Заряды разных уровней лежат отдельными стопками (до {AMMO_STACK} в стопке).</i></p>")
 
 
-def ammo_group_kb(user: dict, key: str) -> InlineKeyboardMarkup:
-    """Стопки вида: «💣 | 10х · ✨2» (уровень, сколько)."""
+def ammo_group_kb(user: dict, key: str, page: int = 0) -> InlineKeyboardMarkup:
+    """Стопки вида: «💣 | 10х · ✨2» (уровень, сколько); если стопок больше 9, листание страниц."""
     btns, seen = [], {}
     for lv, n in ammo_stacks(user, key):
         i = seen.get(lv, 0)
         seen[lv] = i + 1
         btns.append(_btn(f"| {n}х · {UPGRADE_EMOJI[1]}{lv}", f"ws:amst:{key}:{lv}:{i}", ITEMS[key]["emoji"], None))
-    return InlineKeyboardMarkup(inline_keyboard=_rows(btns, ITEMS_PER_ROW) + [_back("ws:cat:ammo")])
+    per = ITEMS_PER_ROW * ROWS_PER_PAGE
+    pages = _pages(len(btns))
+    page = min(max(page, 0), pages - 1)
+    rows = _rows(btns[page * per:(page + 1) * per], ITEMS_PER_ROW)
+    pager = _pager_row(f"ws:am:{key}", page, pages)
+    if pager:
+        rows.append(pager)
+    return InlineKeyboardMarkup(inline_keyboard=rows + [_back("ws:cat:ammo")])
 
 
 def _ammo_back(user: dict, key: str) -> str:
@@ -2547,6 +2630,35 @@ async def open_workshop(message: Message):
                            lambda wi: root_html(user, wi, done), root_kb())
 
 
+# Текстовые команды для быстрого открытия раздела (можно с «/» в начале): сокращение и полное название.
+CATEGORY_ALIASES = {
+    "ресы": "res", "ресурсы": "res",
+    "прд": "items", "предметы": "items",
+    "снар": "gear", "снаряжение": "gear",
+    "запас": "ammo", "припасы": "ammo", "боезапас": "ammo",
+    "доп": "extra", "дополнительно": "extra",
+}
+
+
+def _alias_cat(text: str | None) -> str | None:
+    """«ресы», «/Ресурсы», «!доп» -> ключ раздела; всё остальное (в том числе фразы со словами) -> None."""
+    t = (text or "").strip().lower().lstrip("/!.").split("@")[0].strip()
+    return CATEGORY_ALIASES.get(t)
+
+
+@router.message(F.text.func(lambda t: _alias_cat(t) is not None))
+async def open_category_by_command(message: Message):
+    key = _alias_cat(message.text)
+    user = D.get_user(message.from_user.id)
+    if user is None:
+        await message.answer("Сначала выбери питомца: /start")
+        return
+    if settle(user):
+        D.save_users()
+    await D.send_rich_card(message.bot, message.chat.id, "workshop",
+                           lambda wi: category_html(user, key, wi, 0), category_kb(user, key, 0))
+
+
 @router.callback_query(F.data == "ws:open")
 async def on_open(callback: CallbackQuery):
     user = await _user_or_alert(callback)
@@ -2581,14 +2693,9 @@ async def on_category(callback: CallbackQuery):
     await callback.answer()
     if settle(user):
         D.save_users()
-    page = min(max(page, 0), _pages(len(groups_of(user, key))) - 1)
-    if key == "res":
-        kb = InlineKeyboardMarkup(inline_keyboard=[_back("ws:open")])
-    elif key == "ammo":
-        kb = ammo_list_kb(user)
-    else:
-        kb = category_kb(user, key, page)
-    await D.show_rich_card(callback, "workshop", lambda wi: category_html(user, key, wi, page), kb)
+    page = min(max(page, 0), _cat_pages(user, key) - 1)
+    await D.show_rich_card(callback, "workshop", lambda wi: category_html(user, key, wi, page),
+                           category_kb(user, key, page))
 
 
 async def _show_group(callback: CallbackQuery, user: dict, key: str, page: int = 0) -> None:
@@ -2897,7 +3004,7 @@ def _ammo_args(data: str) -> tuple[str, int, int] | None:
     return (key, lvl, i) if key in AMMO and 0 <= lvl <= MAX_LEVEL and i >= 0 else None
 
 
-async def _show_ammo_type(callback: CallbackQuery, user: dict, key: str) -> None:
+async def _show_ammo_type(callback: CallbackQuery, user: dict, key: str, page: int = 0) -> None:
     """Вид зарядов: если стопка одна, сразу её карточка; если зарядов не осталось, раздел «Боезапас»."""
     sts = ammo_stacks(user, key)
     if not sts:
@@ -2906,7 +3013,7 @@ async def _show_ammo_type(callback: CallbackQuery, user: dict, key: str) -> None
         lv = sts[0][0]
         await D.show_rich_card(callback, "workshop", lambda wi: ammo_html(user, key, lv, 0, wi), ammo_card_kb(user, key, lv, 0))
     else:
-        await D.show_rich_card(callback, "workshop", lambda wi: ammo_group_html(user, key, wi), ammo_group_kb(user, key))
+        await D.show_rich_card(callback, "workshop", lambda wi: ammo_group_html(user, key, wi), ammo_group_kb(user, key, page))
 
 
 async def _show_stack(callback: CallbackQuery, user: dict, key: str, lvl: int, i: int) -> None:
@@ -2930,7 +3037,11 @@ async def on_ammo(callback: CallbackQuery):
     if settle(user):
         D.save_users()
     await callback.answer()
-    await _show_ammo_type(callback, user, key)
+    try:
+        page = int(parts[3]) if len(parts) > 3 else 0
+    except ValueError:
+        page = 0
+    await _show_ammo_type(callback, user, key, page)
 
 
 @router.callback_query(F.data.startswith("ws:amst:"))
