@@ -1532,7 +1532,52 @@ def arts_kb(user: dict) -> InlineKeyboardMarkup:
     return _kb(slots, [_btn("Мои артефакты", "exrn:alist", ButtonStyle.SUCCESS)], [_back("exrn:main")])
 
 
-def alist_html(user: dict, with_image: bool = False) -> str:
+
+# ---------- Список «Мои артефакты»: страницы, кнопки только со значками, текст в сворачиваемой цитате ----------
+ART_PER_PAGE = 13   # больше этого артефактов на одной странице не бывает; 25 = 12 + 13 (поровну, меньшая страница первая)
+ART_PER_ROW = 5     # кнопок в ряду не больше этого; ряды выравниваются (12 -> 4+4+4, 13 -> 5+4+4)
+
+
+def _art_split(total: int) -> list[int]:
+    """Размеры страниц: поровну, лишние артефакты уходят на последние страницы. 25 -> [12, 13], 14 -> [7, 7]."""
+    pages = max(1, -(-total // ART_PER_PAGE))
+    base, extra = divmod(total, pages)
+    return [base] * (pages - extra) + [base + 1] * extra
+
+
+def _art_slice(items: list, page: int) -> tuple[list, int, int]:
+    """(артефакты этой страницы, номер страницы с поправкой на границы, всего страниц)."""
+    sizes = _art_split(len(items))
+    page = min(max(page, 0), len(sizes) - 1)
+    start = sum(sizes[:page])
+    return items[start:start + sizes[page]], page, len(sizes)
+
+
+def _art_page_of(items: list, key: str) -> int:
+    """На какой странице списка лежит артефакт с ключом key (чтобы «Назад» из карточки вёл на ту же страницу)."""
+    start = 0
+    for page, size in enumerate(_art_split(len(items))):
+        if any(a["key"] == key for a in items[start:start + size]):
+            return page
+        start += size
+    return 0
+
+
+def _art_btn_rows(buttons: list) -> list[list]:
+    """Кнопки рядами поровну: не больше ART_PER_ROW в ряду, без одинокой кнопки в хвосте."""
+    if not buttons:
+        return []
+    n_rows = -(-len(buttons) // ART_PER_ROW)
+    base, extra = divmod(len(buttons), n_rows)
+    rows, i = [], 0
+    for r in range(n_rows):
+        size = base + (1 if r < extra else 0)    # длинные ряды сверху: 13 -> 5, 4, 4
+        rows.append(buttons[i:i + size])
+        i += size
+    return rows
+
+
+def alist_html(user: dict, with_image: bool = False, page: int = 0) -> str:
     """Мои артефакты по редкостям."""
     mine_ = owned(user)
     head = (
@@ -1545,30 +1590,39 @@ def alist_html(user: dict, with_image: bool = False) -> str:
             "<blockquote><i>У тебя пока нет артефактов. Их находят в экспедициях "
             "и достают из сундуков «Сокровищницы».</i></blockquote>"
         )
+    chunk, page, pages = _art_slice(mine_, page)
+    # весь список страницы одной сворачиваемой цитатой: по редкостям, «значок — название»
     blocks = []
     for tier, (_, plural) in TIERS.items():
-        rows = []
-        for a in mine_:
-            if a["tier"] != tier:
-                continue
-            kind, pct = next(iter(a["bonus"].items()))
-            rows.append((f"{a['icon']} {a['name']}", f"{BONUS_KINDS[kind][0]} {fmt_bonus(kind, pct)}"))
-        if rows:
-            blocks.append(_tree(rows, f"{_tier_icon(tier)} {plural}"))
-    return head + "<blockquote><i>Выбери артефакт, чтобы надеть или снять.</i></blockquote>" + _gap().join(blocks)
+        names = [f"{a['icon']} — {a['name']}" for a in chunk if a["tier"] == tier]
+        if names:
+            blocks.append(f"<b>{_tier_icon(tier)} {plural}</b><br>" + "<br>".join(names))
+    page_line = f"<p><i>Страница {page + 1} из {pages}.</i></p>" if pages > 1 else ""
+    return (head + page_line
+            + "<blockquote><i>Нажми на значок артефакта, чтобы надеть или снять.</i></blockquote>"
+            + _gap()
+            + "<blockquote expandable>" + "<br><br>".join(blocks) + "</blockquote>")
 
 
-def alist_kb(user: dict) -> InlineKeyboardMarkup:
-    """Мои артефакты по два в ряд: надетые зелёные, не надетые синие."""
+def alist_kb(user: dict, page: int = 0) -> InlineKeyboardMarkup:
+    """Мои артефакты: кнопки только со значками, надетые зелёные, не надетые синие; ниже листание."""
     worn = set(_state(user)["worn"])
+    chunk, page, pages = _art_slice(owned(user), page)
     buttons = [
-        _btn(f"{a['icon']} {a['name']}", f"exrn:ai:{a['key']}",
-             ButtonStyle.SUCCESS if a["key"] in worn else ButtonStyle.PRIMARY)
-        for a in owned(user)
+        _btn(a["icon"], f"exrn:ai:{a['key']}", ButtonStyle.SUCCESS if a["key"] in worn else ButtonStyle.PRIMARY)
+        for a in chunk
     ]
-    rows = _pairs(buttons, 2)
+    rows = _art_btn_rows(buttons)
     if not buttons:
         rows.append([_btn("В сокровищницу", "menu:cases", ButtonStyle.SUCCESS)])
+    if pages > 1:    # листание: ‹ 1/2 ›
+        rows.append([
+            InlineKeyboardButton(text=ARROW_TEXT, callback_data=f"exrn:alist:{(page - 1) % pages}",
+                                 style=ButtonStyle.PRIMARY, icon_custom_emoji_id=ARROW_PREV_ID),
+            _btn(f"{page + 1}/{pages}", "exrn:noop", ButtonStyle.PRIMARY),
+            InlineKeyboardButton(text=ARROW_TEXT, callback_data=f"exrn:alist:{(page + 1) % pages}",
+                                 style=ButtonStyle.PRIMARY, icon_custom_emoji_id=ARROW_NEXT_ID),
+        ])
     rows.append([_back("exrn:arts")])
     return _kb(*rows)
 
@@ -1601,7 +1655,8 @@ def art_item_kb(user: dict, key: str) -> InlineKeyboardMarkup:
         free = len(ex["worn"]) < SLOTS
         action = _btn("Надеть", f"exrn:aw:{a['key']}",
                       ButtonStyle.SUCCESS if free else ButtonStyle.DANGER)
-    return _kb([action], [_back("exrn:alist")])
+    back_page = _art_page_of(owned(user), a["key"])   # «Назад» ведёт на ту же страницу списка
+    return _kb([action], [_back(f"exrn:alist:{back_page}")])
 
 
 # ---------------------------------------------------------------------------
@@ -1958,13 +2013,15 @@ async def on_arts(callback: CallbackQuery):
     await _show(callback, lambda wi: arts_html(user, wi), arts_kb(user), key="exrn_arts")
 
 
-@router.callback_query(F.data == "exrn:alist")
+@router.callback_query(F.data.regexp(r"^exrn:alist(:\d+)?$"))
 async def on_art_list(callback: CallbackQuery):
     user = await _need_user(callback)
     if user is None:
         return
+    parts = callback.data.split(":")
+    page = int(parts[2]) if len(parts) > 2 else 0
     await callback.answer()
-    await _show(callback, lambda wi: alist_html(user, wi), alist_kb(user), key="exrn_arts_list")
+    await _show(callback, lambda wi: alist_html(user, wi, page), alist_kb(user, page), key="exrn_arts_list")
 
 
 @router.callback_query(F.data.regexp(r"^exrn:ai:\w+$"))
