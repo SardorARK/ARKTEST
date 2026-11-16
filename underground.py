@@ -110,7 +110,7 @@ ORES: dict[str, dict] = {
 }
 
 # ---------- Наборы в шахте ----------
-# Игрок находит наборы (workshop_sets) прямо при добыче. Они попадают в «Добыто» и забираются кнопкой «Забрать».
+# Игрок находит наборы (workshop_sets) прямо при добыче. Они ждут в «Найдено» и переходят в инвентарь (раздел «Наборы») кнопкой «Забрать», после чего пропадают из «Найдено».
 # Всё считается по МИНУТАМ работы шахты, а не по числу запусков: перезапускать шахту ради наборов не выгодно.
 #
 # 1) СТАРТ: пока игрок суммарно отработал в шахте меньше SET_START_HOURS часов, находки идут по «этапам» ниже.
@@ -685,8 +685,7 @@ def settle(ug: dict, user: dict | None = None) -> bool:
     now = time.time()
     span = max(1.0, run["end"] - run["start"])
     changed = False
-    if user is not None and _flush_sets(user, ug):
-        changed = True
+    # наборы сами в инвентарь не идут: они ждут в «Найдено» (pending) до кнопки «Забрать»
 
     if "plan" in run:                         # старый формат: символ на копание, множители ×1
         plan = run["plan"]
@@ -724,8 +723,6 @@ def settle(ug: dict, user: dict | None = None) -> bool:
                 g += 1
                 changed = True
             run["sets_given"] = g
-            if user is not None:
-                _flush_sets(user, ug)
     else:                                     # старый формат: сегменты по минутам
         segs = run["segs"]
         total = len(segs)
@@ -869,8 +866,8 @@ def _found_rows(ug: dict) -> list:
 
 def _sets_found_block(ug: dict) -> str:
     """Отдельная строка «Найдено»: наборы, найденные в этом запуске. Пусто, если ничего не найдено."""
-    found = ug.get("found") or {}
-    rows = [(set_name(k), "×" + num(n)) for k, n in found.items() if int(n) > 0]
+    pend = ug.get("pending") or {}
+    rows = [(set_name(k[4:]), "×" + num(n)) for k, n in pend.items() if k.startswith("set_") and int(n) > 0]
     return _quote("Найдено", rows, expandable=True) if rows else ""
 
 
@@ -1709,6 +1706,8 @@ async def on_collect(callback: CallbackQuery):
                 wsets.give_set(user, key, n)
                 got_sets[key] = n
                 pend[k] = 0
+    if wsets is not None:
+        ug["found"] = {}              # забранные наборы пропадают из «Найдено»
     PS.add(ug, "ore", ore_got)        # статистика: руда и минералы, забранные из шахты
     PS.add(ug, "min", minerals)
     _ach("on_ug_collect", user, ore_got, minerals)
