@@ -1320,10 +1320,15 @@ def group_html(user: dict, gi: int, with_image: bool = False) -> str:
             real = f" (в пути {_dur(h * 3600 * (1 - bon['time'] / 100))})" if bon["time"] else ""
             rows.append((f"{_em(EM_TIME)} {h} ч{real}",
                          f"{_num(lo)}–{_num(hi)} {_coin()} · {_em(EM_ART)} {art_chance(gi, h, lvl, 1.0, bon['art']) * 100:.1f}%"))
-        return head + _gap() + _tree(rows, "Экспедиции", quote=PLAIN_EMOJI.get()) + _ws_line(user) + _p(
-            "<b>💤 Отряд готов к походу.</b>",
-            "<i>Выбери время кнопкой ниже.</i>",
-        )
+        # Всё одним сворачиваемым блоком (blockquote expandable), части разделены точками
+        parts = [
+            _tree(rows, "Экспедиции"),
+            _ws_line(user),
+            _p("<b>💤 Отряд готов к походу.</b>", "<i>Выбери время кнопкой ниже.</i>"),
+        ]
+        sep = f"<br><code>{DOTS}</code><br>"
+        inner = sep.join(p.replace("<p>", "").replace("</p>", "") for p in parts if p)
+        return head + _gap() + f"<blockquote expandable>{inner}</blockquote>"
     trip = ex["trips"][g["key"]]
     if code == "ready":
         return head + _gap() + _p(
