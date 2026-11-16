@@ -1400,18 +1400,14 @@ def times_html(user: dict, with_image: bool = False) -> str:
         bonus_pct = int(round((DURATION_BONUS.get(h, 1.0) - 1) * 100))
         rows.append((f"{_em(EM_TIME)} {h} ч", f"{'+' + str(bonus_pct) + '%' if bonus_pct else 'без бонуса'} · {state}"))
     if nxt:
-        tail = _tree([
-            ("Следующая", f"{nxt} ч"),
-            ("Цена", f"{_num(DURATION_PRICE[nxt])} {_coin()}"),
-            ("У тебя", f"{_num(user['coins'])} {_coin()}"),
-        ], f"{_info()} Открытие")
+        tail = _p(f"<i>Следующий маршрут ({nxt} ч) можно открыть кнопкой ниже.</i>")
     else:
         tail = _p(f"<b>{_em(EM_OK)} Все маршруты открыты!</b>")
     return (
         f"{_image(with_image)}"
         f"<p><b>{_em(EM_TIME)} ВРЕМЯ ЭКСПЕДИЦИЙ</b></p>"
         "<blockquote><i>Чем дольше путь, тем больше добыча. Открывай маршруты по порядку.</i></blockquote>" + _gap()
-        + _tree(rows, "Маршруты")
+        + _tree(rows, "Маршруты", quote=True)
         + _gap()
         + tail
     )
@@ -1445,6 +1441,7 @@ def log_html(user: dict, with_image: bool = False) -> str:
     return (
         f"{_image(with_image)}"
         f"<p><b>{_em(EM_LOG)} ЖУРНАЛ</b></p>"
+        + _gap()
         + _tree([
             (f"{_em(EM_TITLE)} Звание", rank + (f" · ещё {to_next} эксп." if to_next else "")),
             (f"{_em(EM_STREAK)} Серия", f"{streak} дн."),
