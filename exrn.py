@@ -505,7 +505,7 @@ def _num(n) -> str:
 PLAIN_EMOJI: ContextVar[bool] = ContextVar("exrn_plain_emoji", default=False)
 # В группе в карточке отряда: названия жирным, значения моно (<code>: нажатие копирует значение).
 # Если Telegram откажется принимать <code> в таком сообщении, поставь False.
-GROUP_MONO_VALUES = True
+GROUP_MONO_VALUES = False
 
 
 def _custom_emoji(pair: tuple[str, str]) -> str:
@@ -770,21 +770,19 @@ def _val(value) -> str:
 
 
 def _tree(rows: list, title: str = "", mono: bool = False, quote: bool = False) -> str:
-    """Блок с рамочкой ├ └, как в «Снаряжении» и «Сокровищнице».
-    mono: название жирным, значение моно (<code>), нажатие копирует значение.
+    """Блок строк «Название: значение» без рамочек: и название, и значение жирным.
+    mono оставлен для совместимости (значения теперь всегда жирные, не моно).
     quote: весь блок в сворачиваемой цитате (<blockquote expandable>)."""
     lines = []
-    for n, row in enumerate(rows):
+    for row in rows:
         label, value = row[0], row[1]
         kids = row[2] if len(row) > 2 else []
-        last = n == len(rows) - 1
-        line = f"{'└' if last else '├'} {'<b>' + label + '</b>' if mono else label}"
+        line = f"<b>{label}</b>"
         if value != "":
-            line += f": <code>{value}</code>" if mono else _val(value)
+            line += f": {value}" if isinstance(value, _Raw) else f": <b>{value}</b>"
         lines.append(line)
-        pad = "&nbsp;&nbsp;&nbsp;" if last else "│&nbsp;&nbsp;"
-        for k, (kl, kv) in enumerate(kids):
-            kline = f"{pad}{'└' if k == len(kids) - 1 else '├'} {kl}"
+        for kl, kv in kids:
+            kline = f"&nbsp;&nbsp;<b>{kl}</b>"
             if kv != "":
                 kline += _val(kv)
             lines.append(kline)
@@ -798,7 +796,7 @@ def _mono() -> bool:
     return GROUP_MONO_VALUES and PLAIN_EMOJI.get()
 
 
-DOTS = "·" * 30      # точки-разделитель подразделов (моно: нажатие копирует)
+DOTS = "·" * 25      # точки-разделитель подразделов (моно: нажатие копирует)
 
 
 def _gap() -> str:
@@ -819,8 +817,6 @@ def _bonus_row(kind: str, pct: int, icon: str | None = None) -> tuple[str, str]:
     """Строка бонуса «Монеты из экспедиций: +5%». В группе вся строка курсивом (без жирного)."""
     label = f"{icon or _kind_icon(kind)} {BONUS_KINDS[kind][0]}"
     value = fmt_bonus(kind, pct)
-    if PLAIN_EMOJI.get():
-        return f"<i>{label}</i>", _Raw(f"<i>{value}</i>")
     return label, value
 
 
@@ -1115,8 +1111,8 @@ def _loot_rows(gi: int, hours: int, level: int, bon: dict | None = None) -> list
 def _level_line(ex: dict, key: str) -> str:
     lvl, cur, need = _level_info(ex["xp"].get(key, 0))
     if need is None:
-        return f"{_em(EM_LEVEL)} Уровень {lvl} (максимум)"
-    return f"{_em(EM_LEVEL)} Уровень {lvl} · {_bar(cur, need, 8)} · {cur}/{need} опыта"
+        return f"<b>{_em(EM_LEVEL)} Уровень {lvl} (максимум)</b>"
+    return f"<b>{_em(EM_LEVEL)} Уровень {lvl} · {_bar(cur, need, 8)} · {cur}/{need} опыта</b>"
 
 
 def main_html(user: dict, with_image: bool = False) -> str:
@@ -1606,13 +1602,12 @@ def alist_html(user: dict, with_image: bool = False, page: int = 0) -> str:
     chunk, page, pages = _art_slice(mine_, page)
     blocks = []
     for tier, (_, plural) in TIERS.items():
-        names = [f"{a['icon']} — {a['name']}" for a in chunk if a["tier"] == tier]
+        names = [f"<b>{a['icon']} — {a['name']}</b>" for a in chunk if a["tier"] == tier]
         if names:
             blocks.append(f"<b>{_tier_icon(tier)} {plural}</b><br>" + "<br>".join(names))
     page_line = f"<p><i>Страница {page + 1} из {pages}</i></p>" if pages > 1 else ""
     return (head + page_line
             + "<blockquote><i>Нажми на значок, чтобы надеть или снять.</i></blockquote>" + _gap()
-            + _gap()
             + "<blockquote expandable>" + "<br><br>".join(blocks) + "</blockquote>")
 
 
