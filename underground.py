@@ -871,7 +871,7 @@ def _sets_found_block(ug: dict) -> str:
     """Отдельная строка «Найдено»: наборы, найденные в этом запуске. Пусто, если ничего не найдено."""
     found = ug.get("found") or {}
     rows = [(set_name(k), "×" + num(n)) for k, n in found.items() if int(n) > 0]
-    return _quote("Найдено", rows) if rows else ""
+    return _quote("Найдено", rows, expandable=True) if rows else ""
 
 
 def _dur_label(minutes: int) -> str:
@@ -894,7 +894,7 @@ def _used_block(run: dict | None) -> str:
         rows = [ws.mine_item_label(e) for e in run["used"]]
     except Exception:
         return ""
-    return _quote("Используемые предметы", rows)
+    return _quote("Используемые предметы", rows, expandable=True)
 
 
 def ug_html(user_id: int, with_image: bool = False) -> str:
