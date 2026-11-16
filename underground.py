@@ -34,7 +34,7 @@ from aiogram import BaseMiddleware, F, Router
 from aiogram.enums import ButtonStyle
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
-from mine import _bar, _gap, fmt, fmt_dur   # оформление как в «Шахтах»
+from mine import _bar, fmt, fmt_dur   # оформление как в «Шахтах»
 import period_stats as PS   # статистика по периодам (команда «стата»)
 
 log = logging.getLogger(__name__)
@@ -815,6 +815,14 @@ def _image(with_image: bool) -> str:
     return ""                     # картинки в шахте не нужны
 
 
+DOTS = "·" * 25      # точки-разделитель подразделов (моно: нажатие копирует)
+
+
+def _gap() -> str:
+    """Разделитель подразделов: ряд точек в <code>."""
+    return f"<p><code>{DOTS}</code></p>"
+
+
 def _line(label: str, value: str, mono: bool = True) -> str:
     """Подпись жирным, значение моноширинным (по нажатию копируется) или обычным."""
     if value == "":
@@ -915,9 +923,10 @@ def ug_html(user_id: int, with_image: bool = False) -> str:
     return (
         f"{_image(with_image)}"
         + _tree(state, "Состояние", mono=False)
-        + _used_block(run)
+        + _gap()
+        + _used_block(run) + (_gap() if _used_block(run) else "")
         + _quote("Добыто", _found_rows(ug), expandable=True)
-        + _sets_found_block(ug)
+        + (_gap() + _sets_found_block(ug) if _sets_found_block(ug) else "")
     )
 
 
@@ -984,6 +993,7 @@ def time_html(user_id: int, with_image: bool = False) -> str:
         f"<p><b>{hourglass} Время запуска</b></p>"
         "<blockquote><i>Открывай время по очереди: чем дольше запуск, тем больше бонус к добыче. "
         "Шахта запускается на самом долгом открытом времени. Сам запуск бесплатный.</i></blockquote>"
+        + _gap()
         + _tree(rows, mono=False)
         + _gap()
     )
@@ -1016,7 +1026,8 @@ def bag_html(user_id: int, with_image: bool = False) -> str:
         "<p><b>🎒 РЮКЗАК</b></p>"
         "<blockquote><i>Здесь лежит руда, которую ты забрал из шахт. "
         "Продай её за монеты.</i></blockquote>"
-        f"<p><b>Руда</b></p><blockquote>{lines}</blockquote>"
+        + _gap()
+        + f"<p><b>Руда</b></p><blockquote>{lines}</blockquote>"
         + _gap()
         + _tree(total, "Итого")
     )
