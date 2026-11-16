@@ -702,8 +702,8 @@ MAX_EVO = len(EVO_STAGES)   # больше этапов эволюции нет
 RECON_SHARE = 0.5          # реконструкция: возвращается 50% вложенных ресурсов (крафт + улучшения + эволюция)
 STACK_MAX = 5               # сколько одинаковых предметов (ключ + уровень + этап) можно иметь
 
-DIVIDER_LEN = 18       # длина линии-разделителя из тире
-DIV = "<code>" + "—" * DIVIDER_LEN + "</code>"   # линия моно, разделяет блоки текста в разделе «Предметы»
+DIVIDER_LEN = 25       # сколько точек в разделителе
+DIV = "<code>" + "·" * DIVIDER_LEN + "</code>"   # точки моно (нажатие копирует), разделяют блоки текста
 
 MAX_SLOTS = 4          # слотов в кузнице; сначала открыт только первый
 # Цена открытия слота (монеты). Слоты открываются строго по порядку: 2, потом 3, потом 4.
@@ -1890,7 +1890,7 @@ def _craft_status(user: dict) -> str:
     now = time.time()
     lines = [f"<i>{_em(ITEMS[j['item']]['emoji'])} {escape(ITEMS[j['item']]['name'])} — {percent(j, now)}% · {fmt_time(j['end'] - now)}</i>"
              for j in jobs]
-    return "<p>⠀<br>" + "<br>".join(lines) + "</p>"
+    return f"<p>{DIV}<br>" + "<br>".join(lines) + "</p>"
 
 
 def _done_note(done: list[str] | None) -> str:
@@ -2508,7 +2508,7 @@ def slot_busy_html(job: dict, slot: int, with_image: bool) -> str:
     return text + (f"<p><b>{_em(item['emoji'])} {escape(item['name'])}</b><br><br>"
                    f"Готово: <b>{percent(job, now)}%</b><br>"
                    f"Осталось: <b>{fmt_time(job['end'] - now)}</b></p>"
-                   "<p>Готовый предмет сам попадёт в инвентарь, когда время выйдет.</p>"
+                   f"<p>{DIV}<br>Готовый предмет сам попадёт в инвентарь, когда время выйдет.</p>"
                    + _legend((REFRESH_EMOJI, "Обновить")))
 
 
@@ -2552,7 +2552,7 @@ def recipe_html(user: dict, key: str, slot: int, with_image: bool) -> str:
             lack.append(f"{em} {escape(name)} ×{_n(n - got)}")
         lines.append(f"{ok if got >= n else no} | {em} <b>{escape(name)}</b> — "
                      f"<code>{_n(got)}</code> / <code>{_n(n)}</code>")
-    gap = "⠀<br>"   # невидимый символ: пустая строка видна и на ПК (как в _craft_status)
+    gap = DIV + "<br>"   # точки между блоками рецепта
     if ammo and ammo_count(user, key) + ammo_pending(user, key) + item["batch"] > ammo_cap(user):
         note = f"<i>Боезапас этого вида почти полон (максимум {ammo_cap(user)}).</i>"
     elif not ammo and owned_count(user, key) >= stack_cap(user, key):
@@ -3246,7 +3246,7 @@ def pick_view(user: dict, key: str):
                     else "Мгновенно можно завершить только ковку базовых предметов и боезапаса.")
         now = time.time()
         hint = "Выбери слот, где идёт ковка."
-        body = "<p>⠀<br>" + "<br>".join(
+        body = f"<p>{DIV}<br>" + "<br>".join(
             f"{_em(ITEMS[j['item']]['emoji'])} <b>{escape(ITEMS[j['item']]['name'])}</b> — слот {j['slot']} · "
             f"осталось {fmt_time(j['end'] - now)}" for j in jobs) + "</p>"
         rows = _rows([_btn(f"Слот {j['slot']} • {fmt_time(j['end'] - now)}", f"ws:xh:{key}:{j['slot']}",
@@ -3258,7 +3258,7 @@ def pick_view(user: dict, key: str):
                 f"<b>У тебя:</b> <code>{_n(total)}</code><br>"
                 f"<i>Списываются те ресурсы, которых у тебя больше всего.</i></p>")
         short = {"light_essence": "Свет", "fire_core": "Огонь", "ice_shard": "Лёд"}
-        body += "<p>⠀<br>" + "<br>".join(
+        body += f"<p>{DIV}<br>" + "<br>".join(
             f"{RESOURCES[r][1]} <b>{escape(RESOURCES[r][0])}</b> — <code>{_n(have(user, r))}</code>" for r in RARE_RESOURCES) + "</p>"
         rows = [[_res_btn(f"| {short.get(r, RESOURCES[r][0])}", f"ws:xa:{r}", r) for r in RARE_RESOURCES]]
     elif key == "swap_token":
@@ -3266,7 +3266,7 @@ def pick_view(user: dict, key: str):
         if not opts:
             return f"Нужно хотя бы {SWAP_IN} штук одного базового ресурса."
         hint = f"Выбери, какой ресурс отдать: {SWAP_IN} штук превратятся в {SWAP_OUT} другого."
-        body = "<p>⠀<br>" + "<br>".join(
+        body = f"<p>{DIV}<br>" + "<br>".join(
             f"{RESOURCES[k][1]} <b>{escape(RESOURCES[k][0])}</b> — <code>{_n(have(user, k))}</code>" for k in opts) + "</p>"
         rows = _rows([_res_btn(f"| {have(user, k)}", f"ws:xs:{k}", k) for k in opts], 3)
     elif key == "backpack":
@@ -3277,7 +3277,7 @@ def pick_view(user: dict, key: str):
         if not opts:
             return "Для всех твоих предметов лимит уже расширен до максимума."
         hint = "Выбери предмет, для которого нужно расширить лимит."
-        body = ("<p>⠀<br>" + "<br>".join(
+        body = (f"<p>{DIV}<br>" + "<br>".join(
             f"{_em(ITEMS[k]['emoji'])} <b>{escape(ITEMS[k]['name'])}</b> — <code>{stack_cap(user, k)} → {stack_cap(user, k) + 1}</code>"
             for k in opts) + "</p>")
         rows = _rows([_btn(f"| {stack_cap(user, k)}→{stack_cap(user, k) + 1}", f"ws:xb:{k}", ITEMS[k]["emoji"], None)
