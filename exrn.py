@@ -503,6 +503,9 @@ def _num(n) -> str:
 # раздел в группе обновляется на месте, без удаления и новых сообщений. Кнопки (icon_custom_emoji_id)
 # не затрагиваются: у них свой механизм. Флаг ставит _show() только на время сборки одного экрана.
 PLAIN_EMOJI: ContextVar[bool] = ContextVar("exrn_plain_emoji", default=False)
+# В группе в карточке отряда: названия жирным, значения моно (<code>: нажатие копирует значение).
+# Если Telegram откажется принимать <code> в таком сообщении, поставь False.
+GROUP_MONO_VALUES = True
 
 
 def _custom_emoji(pair: tuple[str, str]) -> str:
@@ -766,16 +769,18 @@ def _val(value) -> str:
     return f": {value}" if isinstance(value, _Raw) else f": <b>{value}</b>"
 
 
-def _tree(rows: list, title: str = "") -> str:
-    """Блок с рамочкой ├ └, как в «Снаряжении» и «Сокровищнице»."""
+def _tree(rows: list, title: str = "", mono: bool = False, quote: bool = False) -> str:
+    """Блок с рамочкой ├ └, как в «Снаряжении» и «Сокровищнице».
+    mono: название жирным, значение моно (<code>), нажатие копирует значение.
+    quote: весь блок в сворачиваемой цитате (<blockquote expandable>)."""
     lines = []
     for n, row in enumerate(rows):
         label, value = row[0], row[1]
         kids = row[2] if len(row) > 2 else []
         last = n == len(rows) - 1
-        line = f"{'└' if last else '├'} {label}"
+        line = f"{'└' if last else '├'} {'<b>' + label + '</b>' if mono else label}"
         if value != "":
-            line += _val(value)
+            line += f": <code>{value}</code>" if mono else _val(value)
         lines.append(line)
         pad = "&nbsp;&nbsp;&nbsp;" if last else "│&nbsp;&nbsp;"
         for k, (kl, kv) in enumerate(kids):
@@ -784,7 +789,13 @@ def _tree(rows: list, title: str = "") -> str:
                 kline += _val(kv)
             lines.append(kline)
     head = f"<b>{title}</b><br>" if title else ""
-    return f"<p>{head}{'<br>'.join(lines)}</p>"
+    body = f"{head}{'<br>'.join(lines)}"
+    return f"<blockquote expandable>{body}</blockquote>" if quote else f"<p>{body}</p>"
+
+
+def _mono() -> bool:
+    """Моно-значения включены только в группе."""
+    return GROUP_MONO_VALUES and PLAIN_EMOJI.get()
 
 
 def _gap() -> str:
@@ -1282,9 +1293,9 @@ def group_html(user: dict, gi: int, with_image: bool = False) -> str:
         f"{_image(with_image)}"
         f"<p><b>{g['icon']} {g['name'].upper()}</b></p>"
         f"<blockquote><i>{g['desc']}</i></blockquote>"
-        + _tree(stats, "Отряд")
+        + _tree(stats, "Отряд", mono=_mono())
         + _gap()
-        + _tree(_loot_rows(gi, h0, lvl, bon), f"Добыча за {h0} ч")
+        + _tree(_loot_rows(gi, h0, lvl, bon), f"Добыча за {h0} ч", mono=_mono())
     )
 
     if code == "locked":
@@ -1309,7 +1320,7 @@ def group_html(user: dict, gi: int, with_image: bool = False) -> str:
             real = f" (в пути {_dur(h * 3600 * (1 - bon['time'] / 100))})" if bon["time"] else ""
             rows.append((f"{_em(EM_TIME)} {h} ч{real}",
                          f"{_num(lo)}–{_num(hi)} {_coin()} · {_em(EM_ART)} {art_chance(gi, h, lvl, 1.0, bon['art']) * 100:.1f}%"))
-        return head + _gap() + _tree(rows, "Экспедиции") + _ws_line(user) + _p(
+        return head + _gap() + _tree(rows, "Экспедиции", quote=PLAIN_EMOJI.get()) + _ws_line(user) + _p(
             "<b>💤 Отряд готов к походу.</b>",
             "<i>Выбери время кнопкой ниже.</i>",
         )
