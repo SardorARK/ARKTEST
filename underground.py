@@ -852,7 +852,7 @@ def _quote(title: str, rows: list, expandable: bool = False) -> str:
     expandable=True: цитата сворачивается (Telegram: <blockquote expandable>)."""
     lines = "<br>".join(_line(lab, val) for lab, val in rows)
     tag = "<blockquote expandable>" if expandable else "<blockquote>"
-    return f"<p><b>{title}</b></p>{tag}{lines}</blockquote>"
+    return f"{tag}<b>{title}</b><br>{lines}</blockquote>"   # заголовок внутри цитаты вместе со строками
 
 
 def selected(ug: dict) -> int:
@@ -1027,7 +1027,7 @@ def bag_html(user_id: int, with_image: bool = False) -> str:
         "<blockquote><i>Здесь лежит руда, которую ты забрал из шахт. "
         "Продай её за монеты.</i></blockquote>"
         + _gap()
-        + f"<p><b>Руда</b></p><blockquote>{lines}</blockquote>"
+        + f"<blockquote><b>Руда</b><br>{lines}</blockquote>"
         + _gap()
         + _tree(total, "Итого")
     )
