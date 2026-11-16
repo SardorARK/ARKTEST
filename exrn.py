@@ -138,7 +138,7 @@ ICON_LOG = "5393180920234647059"    # «Журнал»
 # Кастомные эмодзи в тексте: (id, запасной обычный эмодзи)
 EXPLORE_EMOJI = ("5235794253149394263", "🗺")   # раздел «Исследование» (кнопка в меню и заголовок)
 EM_HIRE = ("5440457429147997980", "🫴")         # найм
-EM_RANK = ("5332415533952289417", "⭐")          # ранг
+EM_RANK = ("5332415533952289417", "🎖")          # ранг
 EM_LEVEL = ("5408869739982246969", "⭐")         # уровень
 EM_STATUS = ("5325905536057615182", "🧘‍♀️")      # статус
 EM_TITLE = ("5424746623462823358", "🏅")        # звание
@@ -758,6 +758,14 @@ def _tier_icon(tier: str) -> str:
     return _custom_emoji(TIERS[tier][0])
 
 
+class _Raw(str):
+    """Значение для _tree, которое вставляется как есть, без жирного."""
+
+
+def _val(value) -> str:
+    return f": {value}" if isinstance(value, _Raw) else f": <b>{value}</b>"
+
+
 def _tree(rows: list, title: str = "") -> str:
     """Блок с рамочкой ├ └, как в «Снаряжении» и «Сокровищнице»."""
     lines = []
@@ -767,13 +775,13 @@ def _tree(rows: list, title: str = "") -> str:
         last = n == len(rows) - 1
         line = f"{'└' if last else '├'} {label}"
         if value != "":
-            line += f": <b>{value}</b>"
+            line += _val(value)
         lines.append(line)
         pad = "&nbsp;&nbsp;&nbsp;" if last else "│&nbsp;&nbsp;"
         for k, (kl, kv) in enumerate(kids):
             kline = f"{pad}{'└' if k == len(kids) - 1 else '├'} {kl}"
             if kv != "":
-                kline += f": <b>{kv}</b>"
+                kline += _val(kv)
             lines.append(kline)
     head = f"<b>{title}</b><br>" if title else ""
     return f"<p>{head}{'<br>'.join(lines)}</p>"
@@ -792,11 +800,17 @@ def _kind_icon(kind: str) -> str:
     return BONUS_KINDS[kind][2]
 
 
+def _bonus_row(kind: str, pct: int, icon: str | None = None) -> tuple[str, str]:
+    """Строка бонуса «Монеты из экспедиций: +5%». В группе вся строка курсивом (без жирного)."""
+    label = f"{icon or _kind_icon(kind)} {BONUS_KINDS[kind][0]}"
+    value = fmt_bonus(kind, pct)
+    if PLAIN_EMOJI.get():
+        return f"<i>{label}</i>", _Raw(f"<i>{value}</i>")
+    return label, value
+
+
 def _bonus_rows(bonuses_: dict[str, int]) -> list[tuple[str, str]]:
-    return [
-        (f"{_kind_icon(kind)} {BONUS_KINDS[kind][0]}", fmt_bonus(kind, pct))
-        for kind, pct in bonuses_.items()
-    ]
+    return [_bonus_row(kind, pct) for kind, pct in bonuses_.items()]
 
 
 def result_block(a: dict) -> str:
@@ -1460,7 +1474,7 @@ def loot_html(gi: int, hours: int, loot: dict, art, is_new: bool, dup: int, info
         summary.append((_ws_item_name(info.get("ws_key")), f"+{info['ws_bonus']:g}%"))
     for kind, pct in info.get("art_bonus", {}).items():
         if pct and kind != "time":
-            summary.append((f"{_kind_icon(kind) if kind == 'art' else '🎒'} {BONUS_KINDS[kind][0]}", fmt_bonus(kind, pct)))
+            summary.append(_bonus_row(kind, pct, _kind_icon(kind) if kind == "art" else "🎒"))
     text += _gap() + _tree(summary, "Итоги")
     if art is not None:
         text += _p(f"<b>{_em(EM_ART)} НАЙДЕН АРТЕФАКТ!</b>") + result_block(art)
