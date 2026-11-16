@@ -36,11 +36,12 @@ import logging
 import math
 import random
 import time
+from contextvars import ContextVar
 from html import escape
 
 from aiogram import F, Router
 from aiogram.enums import ButtonStyle
-from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup
+from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 import settings                        # никнейм игрока и уведомления о возвращении отряда
 
@@ -446,7 +447,7 @@ _save_users = None
 _reward_boost = None          # необязательно: user -> прибавка к добыче в процентах
 _show_rich_card = None
 _send_rich_card = None
-_custom_emoji = None
+_base_custom_emoji = None     # настоящая функция из main.py; в тексты идёт через _custom_emoji ниже
 _COIN = ("5449418135381759397", "🪙")
 _INFO = ("5334544901428229844", "ℹ️")
 _BACK_ID: str | None = None
@@ -472,14 +473,14 @@ def setup(
 ) -> None:
     """Артефакты исследователей выдаются из собственного списка ARTIFACTS, поэтому
     drop_artifact, result_block и tiers из старого вызова setup больше не нужны."""
-    global _get_user, _save_users, _show_rich_card, _send_rich_card, _custom_emoji
+    global _get_user, _save_users, _show_rich_card, _send_rich_card, _base_custom_emoji
     global _COIN, _INFO, _BACK_ID, _MEAT, _FRUIT, _reward_boost
     _reward_boost = reward_boost     # user -> прибавка к добыче в процентах (привилегии)
     _get_user = get_user
     _save_users = save_users
     _show_rich_card = show_rich_card
     _send_rich_card = send_rich_card
-    _custom_emoji = custom_emoji
+    _base_custom_emoji = custom_emoji
     _COIN, _INFO, _BACK_ID = COIN_EMOJI, INFO_EMOJI, BACK_EMOJI_ID
     _MEAT, _FRUIT = MEAT_EMOJI, FRUIT_EMOJI
 
@@ -507,6 +508,20 @@ def _num(n) -> str:
     text = f"{whole}.{frac * 100 // div:02d}".rstrip("0").rstrip(".")
     return f"{sign}{text}{NUMBER_SUFFIXES[idx]}"
 
+
+
+# В группах тексты раздела строятся с ОБЫЧНЫМИ эмодзи: правка сообщения на месте (editMessageText)
+# превращает кастомные эмодзи в тексте в обычные, а обычные при правке не меняются. Благодаря этому
+# раздел в группе обновляется на месте, без удаления и новых сообщений. Кнопки (icon_custom_emoji_id)
+# не затрагиваются: у них свой механизм. Флаг ставит _show() только на время сборки одного экрана.
+PLAIN_EMOJI: ContextVar[bool] = ContextVar("exrn_plain_emoji", default=False)
+
+
+def _custom_emoji(pair: tuple[str, str]) -> str:
+    """Эмодзи для текста: кастомный (в личке) или обычный запасной (в группе)."""
+    if PLAIN_EMOJI.get():
+        return pair[1]
+    return _base_custom_emoji(pair)
 
 
 def _em(pair: tuple[str, str]) -> str:
@@ -1668,10 +1683,23 @@ async def _need_user(callback: CallbackQuery):
     return user
 
 
+def _in_group(callback: CallbackQuery) -> bool:
+    """Нажатие в группе/супергруппе. Недоступное (старое) сообщение считаем личным: карточка уйдёт в личку."""
+    msg = callback.message
+    return isinstance(msg, Message) and msg.chat.type != "private"
+
+
 async def _show(callback: CallbackQuery, html_fn, kb: InlineKeyboardMarkup,
                 force_new: bool = False, key: str = "exrn"):
     # key оставлен для совместимости: у раздела одно общее фото, поэтому всегда "exrn"
-    await _show_rich_card(callback, "exrn", html_fn, kb, force_new=force_new)
+    group = _in_group(callback)
+    # В группе: обычные эмодзи в тексте и только правка на месте (force_new там не нужен:
+    # быстрая команда уже создала сообщение-заглушку, и она превращается в экран раздела)
+    token = PLAIN_EMOJI.set(group)
+    try:
+        await _show_rich_card(callback, "exrn", html_fn, kb, force_new=force_new and not group)
+    finally:
+        PLAIN_EMOJI.reset(token)
 
 
 async def _show_main(callback: CallbackQuery, user: dict):
