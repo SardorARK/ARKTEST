@@ -1477,13 +1477,15 @@ LIVE_EDIT_KEYS = {"arena_battle", "arena_find", "player", "exrn"} | set(cases.IM
 # "lab", "market", "boss" ...). Ключи из LIVE_EDIT_KEYS сюда добавлять нельзя.
 ALWAYS_RESEND_KEYS: set[str] = set()
 # Экраны из LIVE_EDIT_KEYS, которые в группах всё же шлются заново (иначе пропадают кастомные эмодзи)
-GROUP_RESEND_LIVE_KEYS: set[str] = {"player", "exrn"}
+# «exrn» здесь нет: тексты раздела в группе строятся с обычными эмодзи (exrn.PLAIN_EMOJI), поэтому он
+# обновляется правкой на месте
+GROUP_RESEND_LIVE_KEYS: set[str] = {"player"}
 
 
 def _edit_in_place_ok(msg, key: str) -> bool:
     """Можно ли обновить сообщение правкой (а не удалять и слать новое)."""
     if key in LIVE_EDIT_KEYS:
-        # «player» (профиль, команда «я») и «exrn» в группе правка на месте превращает кастомные эмодзи
+        # «player» (профиль, команда «я») в группе: правка на месте превращает кастомные эмодзи
         # в обычные (команда сперва шлёт заглушку «⏳» и правит её): там шлём заново, как остальные экраны
         if key in GROUP_RESEND_LIVE_KEYS and RESEND_IN_GROUPS and getattr(msg.chat, "type", "private") != "private":
             return False
