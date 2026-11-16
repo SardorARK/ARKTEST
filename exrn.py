@@ -798,8 +798,12 @@ def _mono() -> bool:
     return GROUP_MONO_VALUES and PLAIN_EMOJI.get()
 
 
+DOTS = "· " * 13 + "·"      # точки-разделитель подразделов (моно: нажатие копирует)
+
+
 def _gap() -> str:
-    return "<p>&nbsp;</p>"
+    """Разделитель подразделов: ряд точек в <code>, как в боте боссов."""
+    return f"<p><code>{DOTS}</code></p>"
 
 
 def _kind_icon(kind: str) -> str:
@@ -833,7 +837,7 @@ def result_block(a: dict) -> str:
     ]
     return (
         _tree(rows, "Содержимое")
-        + f"<blockquote><i>{a['desc']}</i></blockquote>"
+        + f"<blockquote><i>{a['desc']}</i></blockquote>" + _gap()
         + _tree(_bonus_rows(a["bonus"]), "Бонус")
     )
 
@@ -1160,7 +1164,7 @@ def main_html(user: dict, with_image: bool = False) -> str:
     return (
         f"{_image(with_image)}"
         f"<p><b>{_em(EXPLORE_EMOJI)} ИССЛЕДОВАТЕЛИ</b></p>"
-        "<blockquote><i>Отправляй отряды в экспедиции за добычей и артефактами.</i></blockquote>"
+        "<blockquote><i>Отправляй отряды в экспедиции за добычей и артефактами.</i></blockquote>" + _gap()
         + _tree(squad, f"{g['icon']} {g['name']}")
         + (f"<p>{hint}</p>" if hint else "")
         + _gap()
@@ -1201,7 +1205,7 @@ def sel_html(user: dict, with_image: bool = False) -> str:
     return (
         f"{_image(with_image)}"
         f"<p><b>{_em(EM_SQUADS)} ВЫБОР ОТРЯДА</b></p>"
-        "<blockquote><i>Выбранный отряд будет главным в лагере.</i></blockquote>"
+        "<blockquote><i>Выбранный отряд будет главным в лагере.</i></blockquote>" + _gap()
         + _p(f"<b>Сейчас: {g['icon']} {g['name']}</b>", "<i>Зелёная кнопка — текущий отряд.</i>")
     )
 
@@ -1228,7 +1232,7 @@ def list_html(user: dict, page: int = 0, with_image: bool = False) -> str:
     return (
         f"{_image(with_image)}"
         f"<p><b>{_em(EM_HIRE)} НАЙМ ОТРЯДОВ</b> · стр. {page + 1}/{_pages()}</p>"
-        f"<blockquote><i>{random.choice(SCENES)}</i></blockquote>"
+        f"<blockquote><i>{random.choice(SCENES)}</i></blockquote>" + _gap()
         + _p("<i>Выше ранг: богаче добыча и чаще артефакты. Нажми на отряд, чтобы узнать больше.</i>")
         + _p(
             f"<b>{_info()} Монеты: {_num(user['coins'])} {_coin()}</b>",
@@ -1292,7 +1296,7 @@ def group_html(user: dict, gi: int, with_image: bool = False) -> str:
     head = (
         f"{_image(with_image)}"
         f"<p><b>{g['icon']} {g['name'].upper()}</b></p>"
-        f"<blockquote><i>{g['desc']}</i></blockquote>"
+        f"<blockquote><i>{g['desc']}</i></blockquote>" + _gap()
         + _tree(stats, "Отряд", mono=_mono())
         + _gap()
         + _tree(_loot_rows(gi, h0, lvl, bon), f"Добыча за {h0} ч", mono=_mono())
@@ -1405,7 +1409,7 @@ def times_html(user: dict, with_image: bool = False) -> str:
     return (
         f"{_image(with_image)}"
         f"<p><b>{_em(EM_TIME)} ВРЕМЯ ЭКСПЕДИЦИЙ</b></p>"
-        "<blockquote><i>Чем дольше путь, тем больше добыча. Открывай маршруты по порядку.</i></blockquote>"
+        "<blockquote><i>Чем дольше путь, тем больше добыча. Открывай маршруты по порядку.</i></blockquote>" + _gap()
         + _tree(rows, "Маршруты")
         + _gap()
         + tail
@@ -1469,10 +1473,10 @@ def loot_html(gi: int, hours: int, loot: dict, art, is_new: bool, dup: int, info
     text = (
         f"{_image(with_image)}"
         f"<p><b>{g['icon']} {g['name'].upper()} · ДОБЫЧА</b></p>"
-        f"<blockquote><i>{random.choice(RETURN_LINES)}</i></blockquote>"
+        f"<blockquote><i>{random.choice(RETURN_LINES)}</i></blockquote>" + _gap()
     )
     if event:
-        text += _p(f"<b>📖 {event['name']}</b>", f"<i>{event['text']}</i>")
+        text += _p(f"<b>📖 {event['name']}</b>", f"<i>{event['text']}</i>") + _gap()
     text += _tree(rows, "Трофеи")
     summary = [(f"{_em(EM_EXPED)} Экспедиция", f"{hours} ч"), ("✨ Опыт", f"+{loot['xp']}")]
     if info["level_bonus"]:
@@ -1488,7 +1492,7 @@ def loot_html(gi: int, hours: int, loot: dict, art, is_new: bool, dup: int, info
             summary.append(_bonus_row(kind, pct, _kind_icon(kind) if kind == "art" else "🎒"))
     text += _gap() + _tree(summary, "Итоги")
     if art is not None:
-        text += _p(f"<b>{_em(EM_ART)} НАЙДЕН АРТЕФАКТ!</b>") + result_block(art)
+        text += _gap() + _p(f"<b>{_em(EM_ART)} НАЙДЕН АРТЕФАКТ!</b>") + result_block(art)
         if is_new:
             text += _p("<i>Он уже в разделе «🎒 Артефакты».</i>")
         else:
@@ -1525,7 +1529,7 @@ def arts_html(user: dict, with_image: bool = False) -> str:
     return (
         f"{_image(with_image)}"
         f"<p><b>🎒 АРТЕФАКТЫ</b> · занято {len(worn)}/{SLOTS}</p>"
-        "<blockquote><i>Надень до трёх: их бонусы складываются.</i></blockquote>"
+        "<blockquote><i>Надень до трёх: их бонусы складываются.</i></blockquote>" + _gap()
         + _tree(slots, "Слоты")
         + _gap()
         + summary
@@ -1607,7 +1611,7 @@ def alist_html(user: dict, with_image: bool = False, page: int = 0) -> str:
             blocks.append(f"<b>{_tier_icon(tier)} {plural}</b><br>" + "<br>".join(names))
     page_line = f"<p><i>Страница {page + 1} из {pages}</i></p>" if pages > 1 else ""
     return (head + page_line
-            + "<blockquote><i>Нажми на значок, чтобы надеть или снять.</i></blockquote>"
+            + "<blockquote><i>Нажми на значок, чтобы надеть или снять.</i></blockquote>" + _gap()
             + _gap()
             + "<blockquote expandable>" + "<br><br>".join(blocks) + "</blockquote>")
 
@@ -1647,7 +1651,7 @@ def art_item_html(user: dict, key: str, with_image: bool = False) -> str:
         f"{_image(with_image)}"
         f"<p><b>{a['icon']} {a['name'].upper()}</b><br>"
         f"{_tier_icon(a['tier'])} {a['tier']} артефакт</p>"
-        f"<blockquote><i>{a['desc']}</i></blockquote>"
+        f"<blockquote><i>{a['desc']}</i></blockquote>" + _gap()
         + _tree(_bonus_rows(a["bonus"]), "Бонус")
         + _gap()
         + _tree(state, "Состояние")
