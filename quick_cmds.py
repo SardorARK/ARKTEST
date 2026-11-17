@@ -102,6 +102,11 @@ GROUP_REDIRECT: dict[tuple[str, str], tuple[str, str]] = {
         f"{_emoji(ARENA_EMOJI)} <b>Арена</b>\n\n"
         "<i>В чате арена не открывается. Нажми кнопку, и она откроется в личных сообщениях с ботом.</i>",
     ),
+    ("cb", "me:open"): (
+        "me",
+        "<b>Профиль</b>\n\n"
+        "<i>В чате профиль не открывается. Нажми кнопку, и он откроется в личных сообщениях с ботом.</i>",
+    ),
     ("cb", "menu:boss"): (
         "boss",
         f"{_emoji(BOSS_EMOJI)} <b>Боссы</b>\n\n"
@@ -137,10 +142,10 @@ REDIRECT_COOLDOWN = 5.0   # секунд: чтобы повторы в чате 
 # Ссылка t.me/бот?start=ПАРАМЕТР в личке -> какой раздел открыть
 DEEP_LINKS: dict[str, tuple[str, str]] = {
     "menu": ("text", "Меню"), "boss": ("cb", "menu:boss"), "arena": ("text", "Арена"),
-    "pet": ("cb", "menu:pet"),
+    "pet": ("cb", "menu:pet"), "me": ("cb", "me:open"),
     "ug": ("text", "Шахта"), "cases": ("cb", "menu:cases"), "donate": ("cb", "menu:donate"),
 }
-_START_RE = re.compile(r"^/start(?:@(\w+))?\s+(menu|boss|arena|pet|ug|cases|donate)\s*$", re.IGNORECASE)
+_START_RE = re.compile(r"^/start(?:@(\w+))?\s+(menu|boss|arena|pet|ug|cases|donate|me)\s*$", re.IGNORECASE)
 
 # Короткая карточка питомца в группе (уровень, характеристики, кнопка «Перейти»).
 # Функцию ставит main.py: quick_cmds.pet_group_card = ...; она возвращает False, если карточку
