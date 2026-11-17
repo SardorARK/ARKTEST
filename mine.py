@@ -120,7 +120,7 @@ START_MINER = 0            # тип сотрудника, который выд�
 # Кастомные эмодзи: (id, запасной обычный эмодзи)
 MINE_EMOJI = ("5264895611517300926", "🏦")     # банк
 PICK_EMOJI = ("5445353829304387411", "💳")     # карточка
-INCOME_EMOJI = ("5202018746297767789", "🪙")  # доход
+INCOME_EMOJI = ("5449418135381759397", "🏵")  # доход: монета бота
 STORAGE_EMOJI = ("5854908544712707500", "📦")  # склад
 START_EMOJI = ("5906852613629941703", "🟢")    # кнопка «Запустить»
 STOP_EMOJI = ("5907027122446145395", "🔴")     # кнопка «Остановить»
@@ -555,9 +555,12 @@ def _image(with_image: bool) -> str:
     return '<img src="tg://photo?id=pet"/>' if with_image else ""
 
 
+DOTS = "·" * 25      # точки-разделитель подразделов (моно: нажатие копирует)
+
+
 def _gap() -> str:
-    """Пустая строка-отступ между блоками."""
-    return "<p>&nbsp;</p>"
+    """Разделитель между блоками: ряд точек в <code>, как в «Исследователях»."""
+    return f"<p><code>{DOTS}</code></p>"
 
 
 def _note(text: str) -> str:
@@ -606,6 +609,7 @@ def mine_html(user_id: int, with_image: bool = False) -> str:
         f"<p><b>{_mine()} БАНК</b></p>"
         "<blockquote><i>Запусти банк, и сотрудники будут приносить монеты, "
         "даже пока тебя нет рядом.</i></blockquote>"
+        + _gap()
         + _tree(state_rows, "Состояние")
         + _gap()
         + _tree(farm_rows, "Хозяйство")
@@ -640,6 +644,7 @@ def pick_card_html(user_id: int, i: int, with_image: bool = False) -> str:
         f"{_image(with_image)}"
         f"<p><b>{p['name'].upper()}</b></p>"
         f"<blockquote><i>{p['desc']}</i></blockquote>"
+        + _gap()
         + _tree(stats, "Характеристики")
         + _gap()
         + _tree(have, "Твой запас")
@@ -658,6 +663,7 @@ def miners_html(user_id: int, with_image: bool = False) -> str:
         f"{_image(with_image)}"
         f"<p><b>👔 СОТРУДНИКИ</b></p>"
         "<blockquote><i>У каждого уровня сотрудников свой доход, цена и лимит.</i></blockquote>"
+        + _gap()
         + _tree(summary, "Итого")
     )
 
@@ -803,6 +809,7 @@ def arts_html(user_id: int, with_image: bool = False) -> str:
         f"<b>занято {len(worn)}/{MINE_SLOTS}</b></p>"
         "<blockquote><i>Артефакты усиливают банк. Надень до трёх, "
         "и их бонусы сложатся.</i></blockquote>"
+        + _gap()
         + _tree(slots, "Слоты")
         + _gap()
         + summary
@@ -902,6 +909,7 @@ def art_card_html(user_id: int, i: int, with_image: bool = False) -> str:
         f"<p><b>{_aicon(a)} {a['name'].upper()}</b><br>&nbsp;<br>"
         f"<b>{_tier_icon(a['tier'])} {a['tier']} артефакт банка</b></p>"
         f"<blockquote><i>{a['desc']}</i></blockquote>"
+        + _gap()
         + _tree(_art_rows(a["bonus"]), "Бонус")
         + _gap()
         + _tree(state, "Состояние")
@@ -919,6 +927,7 @@ def result_block(a: dict) -> str:
     return (
         _tree(rows, "Содержимое")
         + f"<blockquote><i>{a['desc']}</i></blockquote>"
+        + _gap()
         + _tree(_art_rows(a["bonus"]), "Бонус")
     )
 
