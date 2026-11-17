@@ -436,7 +436,7 @@ _reward_boost = None          # необязательно: user -> прибав
 _show_rich_card = None
 _send_rich_card = None
 _base_custom_emoji = None     # настоящая функция из main.py; в тексты идёт через _custom_emoji ниже
-_COIN = ("5449418135381759397", "🏵")
+_COIN = (None, "🏵")
 _INFO = ("5334544901428229844", "ℹ️")
 _BACK_ID: str | None = None
 _MEAT = "🥩"
@@ -523,7 +523,7 @@ COIN_PLAIN = "🏵"          # обычный эмодзи монеты: в гр
 
 
 def _coin() -> str:
-    return _custom_emoji((_COIN[0], COIN_PLAIN))
+    return COIN_PLAIN      # монета всегда обычным эмодзи 🏵
 
 
 def _info() -> str:
