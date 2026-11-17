@@ -1853,7 +1853,7 @@ PLVL_KEY = "plvl"
 def player_level_cmd_html(user_id: int) -> str:
     user = get_user(user_id)
     level = player_level(user)
-    head = f"<p><b>Уровень {level}</b></p>"
+    head = f"<p><b>⭐️ Уровень: {level}</b></p>" + GAP   # пустая строка: одинаково на телефоне и на ПК
     if level >= PLAYER_MAX_LEVEL:
         return (
             head
@@ -1884,9 +1884,9 @@ def player_level_cmd_kb(user_id: int) -> InlineKeyboardMarkup:
     rows = []
     if user is not None and player_level(user) < PLAYER_MAX_LEVEL:
         rows.append([InlineKeyboardButton(
-            text="Повысить",
+            text="✨ Повысить",
             callback_data=f"plc:do:{user_id}",
-            style=ButtonStyle.DANGER if player_lack(user) else ButtonStyle.SUCCESS,
+            style=ButtonStyle.SUCCESS,
         )])
     rows.append([InlineKeyboardButton(text="Закрыть", callback_data="me:close", style=ButtonStyle.DANGER)])
     return InlineKeyboardMarkup(inline_keyboard=rows)
