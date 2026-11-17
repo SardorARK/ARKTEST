@@ -326,7 +326,7 @@ LEVEL_EMOJI = ("6028435952299413210", "ℹ")   # перед «Необходим
 LOCK_EMOJI_ID = "5296369303661067030"        # замок на кнопке закрытой шахты
 UG_EMOJI = ("5461047575379466857", "⛏")      # как у шахты; поменяй на свой id при желании
 DIG_EMOJI = ("5197371802136892976", "⛏")     # «Копаний» в характеристиках
-LOOT_EMOJI = ("5449418135381759397", "🏵")    # «Добыча» в характеристиках: монета бота
+LOOT_EMOJI = (None, "🏵")    # «Добыча» в характеристиках: обычный эмодзи монеты
 LOCK_EMOJI = (LOCK_EMOJI_ID, "🔒")
 TIME_EMOJI = ("5891211339170326418", "⌛️")    # песочные часы: время запуска
 BOX_EMOJI_ID = "5854908544712707500"         # кнопка «Забрать»
@@ -1174,8 +1174,8 @@ def time_kb(user_id: int) -> InlineKeyboardMarkup:
 def bag_kb(user_id: int) -> InlineKeyboardMarkup:
     _, ug = load(user_id)
     value = bag_value(ug)
-    sell = _btn(f"Продать всё (+{short(value)})" if value else "Продать всё", "ug:sell",
-                emoji_id=D.COIN_EMOJI[0])
+    sell = _btn(f"{D.COIN_EMOJI[1]} Продать всё (+{short(value)})" if value else f"{D.COIN_EMOJI[1]} Продать всё",
+                "ug:sell")   # монета обычным эмодзи в тексте кнопки
     return InlineKeyboardMarkup(inline_keyboard=[[sell], _back("ug:open")])
 
 
