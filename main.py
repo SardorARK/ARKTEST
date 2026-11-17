@@ -204,7 +204,7 @@ def pet_change_price(user: dict) -> int:
     return PET_CHANGE_PRICES[min(n, len(PET_CHANGE_PRICES) - 1)]
 
 
-COIN_EMOJI = ("5433631991675244306", "🤑")  # валюта бота: монеты
+COIN_EMOJI = ("5449418135381759397", "🏵")  # валюта бота: монеты (новая монета; обычный запасной эмодзи 🏵)
 MEAT_EMOJI = "🥩"
 INFO_EMOJI = ("5334544901428229844", "ℹ️")
 FRUIT_EMOJI = "🥭"
