@@ -1433,6 +1433,22 @@ async def send_pet_short(bot: Bot, chat_id: int, user_id: int, url: str) -> bool
 
 
 quick_cmds.pet_group_card = send_pet_short   # «пет», «питомец», «я» в группе (quick_cmds.py)
+
+
+async def send_profile_group(bot: Bot, chat_id: int, user_id: int, url: str) -> bool:
+    """Команда «я» в группе: тот же текст профиля, что в боте (с ником, уровнем и кастомными эмодзи),
+    только кнопка одна: «Перейти» в личный чат с ботом. False: у игрока нет питомца."""
+    if get_user(user_id) is None:
+        return False
+    await send_rich_card(
+        bot, chat_id, "player",
+        lambda with_image: player_profile_html(user_id, with_image),
+        pet_short_kb(url),
+    )
+    return True
+
+
+quick_cmds.group_cards[("cb", "me:open")] = ("me", lambda *a: send_profile_group(*a))   # «я», «проф», «профиль» в группе
 # «шахта» и «кейс» в группе: текст раздела и кнопка «Перейти» (quick_cmds.py)
 quick_cmds.group_cards[("text", "Шахта")] = ("ug", lambda *a: underground.send_group_card(*a))
 quick_cmds.group_cards[("cb", "menu:donate")] = ("donate", lambda *a: donate.send_group_card(*a))
