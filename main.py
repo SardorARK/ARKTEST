@@ -1468,7 +1468,7 @@ _MSG_STATE_MAX = 20000
 # Экраны из LIVE_EDIT_KEYS обновляются часто (кадры боя, поиск), их удалять и слать заново нельзя:
 # упрёмся в лимиты Telegram, поэтому они всегда правятся на месте.
 RESEND_IN_GROUPS = True
-LIVE_EDIT_KEYS = {"arena_battle", "arena_find", "player", "exrn", "plvl"} | set(cases.IMG_TARGETS) | {underground.NOIMG_KEY, "workshop"}   # шахта (без картинок) и мастерская: всегда правка на месте
+LIVE_EDIT_KEYS = {"arena_battle", "arena_find", "player", "exrn", "plvl"} | {mine.img_key(_k) for _k in mine.SCREENS}   # «Банк»: всегда правка на месте | set(cases.IMG_TARGETS) | {underground.NOIMG_KEY, "workshop"}   # шахта (без картинок) и мастерская: всегда правка на месте
 # «player»: профиль, «exrn»: исследователи, ключи cases.IMG_TARGETS: «Сокровищница» — всегда правятся на месте
 
 
