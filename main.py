@@ -1468,7 +1468,7 @@ _MSG_STATE_MAX = 20000
 # Экраны из LIVE_EDIT_KEYS обновляются часто (кадры боя, поиск), их удалять и слать заново нельзя:
 # упрёмся в лимиты Telegram, поэтому они всегда правятся на месте.
 RESEND_IN_GROUPS = True
-LIVE_EDIT_KEYS = {"arena_battle", "arena_find", "player", "exrn"} | set(cases.IMG_TARGETS) | {underground.NOIMG_KEY, "workshop"}   # шахта (без картинок) и мастерская: всегда правка на месте
+LIVE_EDIT_KEYS = {"arena_battle", "arena_find", "player", "exrn", "plvl"} | set(cases.IMG_TARGETS) | {underground.NOIMG_KEY, "workshop"}   # шахта (без картинок) и мастерская: всегда правка на месте
 # «player»: профиль, «exrn»: исследователи, ключи cases.IMG_TARGETS: «Сокровищница» — всегда правятся на месте
 
 
@@ -1843,6 +1843,103 @@ gift.install(dp)         # запоминает ники игроков для �
 # Текст «Шахта» (быстрая команда «шахта») открывает раздел шахты. Ловим его ДО остальных обработчиков
 dp.message.outer_middleware(underground.MenuButtonMiddleware())
 transfer.install(dp)        # «перевести» / «перечислить»: раньше остальных роутеров (transfer.py)
+# ---------- Команда «уровень» / «ур»: прокачка уровня игрока ----------
+# Карточка без ника и без кастомных эмодзи (обычные эмодзи, поэтому правка на месте их не теряет, даже в группе).
+# «Повысить» обновляет это же сообщение. Кнопки доступны только тому, кто вызвал команду (id в callback_data).
+# Профиль в боте («Уровень» в профиле) остаётся как был: с ником и уровнем.
+PLVL_KEY = "plvl"
+
+
+def player_level_cmd_html(user_id: int) -> str:
+    user = get_user(user_id)
+    level = player_level(user)
+    head = f"<p><b>Уровень {level}</b></p>"
+    if level >= PLAYER_MAX_LEVEL:
+        return (
+            head
+            + "<blockquote><i>Ты достиг вершины: максимальный уровень игрока. "
+            "Дальше прокачивать некуда, ты легенда!</i></blockquote>"
+        )
+    need_min, need_coins = player_upgrade_cost(level)
+    needs = (
+        (f"{MINERAL_EMOJI} Минералы", player_minerals(user), need_min),
+        (f"{COIN_EMOJI[1]} Монеты", user["coins"], need_coins),
+    )
+    rows = "<br>&nbsp;<br>".join(
+        f"{DONE_EMOJI[1] if have >= need else '❌'} | "
+        f"<b>{label}:</b> {_fmt(have)} / {_fmt(need)}<br>{_simple_bar(have, need)}"
+        for label, have, need in needs
+    )
+    lack = player_lack(user)
+    status = (
+        "<i>Всё готово, можно повышать уровень!</i>"
+        if not lack
+        else f"<i>Не хватает {escape(', '.join(lack))}.</i>"
+    )
+    return head + f"<p>{rows}<br>{status}</p>"
+
+
+def player_level_cmd_kb(user_id: int) -> InlineKeyboardMarkup:
+    user = get_user(user_id)
+    rows = []
+    if user is not None and player_level(user) < PLAYER_MAX_LEVEL:
+        rows.append([InlineKeyboardButton(
+            text="Повысить",
+            callback_data=f"plc:do:{user_id}",
+            style=ButtonStyle.DANGER if player_lack(user) else ButtonStyle.SUCCESS,
+        )])
+    rows.append([InlineKeyboardButton(text="Закрыть", callback_data="me:close", style=ButtonStyle.DANGER)])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+@dp.message(F.text.regexp(r"(?i)^\s*/?(уровень|ур)(@\w+)?\s*$"))
+async def cmd_player_level(message: Message):
+    uid = message.from_user.id
+    if get_user(uid) is None:
+        await message.answer("Сначала выбери питомца: /start")
+        return
+    await send_rich_card(
+        message.bot, message.chat.id, PLVL_KEY,
+        lambda with_image: player_level_cmd_html(uid),
+        player_level_cmd_kb(uid),
+    )
+
+
+@dp.callback_query(F.data.startswith("plc:do:"))
+async def on_player_level_cmd(callback: CallbackQuery):
+    try:
+        owner = int((callback.data or "").split(":")[2])
+    except (IndexError, ValueError):
+        await callback.answer()
+        return
+    if callback.from_user.id != owner:
+        await callback.answer("Это карточка другого игрока. Вызови свою командой «ур».", show_alert=True)
+        return
+    user = get_user(owner)
+    if user is None:
+        await callback.answer("Сначала выбери питомца: /start", show_alert=True)
+        return
+    level = player_level(user)
+    if level >= PLAYER_MAX_LEVEL:
+        await callback.answer("Достигнут максимальный уровень", show_alert=True)
+        return
+    lack = player_lack(user)
+    if lack:
+        await callback.answer("Не хватает " + ", ".join(lack), show_alert=True)
+        return
+    need_min, need_coins = player_upgrade_cost(level)     # проверка и списание без await между ними
+    user[MINERALS_FIELD] = player_minerals(user) - need_min
+    user["coins"] -= need_coins
+    user["plevel"] = level + 1
+    save_users()
+    await callback.answer(f"Уровень игрока повышен до {level + 1}!", show_alert=True)
+    await show_rich_card(                                  # то же сообщение обновляется на месте
+        callback, PLVL_KEY,
+        lambda with_image: player_level_cmd_html(owner),
+        player_level_cmd_kb(owner),
+    )
+
+
 workshop_sets.install(dp)   # команды наборов - раньше всех, чтобы их ничто не перехватило (workshop_sets.py)
 quick_cmds.install(dp)   # быстрые команды: «шахта», «/босс», «арена» и т.д. (quick_cmds.py)
 
