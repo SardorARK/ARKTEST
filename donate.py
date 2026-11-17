@@ -1125,7 +1125,7 @@ LAVKA_PACKS: dict[str, dict] = {
     "res": {
         "name": "Пак ресурсов", "icon": "📦", "price": 129, "per_player": 2, "global": None, "weight": 3,
         "tagline": "Всё для крафта в одной коробке: по сто штук каждого материала.",
-        "items": [("res", ("волокн",), 100), ("res", ("бревн",), 100), ("res", ("лоз",), 100),
+        "items": [("res", ("волокн",), 100), ("res", ("древес",), 100), ("res", ("лоз",), 100),
                   ("res", ("панцир",), 100), ("res", ("глин",), 100)],
     },
     "royal": {
@@ -1280,14 +1280,28 @@ def _item_line(kind: str, ref, n) -> str:
     return f"{label}: <b>×{_amt(n)}</b>" if kind == "set" else f"{label}: <b>{_amt(n)}</b>"
 
 
+_pack_warned: set = set()
+
+
+def _pack_missing(key: str) -> list:
+    """Что из содержимого пака не найдено в игре (пусто - пак можно продавать)."""
+    sets = getattr(_sets_mod(), "SETS", None) or {}
+    miss = []
+    for kind, ref, _n in LAVKA_PACKS[key]["items"]:
+        if kind == "set" and ref not in sets:
+            miss.append(f"набор «{ref}»")
+        if kind == "res" and _res_key(ref) is None:
+            miss.append(f"ресурс «{' '.join(ref)}»")
+    return miss
+
+
 def _pack_ready(key: str) -> bool:
     """Паком можно торговать, только если все его наборы и ресурсы существуют в игре."""
-    for kind, ref, _n in LAVKA_PACKS[key]["items"]:
-        if kind == "set" and ref not in (getattr(_sets_mod(), "SETS", None) or {}):
-            return False
-        if kind == "res" and _res_key(ref) is None:
-            return False
-    return True
+    miss = _pack_missing(key)
+    if miss and key not in _pack_warned:        # одна запись в лог на пак: чтобы было видно, чего не хватает
+        _pack_warned.add(key)
+        log.warning("Лавка: пак «%s» недоступен, не найдено: %s", key, ", ".join(miss))
+    return not miss
 
 
 def _grant_pack(user: dict, key: str) -> None:
