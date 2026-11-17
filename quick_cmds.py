@@ -102,11 +102,6 @@ GROUP_REDIRECT: dict[tuple[str, str], tuple[str, str]] = {
         f"{_emoji(ARENA_EMOJI)} <b>Арена</b>\n\n"
         "<i>В чате арена не открывается. Нажми кнопку, и она откроется в личных сообщениях с ботом.</i>",
     ),
-    ("cb", "me:open"): (
-        "me",
-        "<b>Профиль</b>\n\n"
-        "<i>В чате профиль не открывается. Нажми кнопку, и он откроется в личных сообщениях с ботом.</i>",
-    ),
     ("cb", "menu:boss"): (
         "boss",
         f"{_emoji(BOSS_EMOJI)} <b>Боссы</b>\n\n"
@@ -118,6 +113,11 @@ GROUP_REDIRECT: dict[tuple[str, str], tuple[str, str]] = {
 # (у игрока нет питомца), отвечаем обычным текстом с кнопкой «Перейти».
 group_cards: dict[tuple[str, str], tuple[str, Callable[..., Awaitable[bool]]]] = {}
 GROUP_FALLBACK: dict[tuple[str, str], tuple[str, str]] = {
+    ("cb", "me:open"): (
+        "me",
+        "<b>Профиль</b>\n\n"
+        "<i>В чате профиль не открывается. Нажми кнопку, и он откроется в личных сообщениях с ботом.</i>",
+    ),
     ("text", "Шахта"): (
         "ug",
         f"{_emoji(MINE_EMOJI)} <b>Шахта</b>\n\n"
