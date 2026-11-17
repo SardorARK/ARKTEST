@@ -27,6 +27,7 @@
 import logging
 import random
 import time
+from contextvars import ContextVar
 from types import SimpleNamespace
 
 from aiogram import F, Router
@@ -42,6 +43,15 @@ router = Router()
 
 # Заполняется в setup()
 D = SimpleNamespace()
+
+# True, пока строится экран для группового чата: в тексте обычные эмодзи вместо кастомных, а верхняя
+# кнопка «Назад» заменена на «Закрыть». В личке с ботом всё как раньше. Кнопки (иконки и тексты) не трогаем.
+IN_CHAT: ContextVar[bool] = ContextVar("mine_in_chat", default=False)
+
+
+def _ce(pair) -> str:
+    """Кастомный эмодзи для текста экрана; в чате вместо него обычный (запасной) эмодзи."""
+    return pair[1] if IN_CHAT.get() else D.custom_emoji(pair)
 
 
 def setup(**deps) -> None:
@@ -518,27 +528,27 @@ def _button(data: str, label: str, emoji: str = "", style: str = "success") -> s
 
 
 def _coin() -> str:
-    return D.custom_emoji(D.COIN_EMOJI)
+    return _ce(D.COIN_EMOJI)
 
 
 def _info() -> str:
-    return D.custom_emoji(D.INFO_EMOJI)
+    return _ce(D.INFO_EMOJI)
 
 
 def _mine() -> str:
-    return D.custom_emoji(MINE_EMOJI)
+    return _ce(MINE_EMOJI)
 
 
 def _pick() -> str:
-    return D.custom_emoji(PICK_EMOJI)
+    return _ce(PICK_EMOJI)
 
 
 def _income() -> str:
-    return D.custom_emoji(INCOME_EMOJI)
+    return _ce(INCOME_EMOJI)
 
 
 def _storage() -> str:
-    return D.custom_emoji(STORAGE_EMOJI)
+    return _ce(STORAGE_EMOJI)
 
 
 def _image(with_image: bool) -> str:
@@ -566,20 +576,20 @@ def mine_html(user_id: int, with_image: bool = False) -> str:
         left = max(0.0, m["run_end"] - now)
         done = (now - m["run_start"]) / max(1.0, m["run_end"] - m["run_start"])
         state_rows = [
-            (f"{_mine()} Банк", f"Работает {D.custom_emoji(START_EMOJI)}"),
-            (f"{D.custom_emoji(PROGRESS_EMOJI)} Прогресс", _bar(done)),
-            (f"{D.custom_emoji(TIMER_EMOJI)} До конца", fmt_dur(left)),
+            (f"{_mine()} Банк", f"Работает {_ce(START_EMOJI)}"),
+            (f"{_ce(PROGRESS_EMOJI)} Прогресс", _bar(done)),
+            (f"{_ce(TIMER_EMOJI)} До конца", fmt_dur(left)),
         ]
         wait = stop_wait_left(m)
         if wait > 0:
-            state_rows.append((f"{D.custom_emoji(STOP_EMOJI)} Остановка", f"через {fmt_dur(wait)}"))
+            state_rows.append((f"{_ce(STOP_EMOJI)} Остановка", f"через {fmt_dur(wait)}"))
         else:
-            state_rows.append((f"{D.custom_emoji(STOP_EMOJI)} Остановка", "доступна"))
+            state_rows.append((f"{_ce(STOP_EMOJI)} Остановка", "доступна"))
         action = _button("mine:stop", "Остановить банк", D.custom_emoji(STOP_EMOJI), "danger")
     else:
         state_rows = [
-            (f"{_mine()} Банк", f"Стоит {D.custom_emoji(STOP_EMOJI)}"),
-            (f"{D.custom_emoji(HOURGLASS_EMOJI)} Длительность запуска", f"{fmt_hours(run_hours(m, user))} ч"),
+            (f"{_mine()} Банк", f"Стоит {_ce(STOP_EMOJI)}"),
+            (f"{_ce(HOURGLASS_EMOJI)} Длительность запуска", f"{fmt_hours(run_hours(m, user))} ч"),
         ]
         action = _button("mine:start", f"Запустить на {fmt_hours(run_hours(m, user))} ч", D.custom_emoji(START_EMOJI))
 
@@ -601,7 +611,7 @@ def mine_html(user_id: int, with_image: bool = False) -> str:
         + _tree(farm_rows, "Хозяйство")
         + _gap()
         + action
-        + _button("mine:collect", f"Собрать ({fmt(m['stored'])})", _coin())
+        + _button("mine:collect", f"Собрать ({fmt(m['stored'])})", D.custom_emoji(D.COIN_EMOJI))
     )
 
 
@@ -618,12 +628,12 @@ def pick_card_html(user_id: int, i: int, with_image: bool = False) -> str:
     user, m = load(user_id)
     p = PICKAXES[i]
     stats = [
-        (f"{D.custom_emoji(MULT_EMOJI)} Множитель дохода", fmt_mult(p["mult"])),
+        (f"{_ce(MULT_EMOJI)} Множитель дохода", fmt_mult(p["mult"])),
         (f"{_coin()} Цена", fmt(pick_price(m, i))),
     ]
     have = [
-        (f"{D.custom_emoji(BOUGHT_EMOJI)} Куплено", str(picks_owned(m, i))),
-        (f"{D.custom_emoji(EQUIPPED_EMOJI)} Выдано сотрудникам", str(picks_equipped(m, i))),
+        (f"{_ce(BOUGHT_EMOJI)} Куплено", str(picks_owned(m, i))),
+        (f"{_ce(EQUIPPED_EMOJI)} Выдано сотрудникам", str(picks_equipped(m, i))),
         (f"{_storage()} Свободно", str(picks_free(m, i))),
     ]
     return (
@@ -634,7 +644,7 @@ def pick_card_html(user_id: int, i: int, with_image: bool = False) -> str:
         + _gap()
         + _tree(have, "Твой запас")
         + _gap()
-        + _button(f"mine:buy_pick:{i}:1", "Приобрести", _coin())
+        + _button(f"mine:buy_pick:{i}:1", "Приобрести", D.custom_emoji(D.COIN_EMOJI))
     )
 
 
@@ -752,12 +762,12 @@ def take_html(user_id: int, i: int, with_image: bool = False) -> str:
 
 
 def _tier_icon(tier: str) -> str:
-    return D.custom_emoji(TIERS[tier][0])
+    return _ce(TIERS[tier][0])
 
 
 def _aicon(a: dict) -> str:
     """Значок артефакта в тексте: кастомный, если задан, иначе обычный."""
-    return D.custom_emoji(a["emoji"]) if a.get("emoji") else a["icon"]
+    return _ce(a["emoji"]) if a.get("emoji") else a["icon"]
 
 
 def fmt_art_bonus(kind: str, pct: int) -> str:
@@ -766,7 +776,7 @@ def fmt_art_bonus(kind: str, pct: int) -> str:
 
 def _art_rows(bonuses: dict[str, int]) -> list[tuple[str, str]]:
     return [
-        (f"{D.custom_emoji(ART_KINDS[k][2])} {ART_KINDS[k][0]}", fmt_art_bonus(k, pct))
+        (f"{_ce(ART_KINDS[k][2])} {ART_KINDS[k][0]}", fmt_art_bonus(k, pct))
         for k, pct in bonuses.items()
     ]
 
@@ -930,6 +940,8 @@ def _pairs(buttons: list[InlineKeyboardButton]) -> list[list[InlineKeyboardButto
 
 
 def _back_row(data: str) -> list[InlineKeyboardButton]:
+    if IN_CHAT.get() and data == "earn:open":      # в чате выход из раздела: «Закрыть» удаляет сообщение
+        return [_btn("Закрыть", "me:close", None, ButtonStyle.DANGER)]
     return [_btn("Назад", data, D.BACK_EMOJI_ID, ButtonStyle.PRIMARY)]
 
 
@@ -1143,12 +1155,17 @@ async def _show(callback: CallbackQuery, key: str) -> None:
     Это делает D.show_rich_card из main.py (сравнивает фото экранов по img_key)."""
     uid = callback.from_user.id
     show = getattr(D, "show_rich_card", None)
-    if show is not None:
-        html, kb = SCREENS[key]
-        await show(
-            callback, img_key(key), lambda with_image: html(uid, with_image), kb(uid)
-        )
-        return
+    chat_type = getattr(getattr(callback.message, "chat", None), "type", "private")
+    token = IN_CHAT.set(chat_type != "private")
+    try:
+        if show is not None:
+            html, kb = SCREENS[key]
+            await show(
+                callback, img_key(key), lambda with_image: html(uid, with_image), kb(uid)
+            )
+            return
+    finally:
+        IN_CHAT.reset(token)
     try:
         await callback.message.delete()
     except Exception as e:  # сообщение могло уже пропасть
