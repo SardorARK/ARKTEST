@@ -1467,13 +1467,15 @@ def back_kb() -> InlineKeyboardMarkup:
 _MSG_STATE: "OrderedDict[tuple[int, int], tuple[str, str | None]]" = OrderedDict()
 _MSG_STATE_MAX = 20000
 
-# Кастомные эмодзи в группах: при правке сообщения (editMessageText) Telegram может заменять их
-# обычными, если у бота нет дополнительных юзернеймов на Fragment. Поэтому в группах и
-# супергруппах вместо правки на месте старое сообщение удаляется и отправляется новое.
-# Экраны из LIVE_EDIT_KEYS обновляются часто (кадры боя, поиск), их удалять и слать заново нельзя:
-# упрёмся в лимиты Telegram, поэтому они всегда правятся на месте.
-RESEND_IN_GROUPS = True
-LIVE_EDIT_KEYS = {"arena_battle", "arena_find", "player", "exrn"} | {mine.img_key(_k) for _k in mine.SCREENS}   # «Банк»: всегда правка на месте | set(cases.IMG_TARGETS) | {underground.NOIMG_KEY, "workshop"}   # шахта (без картинок) и мастерская: всегда правка на месте
+# Все экраны, и в личке и в группах, обновляются правкой на месте (удалять и слать заново не нужно).
+# Кастомные эмодзи в группах при правке сохраняются, если сообщение отправлено ОТВЕТОМ на команду игрока
+# (баг Telegram, см. send_rich_card), поэтому карточки в группах всегда идут ответом.
+# True: вернуть старое поведение (в группах удалять и слать новое сообщение).
+RESEND_IN_GROUPS = False
+LIVE_EDIT_KEYS = ({"arena_battle", "arena_find", "player", "exrn"}
+                  | {mine.img_key(_k) for _k in mine.SCREENS}           # «Банк»
+                  | set(cases.IMG_TARGETS)                              # «Сокровищница»
+                  | {underground.NOIMG_KEY, "workshop"})                # шахта (без картинок) и мастерская
 # «player»: профиль, «exrn»: исследователи, ключи cases.IMG_TARGETS: «Сокровищница» — всегда правятся на месте
 
 
@@ -1484,13 +1486,13 @@ ALWAYS_RESEND_KEYS: set[str] = set()
 # Экраны из LIVE_EDIT_KEYS, которые в группах всё же шлются заново (иначе пропадают кастомные эмодзи)
 # «exrn» здесь нет: тексты раздела в группе строятся с обычными эмодзи (exrn.PLAIN_EMOJI), поэтому он
 # обновляется правкой на месте
-GROUP_RESEND_LIVE_KEYS: set[str] = {"player"}   # в группе правятся на месте только если сообщение — ответ
+GROUP_RESEND_LIVE_KEYS: set[str] = set()   # работает только при RESEND_IN_GROUPS = True
 
 
 def _edit_in_place_ok(msg, key: str) -> bool:
     """Можно ли обновить сообщение правкой (а не удалять и слать новое).
-    В группах правка на месте допустима, только если сообщение отправлено ответом на команду игрока:
-    так кастомные эмодзи не пропадают при правках (см. send_rich_card). Не ответ: шлём заново."""
+    По умолчанию (RESEND_IN_GROUPS = False) правка на месте везде, в том числе в группах.
+    RESEND_IN_GROUPS = True: в группах правка только если сообщение отправлено ответом на команду игрока."""
     in_group = getattr(msg.chat, "type", "private") != "private"
     has_reply = getattr(msg, "reply_to_message", None) is not None
     if key in LIVE_EDIT_KEYS:
