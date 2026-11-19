@@ -1644,6 +1644,9 @@ async def _show_rich_card_impl(
     if not isinstance(msg, Message):
         # Кнопка на слишком старом сообщении: Telegram не отдаёт его целиком, просто шлём новое
         return await send_rich_card(callback.bot, callback.from_user.id, pet_key, build_html, reply_markup)
+    if quick_cmds.is_virtual(msg):
+        # быстрая команда без заглушки «⏳»: сразу отправляем сам экран новым сообщением
+        return await send_rich_card(callback.bot, msg.chat.id, pet_key, build_html, reply_markup)
     bot, chat_id = callback.bot, msg.chat.id
     cur = _MSG_STATE.get((chat_id, msg.message_id))
     holder_ok = (cur is None and not pet_images.get(pet_key) and getattr(msg, "text", None) == "⏳"
