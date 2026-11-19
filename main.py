@@ -49,6 +49,7 @@ from aiogram.types import (
     KeyboardButton,
     Message,
     ReplyKeyboardMarkup,
+    ReplyParameters,
 )
 
 from storage import ProcessLock, UserStore, atomic_write_json, ledger, read_json_safe
@@ -1578,9 +1579,17 @@ async def send_rich_card(
     pet_key: str,
     build_html,
     reply_markup: InlineKeyboardMarkup | None = None,
+    reply_to: int | None = None,
 ):
     """Отправляет rich-сообщение; если у питомца есть фото, ставит его сверху.
-    Возвращает отправленное сообщение (нужно «живым» окнам босса)."""
+    Возвращает отправленное сообщение (нужно «живым» окнам босса).
+
+    reply_to: id сообщения, на которое отправляем ответом. В группах это ОБЯЗАТЕЛЬНО для экранов, которые
+    потом правятся на месте: баг Telegram (tdlib/telegram-bot-api#904): editMessageText с rich_message в
+    группе превращает кастомные эмодзи в обычные, если исходное сообщение не было ответом на другое.
+    Если оно отправлено ответом, эмодзи при правках сохраняются."""
+    reply = (ReplyParameters(message_id=reply_to, allow_sending_without_reply=True)
+             if reply_to else None)
     closable = quick_cmds.CLOSE_MODE.get()
     if closable:
         reply_markup = _close_kb(reply_markup)
@@ -1588,7 +1597,8 @@ async def send_rich_card(
         try:
             rich, image = _rich_input(pet_key, build_html)
             msg = await bot.send_rich_message(
-                chat_id=chat_id, rich_message=rich, reply_markup=reply_markup
+                chat_id=chat_id, rich_message=rich, reply_markup=reply_markup,
+                reply_parameters=reply,
             )
             _remember(msg, "rich", image)
             if closable:
@@ -1600,12 +1610,22 @@ async def send_rich_card(
 
     rich, _ = _rich_input(pet_key, build_html, use_image=False)
     msg = await bot.send_rich_message(
-        chat_id=chat_id, rich_message=rich, reply_markup=reply_markup
+        chat_id=chat_id, rich_message=rich, reply_markup=reply_markup,
+        reply_parameters=reply,
     )
     _remember(msg, "rich", None)
     if closable:
         _mark_closable(msg)
     return msg
+
+
+def _group_reply_to(msg) -> int | None:
+    """В группе: id сообщения, на которое отвечает msg (команда игрока), иначе None.
+    Нужно, чтобы новая карточка тоже шла ответом (иначе правки в группе теряют кастомные эмодзи)."""
+    if getattr(msg.chat, "type", "private") == "private":
+        return None
+    parent = getattr(msg, "reply_to_message", None)
+    return parent.message_id if parent is not None else None
 
 
 async def show_rich_card(
@@ -1645,8 +1665,10 @@ async def _show_rich_card_impl(
         # Кнопка на слишком старом сообщении: Telegram не отдаёт его целиком, просто шлём новое
         return await send_rich_card(callback.bot, callback.from_user.id, pet_key, build_html, reply_markup)
     if quick_cmds.is_virtual(msg):
-        # быстрая команда без заглушки «⏳»: сразу отправляем сам экран новым сообщением
-        return await send_rich_card(callback.bot, msg.chat.id, pet_key, build_html, reply_markup)
+        # быстрая команда без заглушки «⏳»: сразу отправляем сам экран новым сообщением.
+        # В группе ответом на команду игрока: так кастомные эмодзи переживают правки (см. send_rich_card)
+        return await send_rich_card(callback.bot, msg.chat.id, pet_key, build_html, reply_markup,
+                                    reply_to=_group_reply_to(msg))
     bot, chat_id = callback.bot, msg.chat.id
     cur = _MSG_STATE.get((chat_id, msg.message_id))
     holder_ok = (cur is None and not pet_images.get(pet_key) and getattr(msg, "text", None) == "⏳"
@@ -1670,12 +1692,13 @@ async def _show_rich_card_impl(
             if "modified" in str(e).lower():
                 return msg
             logging.warning("Не удалось обновить сообщение на месте, шлю новое: %s", e)
+    reply_to = _group_reply_to(msg)       # до удаления: после него сообщение уже не прочитать
     try:
         await msg.delete()
     except TelegramAPIError:
         pass
     _MSG_STATE.pop((chat_id, msg.message_id), None)
-    return await send_rich_card(bot, chat_id, pet_key, build_html, reply_markup)
+    return await send_rich_card(bot, chat_id, pet_key, build_html, reply_markup, reply_to=reply_to)
 
 
 async def refresh_rich_card(
