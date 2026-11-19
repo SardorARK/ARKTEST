@@ -377,8 +377,10 @@ class QuickCommands(BaseMiddleware):
             reply = (ReplyParameters(message_id=msg.message_id, allow_sending_without_reply=True)
                      if target == "daily:claim:c" else None)
             if NO_PLACEHOLDER and target not in PLACEHOLDER_TARGETS:
+                # reply_to_message = команда игрока: main.py отправит экран ответом на неё (в группе
+                # это нужно, чтобы кастомные эмодзи не пропадали при правках, баг Telegram)
                 holder = _VirtualMessage(message_id=VIRTUAL_ID, date=msg.date, chat=msg.chat,
-                                         from_user=await bot.me()).as_(bot)
+                                         from_user=await bot.me(), reply_to_message=msg).as_(bot)
             else:
                 holder = await bot.send_message(msg.chat.id, "⏳", reply_parameters=reply)
         except TelegramAPIError:
