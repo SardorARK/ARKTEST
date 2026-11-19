@@ -1146,7 +1146,7 @@ def player_level_html(user_id: int, with_image: bool = False, mode: str = "") ->
         # абзацами и показывает конечную пустую строку, компьютер нет, поэтому лишнего нет
         f"<p>{rows}<br>{status}</p>"
         "<tg-button-row>"
-        f'<tg-button type="callback_data" data="{"me:lvlup" if mode == "me" else "plv:do"}" '
+        f'<tg-button type="callback_data" data="{ {"me": "me:lvlup", "cmd": "me:lvlupc"}.get(mode, "plv:do") }" '
         f'style="{"danger" if lack else "success"}">'
         f'{custom_emoji(PLAYER_UP_EMOJI)} Повысить</tg-button>'
         "</tg-button-row>"
@@ -1484,22 +1484,29 @@ ALWAYS_RESEND_KEYS: set[str] = set()
 # Экраны из LIVE_EDIT_KEYS, которые в группах всё же шлются заново (иначе пропадают кастомные эмодзи)
 # «exrn» здесь нет: тексты раздела в группе строятся с обычными эмодзи (exrn.PLAIN_EMOJI), поэтому он
 # обновляется правкой на месте
-GROUP_RESEND_LIVE_KEYS: set[str] = set()   # «player» тоже правится на месте: карточка идёт ответом на команду
+GROUP_RESEND_LIVE_KEYS: set[str] = {"player"}   # в группе правятся на месте только если сообщение — ответ
 
 
 def _edit_in_place_ok(msg, key: str) -> bool:
-    """Можно ли обновить сообщение правкой (а не удалять и слать новое)."""
+    """Можно ли обновить сообщение правкой (а не удалять и слать новое).
+    В группах правка на месте допустима, только если сообщение отправлено ответом на команду игрока:
+    так кастомные эмодзи не пропадают при правках (см. send_rich_card). Не ответ: шлём заново."""
+    in_group = getattr(msg.chat, "type", "private") != "private"
+    has_reply = getattr(msg, "reply_to_message", None) is not None
     if key in LIVE_EDIT_KEYS:
-        # «player» (профиль, команда «я») в группе: правка на месте превращает кастомные эмодзи
-        # в обычные (команда сперва шлёт заглушку «⏳» и правит её): там шлём заново, как остальные экраны
-        if key in GROUP_RESEND_LIVE_KEYS and RESEND_IN_GROUPS and getattr(msg.chat, "type", "private") != "private":
-            return False
+        if key in GROUP_RESEND_LIVE_KEYS and RESEND_IN_GROUPS and in_group:
+            return has_reply
         return True
     if key in ALWAYS_RESEND_KEYS:
         return False
     if not RESEND_IN_GROUPS:
         return True
-    return getattr(msg.chat, "type", "private") == "private"
+    return has_reply if in_group else True
+
+
+def _image_for(chat_id: int, pet_key: str) -> str | None:
+    """Фото экрана. В группах фото не показываем: экраны там без изображений, правятся на месте."""
+    return pet_images.get(pet_key) if chat_id > 0 else None
 
 
 def _remember(msg, kind: str, image: str | None) -> None:
@@ -1581,7 +1588,7 @@ async def send_rich_card(
     closable = quick_cmds.CLOSE_MODE.get()
     if closable:
         reply_markup = _close_kb(reply_markup)
-    if pet_images.get(pet_key):
+    if _image_for(chat_id, pet_key):
         try:
             rich, image = _rich_input(pet_key, build_html)
             msg = await bot.send_rich_message(
@@ -1659,15 +1666,17 @@ async def _show_rich_card_impl(
                                     reply_to=_group_reply_to(msg))
     bot, chat_id = callback.bot, msg.chat.id
     cur = _MSG_STATE.get((chat_id, msg.message_id))
-    holder_ok = (cur is None and not pet_images.get(pet_key) and getattr(msg, "text", None) == "⏳"
+    img = _image_for(chat_id, pet_key)    # в группе None: экран без фото
+    in_group = chat_id < 0
+    holder_ok = (cur is None and not img and getattr(msg, "text", None) == "⏳"
                  and _edit_in_place_ok(msg, pet_key))   # заглушка быстрой команды: правим её в нужный экран
     # бот не помнит сообщение (перезапуск), но экран из LIVE_EDIT_KEYS: всё равно пробуем правку на месте,
     # а если Telegram откажет (например, это сообщение с фото), ниже шлётся новое
-    unknown_ok = cur is None and pet_key in LIVE_EDIT_KEYS
+    unknown_ok = cur is None and (pet_key in LIVE_EDIT_KEYS or in_group)
     if (not force_new and (holder_ok or unknown_ok or (cur is not None and cur[0] == "rich"
-            and cur[1] == pet_images.get(pet_key))) and _edit_in_place_ok(msg, pet_key)):
+            and cur[1] == img)) and _edit_in_place_ok(msg, pet_key)):
         try:
-            rich, image = _rich_input(pet_key, build_html)
+            rich, image = _rich_input(pet_key, build_html, use_image=not in_group)
             edited = await bot.edit_message_text(
                 chat_id=chat_id,
                 message_id=msg.message_id,
@@ -1705,12 +1714,12 @@ async def refresh_rich_card(
     для нажатия кнопки «Обновить»."""
     cur = _MSG_STATE.get((chat_id, message_id))
     if require_state:
-        if cur is None or cur[0] != "rich" or cur[1] != pet_images.get(pet_key):
+        if cur is None or cur[0] != "rich" or cur[1] != _image_for(chat_id, pet_key):
             return False
     elif chat_id < 0 and RESEND_IN_GROUPS and pet_key not in LIVE_EDIT_KEYS:       # в группах экраны всегда шлются заново (кроме LIVE_EDIT_KEYS)
         return False
     try:
-        rich, image = _rich_input(pet_key, build_html)
+        rich, image = _rich_input(pet_key, build_html, use_image=chat_id > 0)
         await bot.edit_message_text(
             chat_id=chat_id, message_id=message_id, rich_message=rich, reply_markup=reply_markup
         )
@@ -2493,13 +2502,18 @@ def player_back_kb() -> InlineKeyboardMarkup:
     )
 
 
-async def open_player_profile(bot, chat_id: int, user_id: int, note: str = "") -> None:
-    """Новое сообщение «Профиль» (после смены ника)."""
-    await send_rich_card(
-        bot, chat_id, "player",
-        lambda with_image: player_profile_html(user_id, with_image, note),
-        player_profile_kb(),
-    )
+async def open_player_profile(bot, chat_id: int, user_id: int, note: str = "", message_id: int | None = None) -> None:
+    """«Профиль» после смены ника. message_id: карточка, которую можно обновить на месте (так в чате не появляется
+    лишнее сообщение); не получилось обновить: отправляется новое сообщение."""
+    def build(with_image: bool) -> str:
+        return player_profile_html(user_id, with_image, note)
+
+    if message_id:
+        kb = player_me_kb() if _is_closable(SimpleNamespace(chat=SimpleNamespace(id=chat_id), message_id=message_id)) \
+            else player_profile_kb()
+        if await refresh_rich_card(bot, chat_id, message_id, "player", build, kb, require_state=False):
+            return
+    await send_rich_card(bot, chat_id, "player", build, player_profile_kb())
 
 
 @dp.callback_query(F.data == "menu:player")
@@ -2642,44 +2656,70 @@ async def on_stat_cmd(callback: CallbackQuery):
     )
 
 
+def player_cmd_close_kb() -> InlineKeyboardMarkup:
+    """Экран «Уровень», открытый командой «ур»: вместо «Назад» в профиль кнопка «Закрыть»."""
+    return InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="Закрыть", callback_data="me:close", style=ButtonStyle.DANGER)
+    ]])
+
+
 @dp.callback_query(F.data == "me:lvl")
 async def on_me_level(callback: CallbackQuery):
     if get_user(callback.from_user.id) is None:
         await callback.answer("Сначала выбери питомца: /start", show_alert=True)
         return
     await callback.answer()
+    # быстрая команда «ур» создаёт «виртуальное» сообщение: тогда вместо «Назад» кнопка «Закрыть»
+    from_cmd = quick_cmds.is_virtual(callback.message)
     await show_rich_card(
         callback, "player",
-        lambda with_image: player_level_html(callback.from_user.id, with_image, "me"),
-        player_me_back_kb(),
+        lambda with_image: player_level_html(callback.from_user.id, with_image, "cmd" if from_cmd else "me"),
+        player_cmd_close_kb() if from_cmd else player_me_back_kb(),
     )
 
 
-@dp.callback_query(F.data == "me:lvlup")
-async def on_me_upgrade(callback: CallbackQuery):
+async def _upgrade_player_level(callback: CallbackQuery) -> bool:
+    """Повышение уровня игрока кнопкой «Повысить». True: уровень повышен, экран надо обновить."""
     user = get_user(callback.from_user.id)
     if user is None:
         await callback.answer("Сначала выбери питомца: /start", show_alert=True)
-        return
+        return False
     level = player_level(user)
     if level >= PLAYER_MAX_LEVEL:
         await callback.answer("Достигнут максимальный уровень", show_alert=True)
-        return
+        return False
     lack = player_lack(user)
     if lack:
         await callback.answer("Не хватает " + ", ".join(lack), show_alert=True)
-        return
-    need_min, need_coins = player_upgrade_cost(level)
+        return False
+    need_min, need_coins = player_upgrade_cost(level)     # проверка и списание без await между ними
     user[MINERALS_FIELD] = player_minerals(user) - need_min
     user["coins"] -= need_coins
     user["plevel"] = level + 1
     save_users()
     await callback.answer(f"Уровень игрока повышен до {level + 1}!", show_alert=True)
-    await show_rich_card(
-        callback, "player",
-        lambda with_image: player_level_html(callback.from_user.id, with_image, "me"),
-        player_me_back_kb(),
-    )
+    return True
+
+
+@dp.callback_query(F.data == "me:lvlup")
+async def on_me_upgrade(callback: CallbackQuery):
+    if await _upgrade_player_level(callback):
+        await show_rich_card(
+            callback, "player",
+            lambda with_image: player_level_html(callback.from_user.id, with_image, "me"),
+            player_me_back_kb(),
+        )
+
+
+@dp.callback_query(F.data == "me:lvlupc")
+async def on_cmd_upgrade(callback: CallbackQuery):
+    """«Повысить» на экране «Уровень», открытом командой «ур»: обновляет то же сообщение, «Закрыть» остаётся."""
+    if await _upgrade_player_level(callback):
+        await show_rich_card(
+            callback, "player",
+            lambda with_image: player_level_html(callback.from_user.id, with_image, "cmd"),
+            player_cmd_close_kb(),
+        )
 
 
 @dp.callback_query(F.data == "pst:open")
