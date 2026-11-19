@@ -30,7 +30,7 @@ from typing import Any, Awaitable, Callable
 
 from aiogram import BaseMiddleware
 from aiogram.exceptions import TelegramAPIError
-from aiogram.types import (CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, ReplyParameters,
+from aiogram.types import (CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message, ReplyParameters,
                            TelegramObject, Update)
 
 from guard import current_owner
@@ -203,6 +203,32 @@ def resolve(text: str | None) -> tuple[str, str] | None:
     return found
 
 
+# Без заглушки «⏳»: команда сразу отправляет сам экран новым сообщением (и в личке, и в группе).
+# Для этого вместо реальной заглушки нажатию подсовывается «виртуальное» сообщение (message_id = 0):
+# show_rich_card в main.py видит его и просто отправляет экран. False: вернуть старую заглушку «⏳».
+NO_PLACEHOLDER = True
+# Команды, которым заглушка всё же нужна (их раздел отвечает реплаем на сообщение игрока)
+PLACEHOLDER_TARGETS = {"daily:claim:c"}
+VIRTUAL_ID = 0     # настоящие message_id в Telegram начинаются с 1
+
+
+class _VirtualMessage(Message):
+    """Сообщение, которого нет в чате: на него нельзя ответить правкой, всё уходит новым сообщением."""
+
+    async def delete(self, *args: Any, **kwargs: Any) -> bool:  # type: ignore[override]
+        return True       # удалять нечего
+
+    async def edit_text(self, text: str, **kwargs: Any):  # type: ignore[override]
+        allowed = {k: v for k, v in kwargs.items()
+                   if k in ("parse_mode", "entities", "link_preview_options", "reply_markup")}
+        return await self.bot.send_message(self.chat.id, text, **allowed)
+
+
+def is_virtual(msg: Any) -> bool:
+    """True: это не настоящее сообщение, а подставка быстрой команды (экран надо отправить новым)."""
+    return isinstance(msg, _VirtualMessage) and msg.message_id == VIRTUAL_ID
+
+
 class _QuickCallback(CallbackQuery):
     """Нажатие кнопки, созданное ботом: на него нельзя ответить через answerCallbackQuery."""
 
@@ -259,7 +285,7 @@ class QuickCommands(BaseMiddleware):
         if msg.forward_origin is not None or data.get("raw_state") is not None:
             return None   # пересланное или игрок что-то вводит (ник, обращение и т.п.)
         bot = data["bot"]
-        # сообщение «⏳», которое создаётся ниже, должно получить владельца (см. guard.py)
+        # сообщение, которое бот отправит в ответ на команду, должно получить владельца (см. guard.py)
         current_owner.set(msg.from_user.id)
 
         if msg.chat.type != "private":
@@ -350,7 +376,11 @@ class QuickCommands(BaseMiddleware):
             # ответ на команду «еб» должен быть реплаем на неё: заглушка запоминает, на что отвечать
             reply = (ReplyParameters(message_id=msg.message_id, allow_sending_without_reply=True)
                      if target == "daily:claim:c" else None)
-            holder = await bot.send_message(msg.chat.id, "⏳", reply_parameters=reply)
+            if NO_PLACEHOLDER and target not in PLACEHOLDER_TARGETS:
+                holder = _VirtualMessage(message_id=VIRTUAL_ID, date=msg.date, chat=msg.chat,
+                                         from_user=await bot.me()).as_(bot)
+            else:
+                holder = await bot.send_message(msg.chat.id, "⏳", reply_parameters=reply)
         except TelegramAPIError:
             CLOSE_MODE.set(False)
             return None
