@@ -1438,8 +1438,8 @@ quick_cmds.pet_group_card = send_pet_short   # «пет», «питомец», �
 
 # «я», «проф», «профиль» в группе открываются так же, как в личке: ответом на команду игрока,
 # дальше экран обновляется правкой на месте (см. quick_cmds.py, без кнопки «Перейти»).
-# «шахта» и «кейс» в группе: текст раздела и кнопка «Перейти» (quick_cmds.py)
-quick_cmds.group_cards[("text", "Шахта")] = ("ug", lambda *a: underground.send_group_card(*a))
+# «донат» и «кейс» в группе: текст раздела и кнопка «Перейти» (quick_cmds.py)
+# «шахта» в группе открывается как в личке: ответом на команду и правкой на месте (underground.open_from_menu)
 quick_cmds.group_cards[("cb", "menu:donate")] = ("donate", lambda *a: donate.send_group_card(*a))
 quick_cmds.group_cards[("cb", "menu:cases")] = ("cases", lambda *a: cases.send_group_card(*a))
 
