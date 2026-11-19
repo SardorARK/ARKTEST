@@ -44,14 +44,18 @@ router = Router()
 # Заполняется в setup()
 D = SimpleNamespace()
 
-# True, пока строится экран для группового чата: в тексте обычные эмодзи вместо кастомных, а верхняя
-# кнопка «Назад» заменена на «Закрыть». В личке с ботом всё как раньше. Кнопки (иконки и тексты) не трогаем.
+# True, пока строится экран для группового чата: верхняя кнопка «Назад» заменена на «Закрыть».
+# В личке с ботом всё как раньше. Кнопки (иконки и тексты) не трогаем.
 IN_CHAT: ContextVar[bool] = ContextVar("mine_in_chat", default=False)
+# True: в тексте обычные эмодзи вместо кастомных. Нужно только в чате и только если экран не ответ на сообщение:
+# Telegram (баг tdlib) превращает кастомные эмодзи в обычные при правке сообщения, которое не было ответом.
+# Экран, открытый командой («банк»), отправляется ответом на неё, поэтому эмодзи при правках сохраняются.
+PLAIN_EMOJI: ContextVar[bool] = ContextVar("mine_plain_emoji", default=False)
 
 
 def _ce(pair) -> str:
-    """Кастомный эмодзи для текста экрана; в чате вместо него обычный (запасной) эмодзи."""
-    return pair[1] if IN_CHAT.get() else D.custom_emoji(pair)
+    """Кастомный эмодзи для текста экрана; обычный (запасной) только если PLAIN_EMOJI."""
+    return pair[1] if PLAIN_EMOJI.get() else D.custom_emoji(pair)
 
 
 def setup(**deps) -> None:
@@ -1161,11 +1165,16 @@ async def _require_user(callback: CallbackQuery) -> dict | None:
 async def _show(callback: CallbackQuery, key: str) -> None:
     """Если у нового экрана то же фото, что у текущего (или фото нет и там и там), сообщение
     обновляется на месте. Если фото другое, старое сообщение удаляется и приходит новое.
-    Это делает D.show_rich_card из main.py (сравнивает фото экранов по img_key)."""
+    Это делает D.show_rich_card из main.py (сравнивает фото экранов по img_key).
+    В чате все экраны банка правятся на месте, с одним общим фото банка (см. main._image_for)."""
     uid = callback.from_user.id
     show = getattr(D, "show_rich_card", None)
     chat_type = getattr(getattr(callback.message, "chat", None), "type", "private")
-    token = IN_CHAT.set(chat_type != "private")
+    in_chat = chat_type != "private"
+    # «виртуальное» сообщение быстрой команды тоже имеет reply_to_message: экран уйдёт ответом на команду
+    is_reply = getattr(callback.message, "reply_to_message", None) is not None
+    token = IN_CHAT.set(in_chat)
+    token_plain = PLAIN_EMOJI.set(in_chat and not is_reply)
     try:
         if show is not None:
             html, kb = SCREENS[key]
@@ -1175,6 +1184,7 @@ async def _show(callback: CallbackQuery, key: str) -> None:
             return
     finally:
         IN_CHAT.reset(token)
+        PLAIN_EMOJI.reset(token_plain)
     try:
         await callback.message.delete()
     except Exception as e:  # сообщение могло уже пропасть
