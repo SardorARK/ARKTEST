@@ -1423,6 +1423,7 @@ async def on_nick(callback: CallbackQuery, state: FSMContext):
         return
     await callback.answer()
     await state.set_state(NickStates.waiting)
+    await state.update_data(card_msg=getattr(callback.message, "message_id", None))   # эту карточку обновим после ввода
     await _show(callback, "settings_nick", lambda wi: nick_html_screen(user, wi), nick_kb(user))
 
 
@@ -1506,6 +1507,7 @@ async def on_nick_reset(callback: CallbackQuery, state: FSMContext):
     if old:
         _led("nick_reset", uid=str(callback.from_user.id), old=old)
     await state.set_state(NickStates.waiting)
+    await state.update_data(card_msg=getattr(callback.message, "message_id", None))
     await callback.answer("Никнейм сброшен: теперь показывается имя из Telegram")
     await _show(callback, "settings_nick", lambda wi: nick_html_screen(user, wi), nick_kb(user))
 
@@ -1543,6 +1545,7 @@ async def nick_receive(message: Message, state: FSMContext):
     user["nick"], user["nick_plain"], user["nick_at"] = html, plain, time.time()
     _save_users()
     _led("nick_change", uid=str(message.from_user.id), old=old, new=plain, html=html)
+    card_msg = (await state.get_data()).get("card_msg")
     await state.clear()
     try:
         await message.delete()       # убираем сообщение игрока, чтобы чат оставался чистым
@@ -1551,7 +1554,7 @@ async def nick_receive(message: Message, state: FSMContext):
     uid = message.from_user.id
     note = f"<b>{_ic('ok')} Ник изменён!</b>"
     if _OPEN_PROFILE is not None:
-        await _OPEN_PROFILE(message.bot, message.chat.id, uid, note)
+        await _OPEN_PROFILE(message.bot, message.chat.id, uid, note, message_id=card_msg)
         return
     await _send_rich_card(
         message.bot, message.chat.id, "settings",
