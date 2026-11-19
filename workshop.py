@@ -2603,6 +2603,13 @@ async def _user_or_alert(callback: CallbackQuery) -> dict | None:
     return user
 
 
+def _reply_to(message: Message) -> int | None:
+    """В чате (группе) карточка идёт ОТВЕТОМ на команду игрока: тогда кастомные эмодзи не пропадают
+    при правках на месте (баг Telegram: правка сообщения, которое не было ответом, подменяет их обычными).
+    В личке ответ не нужен."""
+    return message.message_id if message.chat.type != "private" else None
+
+
 @router.message(F.text == "Мастерская")
 async def open_workshop(message: Message):
     user = D.get_user(message.from_user.id)
@@ -2613,7 +2620,7 @@ async def open_workshop(message: Message):
     if done:
         D.save_users()
     await D.send_rich_card(message.bot, message.chat.id, "workshop",
-                           lambda wi: root_html(user, wi, done), root_kb())
+                           lambda wi: root_html(user, wi, done), root_kb(), reply_to=_reply_to(message))
 
 
 # Текстовые команды для быстрого открытия раздела (можно с «/» в начале): сокращение и полное название.
@@ -2642,7 +2649,8 @@ async def open_category_by_command(message: Message):
     if settle(user):
         D.save_users()
     await D.send_rich_card(message.bot, message.chat.id, "workshop",
-                           lambda wi: category_html(user, key, wi, 0), category_kb(user, key, 0))
+                           lambda wi: category_html(user, key, wi, 0), category_kb(user, key, 0),
+                           reply_to=_reply_to(message))
 
 
 @router.callback_query(F.data == "ws:open")
