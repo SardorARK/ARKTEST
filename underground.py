@@ -87,12 +87,12 @@ COOLDOWN_MIN = 10        # пауза после окончания запуск
 TICK_SEC = 5             # раз в сколько секунд добыча попадает в «Добыто»
 AUTO_REFRESH_SEC = 30    # раз в сколько секунд открытый экран шахты обновляется сам
 AUTO_REFRESH_MIN = 120   # предохранитель: сколько минут максимум (0 = совсем не обновлять сам)
-# Telegram при правке сообщения (editMessageText) подменяет кастомные эмодзи обычными, если у бота нет
-# дополнительных юзернеймов на Fragment. Поэтому в группах (и любых не личных чатах) есть выбор:
-#   True  - сообщение удаляется и отправляется заново: кастомные эмодзи сохраняются, но сообщение новое;
-#   False - всегда правка на месте: сообщение одно, но в группе эмодзи после правки становятся обычными.
-# В личке всегда правка на месте. Купишь юзернеймы на Fragment - ставь False.
-GROUP_RESEND = True
+# В чате (группе) шахта открывается ОТВЕТОМ на команду игрока и дальше правится на месте. Так кастомные эмодзи
+# не пропадают при правках (баг Telegram: правка сообщения, которое не было ответом, подменяет их обычными).
+#   False - всегда правка на месте (так и нужно);
+#   True  - в чате сообщение удаляется и отправляется заново (старый режим, на случай проблем).
+# В личке всегда правка на месте.
+GROUP_RESEND = False
 MINERAL_CHANCE = 35      # шанс (%), что добыча окажется минералом; всё остальное руда
 
 # Руда: цена за штуку и вес (шанс при выборе руды, всего 100). Порядок = порядок в рюкзаке.
@@ -1272,6 +1272,21 @@ def _edit_ok(msg) -> bool:
     return not (GROUP_RESEND and getattr(getattr(msg, "chat", None), "type", "private") != "private")
 
 
+def _live_ok(msg) -> bool:
+    """Само-обновление раз в AUTO_REFRESH_SEC только в личке: в группе частые правки упираются в лимиты Telegram
+    (там экран обновляется кнопкой «Обновить» и любым нажатием)."""
+    return (AUTO_REFRESH_MIN > 0 and hasattr(msg, "message_id") and _edit_ok(msg)
+            and getattr(getattr(msg, "chat", None), "type", "private") == "private")
+
+
+def _reply_target(msg) -> int | None:
+    """В чате: id сообщения-команды, на которое msg отвечает (новая карточка тоже идёт ответом)."""
+    if getattr(getattr(msg, "chat", None), "type", "private") == "private":
+        return None
+    parent = getattr(msg, "reply_to_message", None)
+    return parent.message_id if parent is not None else None
+
+
 def _start_live(bot, chat_id: int, message_id: int, uid: int) -> None:
     token = _live.get(uid, 0) + 1
     _live[uid] = token
@@ -1296,14 +1311,14 @@ async def _show(callback: CallbackQuery, key: str) -> None:
         except Exception:
             ok = False
         if ok:
-            if key == "ug" and AUTO_REFRESH_MIN > 0:
+            if key == "ug" and _live_ok(msg):
                 user = D.get_user(uid)
                 if user is not None and get_ug(user)["run"] is not None:
                     _start_live(callback.bot, msg.chat.id, msg.message_id, uid)
             return
     old = callback.message
     new = await D.send_rich_card(callback.bot, old.chat.id if hasattr(old, "chat") else callback.from_user.id,
-                                 img_key(key), lambda wi: html(uid, wi), kb)
+                                 img_key(key), lambda wi: html(uid, wi), kb, reply_to=_reply_target(old))
     if hasattr(old, "message_id"):              # группа: старое сообщение убираем, чтобы не копились
         _closable.pop((old.chat.id, old.message_id), None)
         try:
@@ -1313,7 +1328,7 @@ async def _show(callback: CallbackQuery, key: str) -> None:
     msg = new
     if closable:
         _mark_closable(msg)
-    if key == "ug" and AUTO_REFRESH_MIN > 0 and hasattr(msg, "message_id") and _edit_ok(msg):
+    if key == "ug" and _live_ok(msg):
         user = D.get_user(uid)
         if user is not None and get_ug(user)["run"] is not None:
             _start_live(callback.bot, msg.chat.id, msg.message_id, uid)
@@ -1349,25 +1364,6 @@ async def bot_link(bot, payload: str) -> str:
     return f"https://t.me/{_BOT_USERNAME}?start={payload}"
 
 
-async def send_group_card(bot, chat_id: int, user_id: int, url: str) -> bool:
-    """В группе шахта не открывается: показываем текст самого раздела шахты (состояние, добыто)
-    и одну кнопку «Перейти» в личку с ботом. False: у игрока нет питомца, шахты для него нет."""
-    if D.get_user(user_id) is None:
-        return False
-    html, _ = SCREENS["ug"]
-    kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(
-        text="Перейти", url=url, style=ButtonStyle.PRIMARY, icon_custom_emoji_id=MINES_EMOJI_ID)]])
-    await D.send_rich_card(bot, chat_id, NOIMG_KEY, lambda wi: html(user_id, wi), kb)
-    return True
-
-
-async def send_group_stub(bot, chat_id: int, user_id: int | None = None) -> None:
-    """Запасной путь (если команду не перехватил quick_cmds): то же, что в группе по команде."""
-    url = await bot_link(bot, "ug")
-    if user_id is None or not await send_group_card(bot, chat_id, user_id, url):
-        await bot.send_message(chat_id, "Сначала выбери питомца: /start")
-
-
 async def open_private(bot, chat_id: int, uid: int) -> None:
     """Главный экран шахты в личке (из /start ug): «Назад» ведёт в «Заработать»."""
     if D.get_user(uid) is None:
@@ -1387,9 +1383,7 @@ async def open_from_menu(message: Message) -> None:
     """Кнопка «Шахта» в нижнем (reply) меню: присылает главный экран шахты новым сообщением.
     Вызывается из MenuButtonMiddleware (подключается в main.py до quick_cmds)."""
     uid = message.from_user.id
-    if message.chat.type != "private":          # группа: только «Перейти» в личку, шахту не открываем
-        await send_group_stub(message.bot, message.chat.id, uid)
-        return
+    in_chat = message.chat.type != "private"
     if D.get_user(uid) is None:
         await message.answer("Сначала выбери питомца: /start")
         return
@@ -1397,14 +1391,15 @@ async def open_from_menu(message: Message) -> None:
     html, _ = SCREENS["ug"]
     # Нижняя кнопка «Шахта» (личка, точно «Шахта») ведёт «Назад» в «Заработать»; команда в чате
     # («шахта», в группе и т.п.) получает «Закрыть», которое удаляет сообщение.
-    closable = message.chat.type != "private" or (message.text or "").strip() != "Шахта"
+    closable = in_chat or (message.text or "").strip() != "Шахта"
+    # В чате ответом на команду игрока: дальше экран правится на месте, кастомные эмодзи сохраняются
     msg = await D.send_rich_card(
         message.bot, message.chat.id, img_key("ug"), lambda wi: html(uid, wi),
-        _build_kb("ug", uid, closable),
+        _build_kb("ug", uid, closable), reply_to=message.message_id if in_chat else None,
     )
     if closable:
         _mark_closable(msg)
-    if AUTO_REFRESH_MIN > 0 and hasattr(msg, "message_id") and _edit_ok(msg):
+    if _live_ok(msg):
         user = D.get_user(uid)
         if user is not None and get_ug(user)["run"] is not None:
             _start_live(message.bot, msg.chat.id, msg.message_id, uid)
@@ -1427,9 +1422,6 @@ async def on_open(callback: CallbackQuery):
     if await _require_user(callback) is None:
         return
     await callback.answer()
-    if getattr(getattr(callback.message, "chat", None), "type", "private") != "private":
-        await send_group_stub(callback.bot, callback.message.chat.id, callback.from_user.id)
-        return
     await _show(callback, "ug")
 
 
