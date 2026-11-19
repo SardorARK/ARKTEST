@@ -1504,9 +1504,17 @@ def _edit_in_place_ok(msg, key: str) -> bool:
     return has_reply if in_group else True
 
 
+# В чате (группе) показывается ОДНО фото: общее фото «Банка» (то же на всех экранах банка, поэтому они правятся
+# на месте). У остальных экранов в чате фото нет. В личке с ботом у каждого экрана своё фото, как раньше.
+BANK_CHAT_IMG_KEY = "mine"
+BANK_IMG_KEYS = {mine.img_key(_k) for _k in mine.SCREENS}
+
+
 def _image_for(chat_id: int, pet_key: str) -> str | None:
-    """Фото экрана. В группах фото не показываем: экраны там без изображений, правятся на месте."""
-    return pet_images.get(pet_key) if chat_id > 0 else None
+    """file_id фото экрана для этого чата (None: без фото)."""
+    if chat_id > 0:
+        return pet_images.get(pet_key)
+    return pet_images.get(BANK_CHAT_IMG_KEY) if pet_key in BANK_IMG_KEYS else None
 
 
 def _remember(msg, kind: str, image: str | None) -> None:
@@ -1554,9 +1562,13 @@ def _close_kb(kb):
     return InlineKeyboardMarkup(inline_keyboard=rows) if changed else kb
 
 
-def _rich_input(pet_key: str, build_html, use_image: bool = True):
-    """Собирает rich-сообщение; возвращает (InputRichMessage, file_id или None)."""
-    file_id = pet_images.get(pet_key) if use_image else None
+def _rich_input(pet_key: str, build_html, use_image: bool = True, chat_id: int | None = None):
+    """Собирает rich-сообщение; возвращает (InputRichMessage, file_id или None).
+    chat_id: для какого чата (в группах фото другое, см. _image_for); без него берётся фото экрана."""
+    if not use_image:
+        file_id = None
+    else:
+        file_id = pet_images.get(pet_key) if chat_id is None else _image_for(chat_id, pet_key)
     if file_id:
         return (
             InputRichMessage(
@@ -1590,7 +1602,7 @@ async def send_rich_card(
         reply_markup = _close_kb(reply_markup)
     if _image_for(chat_id, pet_key):
         try:
-            rich, image = _rich_input(pet_key, build_html)
+            rich, image = _rich_input(pet_key, build_html, chat_id=chat_id)
             msg = await bot.send_rich_message(
                 chat_id=chat_id, rich_message=rich, reply_markup=reply_markup,
                 reply_parameters=reply,
@@ -1676,7 +1688,7 @@ async def _show_rich_card_impl(
     if (not force_new and (holder_ok or unknown_ok or (cur is not None and cur[0] == "rich"
             and cur[1] == img)) and _edit_in_place_ok(msg, pet_key)):
         try:
-            rich, image = _rich_input(pet_key, build_html, use_image=not in_group)
+            rich, image = _rich_input(pet_key, build_html, chat_id=chat_id)
             edited = await bot.edit_message_text(
                 chat_id=chat_id,
                 message_id=msg.message_id,
@@ -1719,7 +1731,7 @@ async def refresh_rich_card(
     elif chat_id < 0 and RESEND_IN_GROUPS and pet_key not in LIVE_EDIT_KEYS:       # в группах экраны всегда шлются заново (кроме LIVE_EDIT_KEYS)
         return False
     try:
-        rich, image = _rich_input(pet_key, build_html, use_image=chat_id > 0)
+        rich, image = _rich_input(pet_key, build_html, chat_id=chat_id)
         await bot.edit_message_text(
             chat_id=chat_id, message_id=message_id, rich_message=rich, reply_markup=reply_markup
         )
