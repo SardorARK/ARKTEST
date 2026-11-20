@@ -115,6 +115,7 @@ FIGHTERS_EMOJI = ("6032609071373226027", "👥")  # бойцов
 BLOOD_EMOJI = ("5269535069550162819", "🩸")     # урон
 PLACE_EMOJI = ("5413566144986503832", "🏆")     # место
 ATTACK_EMOJI = ("5454014806950429357", "⚔️")    # кнопка «Атаковать»
+LEVEL_EMOJI = ("5190806721286657692", "📊")      # «Для питомцев: до 100 уровня»
 RESPAWN_EMOJI = ("5337258577729961075", "⏳")   # возрождение
 REWARD_EMOJI = ("5846184826184408721", "🎁")    # награда
 LAST_HIT_EMOJI = ("5397782960512444700", "📌")  # последний удар
@@ -832,7 +833,7 @@ def _table_n(head: tuple, rows: list[tuple]) -> str:
     )
 
 
-def _tree(rows: list, title: str = "") -> str:
+def _tree(rows: list, title: str = "", quote: bool = False) -> str:
     """Блок с рамочкой ├ └. Строка: (подпись, значение) или
     (подпись, значение, [вложенные (подпись, значение)])."""
     lines = []
@@ -851,6 +852,8 @@ def _tree(rows: list, title: str = "") -> str:
                 kline += f": <b>{kv}</b>"
             lines.append(kline)
     head = f"<b>{title}</b><br>" if title else ""
+    if quote:   # весь блок в сворачиваемой цитате
+        return f"<blockquote expandable>{head}{'<br>'.join(lines)}</blockquote>"
     return f"<p>{head}{'<br>'.join(lines)}</p>"
 
 
@@ -1041,7 +1044,7 @@ def boss_list_html(user_id: int, with_image: bool = False, ref: str = "") -> str
         (f"{D.custom_emoji(REWARD_EMOJI)} Награда", fmt(c["reward"]["coins"])),
     ]
     if t in LEVEL_CAP_TYPES:
-        about.append(("🔒 Для питомцев", f"до {LEVEL_CAP} уровня"))
+        about.append((f"{D.custom_emoji(LEVEL_EMOJI)} Для питомцев", f"до {LEVEL_CAP} уровня"))
     fighters = D.custom_emoji(FIGHTERS_EMOJI)
     rows = []
     for bid in all_ids(t):
@@ -1058,7 +1061,7 @@ def boss_list_html(user_id: int, with_image: bool = False, ref: str = "") -> str
         f"<blockquote><i>{escape(c['story'])}</i></blockquote>"
         + _tree(about, "Характеристики")
         + _dots()
-        + _tree(rows, f"Боссы (живых {alive_count(t)} из {c['slots']})")
+        + _tree(rows, f"Боссы (живых {alive_count(t)} из {c['slots']})", quote=True)
     )
 
 
@@ -1079,7 +1082,7 @@ def boss_info_html(user_id: int, with_image: bool = False, ref: str = "") -> str
     if b.get("hp_mult", 1) > 1:
         about.append(("🔥 Усилен", f"здоровье ×{b['hp_mult']}"))
     if type_of(bid) in LEVEL_CAP_TYPES:
-        about.append(("🔒 Для питомцев", f"до {LEVEL_CAP} уровня"))
+        about.append((f"{D.custom_emoji(LEVEL_EMOJI)} Для питомцев", f"до {LEVEL_CAP} уровня"))
     return (
         f"{_image(with_image)}"
         + _head(bid, f"<b>{_type_icon(type_of(bid))} {c['one']} босс</b>")
