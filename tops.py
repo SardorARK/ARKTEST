@@ -3,9 +3,9 @@
 Рейтинги: рефералы, арена (кубки), боссы (урон), экспедиции (число походов), донаты, монеты, минералы.
 В топе донатов показан только ник игрока, без сумм и мест в цифрах сверх порядка.
 
-Как открывается: быстрая команда «топ» (quick_cmds.py) нажимает кнопку top:open. Экран приходит ответом на
-команду игрока, дальше все переходы правят это же сообщение (show_rich_card из main.py), а вместо «Назад»
-в меню стоит «Закрыть». Кнопки рейтингов только с эмодзи, таблиц нет.
+Как открывается: быстрая команда «топ» (quick_cmds.py) нажимает кнопку top:open и сразу показывает топ по
+монетам (без стартового окна). Экран приходит ответом на сообщение игрока (в чате и в личке), дальше переключение
+рейтингов правит это же сообщение, а вместо «Назад» в меню стоит «Закрыть». Кнопки только с эмодзи, таблиц нет.
 
 Данные по монетам, минералам, экспедициям и донатам собираются одним проходом по игрокам и держатся в кэше
 TOP_TTL секунд, чтобы частые нажатия не перебирали всю базу.
@@ -23,6 +23,11 @@ from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMar
 import arena
 import boss
 import friends
+
+try:
+    import quick_cmds
+except ImportError:
+    quick_cmds = None
 
 log = logging.getLogger("tops")
 router = Router(name="tops")
@@ -52,7 +57,7 @@ ORDER = tuple(BOARDS)
 
 
 def setup(**deps) -> None:
-    """Нужны: get_user, users (все игроки, как словарь), show_rich_card, custom_emoji, name_html_of,
+    """Нужны: get_user, users (все игроки, как словарь), show_rich_card, send_rich_card, custom_emoji, name_html_of,
     BACK_EMOJI_ID, MINERALS_FIELD, COIN_EMOJI, MINERAL_EMOJI, EXPLORE_EMOJI."""
     for name, value in deps.items():
         setattr(D, name, value)
@@ -66,6 +71,26 @@ def _ce(pair) -> str:
 
 def _fmt(n) -> str:
     return f"{int(n):,}".replace(",", " ")
+
+
+NUMBER_SUFFIXES = ("", "K", "M", "B", "T", "Qa", "Qi", "Sx", "Sp", "Oc", "No", "Dc")
+
+
+def _short(n) -> str:
+    """Короткая запись чисел, как в main.py: 999, 1K, 1.5K, 1M, 2.35B, 1T, 1Qa и так далее.
+    Без округления вверх: 999 999 это 999.99K, а не 1000K."""
+    n = int(n)
+    sign = "\u2212" if n < 0 else ""
+    a = abs(n)
+    if a < 1000:
+        return f"{sign}{a}"
+    idx = 1
+    while idx < len(NUMBER_SUFFIXES) - 1 and a >= 1000 ** (idx + 1):
+        idx += 1
+    div = 1000 ** idx
+    whole, frac = divmod(a, div)
+    text = f"{whole}.{frac * 100 // div:02d}".rstrip("0").rstrip(".")
+    return f"{sign}{text}{NUMBER_SUFFIXES[idx]}"
 
 
 def _icon(key: str) -> tuple[str | None, str]:
@@ -102,17 +127,13 @@ def _key_btn(key: str, chosen: bool = False) -> InlineKeyboardButton:
     return InlineKeyboardButton(text=ch, callback_data=f"top:{key}", style=style)
 
 
-def _kb(chosen: str | None = None) -> InlineKeyboardMarkup:
+def _kb(chosen: str) -> InlineKeyboardMarkup:
+    """Эмодзи-кнопки рейтингов (4 + 3) и «Назад». «Назад» в меню main.py заменяет на «Закрыть»,
+    когда раздел открыт командой."""
     btns = [_key_btn(k, k == chosen) for k in ORDER]
-    rows = [btns[:4], btns[4:]]
-    if chosen is None:
-        back = InlineKeyboardButton(text="Назад", callback_data="menu:back", style=ButtonStyle.PRIMARY,
-                                    icon_custom_emoji_id=D.BACK_EMOJI_ID)      # в команде станет «Закрыть»
-    else:
-        back = InlineKeyboardButton(text="Назад", callback_data="top:open", style=ButtonStyle.PRIMARY,
-                                    icon_custom_emoji_id=D.BACK_EMOJI_ID)
-    rows.append([back])
-    return InlineKeyboardMarkup(inline_keyboard=rows)
+    back = InlineKeyboardButton(text="Назад", callback_data="menu:back", style=ButtonStyle.PRIMARY,
+                                icon_custom_emoji_id=D.BACK_EMOJI_ID)
+    return InlineKeyboardMarkup(inline_keyboard=[btns[:4], btns[4:], [back]])
 
 
 def _image(with_image: bool) -> str:
@@ -171,30 +192,22 @@ def _rows(key: str) -> list[tuple[str, int]]:
     return _scan_players().get(key, [])
 
 
-def _line(n: int, uid: str, value: int, show_value: bool) -> str:
+def _line(n: int, uid: str, value: int, show_value: bool, short: bool = False) -> str:
     place = _ce(boss.RANK_EMOJI[n - 1])
     name = D.name_html_of(int(uid)) if str(uid).isdigit() else "Игрок"
-    return f"{place} {name}" + (f" · <b>{_fmt(value)}</b>" if show_value else "")
+    shown = _short(value) if short else _fmt(value)       # монеты и минералы: 1.5K, 2.35M, как в main.py
+    return f"{place} {name}" + (f" · <b>{shown}</b>" if show_value else "")
 
 
 # ---------- Экраны ----------
-
-def home_html(user_id: int, with_image: bool = False) -> str:
-    lines = [f"{_icon_html(k)} <b>{BOARDS[k][0]}</b>" for k in ORDER]
-    return (
-        f"{_image(with_image)}"
-        f"<p><b>{_ce(PLACE_EMOJI)} ТОП ИГРОКОВ</b></p>"
-        "<blockquote><i>Выбери рейтинг кнопкой ниже. В каждом десять лучших.</i></blockquote>"
-        f"<p>{'<br>'.join(lines)}</p>"
-    )
-
 
 def top_html(user_id: int, key: str, with_image: bool = False) -> str:
     title, hint = BOARDS[key]
     rows = _rows(key)
     show_value = key != "don"          # в донатах только ник
     if rows:
-        body = "<p>" + "<br>".join(_line(n, u, v, show_value) for n, (u, v) in enumerate(rows, start=1)) + "</p>"
+        body = "<p>" + "<br>".join(_line(n, u, v, show_value, key in ("coins", "min"))
+                                      for n, (u, v) in enumerate(rows, start=1)) + "</p>"
     else:
         body = "<p><i>Пока никого нет.</i></p>"
     return (
@@ -214,13 +227,23 @@ async def _require_user(callback: CallbackQuery) -> bool:
     return True
 
 
+DEFAULT = "coins"      # команда «топ» сразу открывает топ по балансу монет
+
+
 @router.callback_query(F.data == "top:open")
 async def on_open(callback: CallbackQuery):
+    """Команда «топ»: сразу топ по монетам, отдельным ответом на сообщение игрока (и в чате, и в личке)."""
     if not await _require_user(callback):
         return
     await callback.answer()
     uid = callback.from_user.id
-    await D.show_rich_card(callback, IMG_KEY, lambda wi: home_html(uid, wi), _kb())
+    msg = callback.message
+    parent = getattr(msg, "reply_to_message", None)
+    if quick_cmds is not None and quick_cmds.is_virtual(msg) and parent is not None:
+        await D.send_rich_card(callback.bot, msg.chat.id, IMG_KEY, lambda wi: top_html(uid, DEFAULT, wi),
+                               _kb(DEFAULT), reply_to=parent.message_id)
+        return
+    await D.show_rich_card(callback, IMG_KEY, lambda wi: top_html(uid, DEFAULT, wi), _kb(DEFAULT))
 
 
 @router.callback_query(F.data.regexp(r"^top:(" + "|".join(ORDER) + r")$"))
