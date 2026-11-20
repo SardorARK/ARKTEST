@@ -202,6 +202,23 @@ BOSS_TYPES: dict[str, dict] = {
 }
 TYPE_ORDER = list(BOSS_TYPES)
 
+# Усиление за быструю победу. Если босса убили не позже чем через столько секунд после его появления,
+# то на следующем появлении у него здоровье умножено, а время возрождения короче:
+#   (секунд после появления, во сколько раз больше здоровья, во сколько раз короче возрождение)
+# Первая подходящая строка, дольше последнего порога ничего не меняется. Здоровье считается от исходного.
+FAST_KILL = (
+    (5 * 60, 5, 3),
+    (30 * 60, 2, 2),
+)
+
+# Обычные и сложные боссы доступны питомцам до LEVEL_CAP уровня включительно, дальше только остальные виды.
+LEVEL_CAP = 100
+LEVEL_CAP_TYPES = ("normal", "hard")
+LEVEL_CAP_TEXT = (
+    f"Обычные и сложные боссы доступны питомцам до {LEVEL_CAP} уровня. "
+    "Теперь твои противники: безумные, яростные и невозможные боссы."
+)
+
 CRIT_MULT = 2.0          # во сколько раз крит сильнее
 CRIT_MAX = 0.6           # шанс крита не выше
 
@@ -355,9 +372,14 @@ def name_of(bid: str) -> str:
     return cfg(bid)["names"][int(bid.split(":")[1])]
 
 
-def _fresh(btype: str, kills: int = 0) -> dict:
+def _fresh(btype: str, kills: int = 0, hp_mult: int = 1) -> dict:
+    hp = BOSS_TYPES[btype]["hp"] * hp_mult
     return {
-        "hp": BOSS_TYPES[btype]["hp"],
+        "hp": hp,
+        "max_hp": hp,        # здоровье этого появления: исходное, а после быстрой победы ×2 или ×5
+        "hp_mult": hp_mult,
+        "born": time.time(),  # когда появился: от этого считается «быстрая победа»
+        "next_mult": 1,      # во сколько раз больше будет здоровье при следующем появлении
         "dmg": {},           # {"user_id": нанесённый урон}
         "names": {},         # {"user_id": ник для топа}
         "dead_until": None,  # когда возродится, если босс убит
@@ -379,7 +401,9 @@ def _load() -> dict[str, dict]:
     for bid in all_ids():
         base = _fresh(type_of(bid))
         base.update({k: v for k, v in saved.get(bid, {}).items() if k in base})
-        base["hp"] = min(base["hp"], cfg(bid)["hp"])
+        if "born" not in saved.get(bid, {}):
+            base["born"] = None      # босс из старого сохранения: время появления неизвестно, усиления не будет
+        base["hp"] = min(base["hp"], base["max_hp"])
         result[bid] = base
     return result
 
@@ -485,7 +509,7 @@ def tick() -> None:
         if b["dead_until"] is not None and now >= b["dead_until"]:
             if type_of(bid) in NOTIFY_SPAWN_TYPES and b["dmg"]:
                 _spawned.append((bid, list(b["dmg"])))
-            BOSSES[bid] = _fresh(type_of(bid), b["kills"])
+            BOSSES[bid] = _fresh(type_of(bid), b["kills"], b.get("next_mult", 1))
             changed = True
     if changed:
         save_boss()
@@ -549,8 +573,18 @@ def fmt_dur(seconds: float) -> str:
     return f"{secs} сек"
 
 
+def max_hp(bid: str) -> int:
+    """Здоровье босса при появлении (после быстрой победы над ним оно ×2 или ×5)."""
+    return BOSSES[bid].get("max_hp") or cfg(bid)["hp"]
+
+
 def hp_ratio(bid: str) -> float:
-    return max(0.0, BOSSES[bid]["hp"] / cfg(bid)["hp"])
+    return max(0.0, BOSSES[bid]["hp"] / max_hp(bid))
+
+
+def level_locked(user: dict, bid: str) -> bool:
+    """Обычные и сложные боссы закрыты для питомцев выше LEVEL_CAP уровня."""
+    return type_of(bid) in LEVEL_CAP_TYPES and int(user.get("level", 1)) > LEVEL_CAP
 
 
 def bar(ratio: float, width: int = 10) -> str:
@@ -745,7 +779,17 @@ def finish_boss(bid: str, killer_name: str) -> dict[str, dict[str, int]]:
             if killer is not None:
                 achives.on_boss_kill(killer, type_of(bid), b["dmg"][uid] / total)
 
-    b["dead_until"] = time.time() + c["respawn_min"] * 60
+    now = time.time()
+    delay = c["respawn_min"] * 60
+    b["next_mult"] = 1
+    if b.get("born"):
+        life = now - b["born"]
+        for limit, mult, div in FAST_KILL:
+            if life <= limit:                  # убили быстро: вернётся раньше, но с большим здоровьем
+                b["next_mult"] = mult
+                delay = round(delay / div)
+                break
+    b["dead_until"] = now + delay
     b["kills"] += 1
     b["killer"] = killer_name
     D.save_users()
@@ -811,8 +855,16 @@ def _tree(rows: list, title: str = "") -> str:
 
 
 def _gap() -> str:
-    """Пустая строка-отступ между блоками."""
+    """Пустая строка-отступ между блоками (рядом с таблицами)."""
     return "<p>&nbsp;</p>"
+
+
+DOTS = "·" * 25   # ряд моно-точек, как в донатах и экспедициях
+
+
+def _dots() -> str:
+    """Разделитель блоков рядом, где нет таблиц: ряд точек, как в других разделах."""
+    return f"<p><code>{DOTS}</code></p>"
 
 
 def _stat_icon(key: str) -> str:
@@ -947,7 +999,7 @@ def _reward_tree(c: dict) -> str:
     ]
     return (
         _tree(reward, f"{D.custom_emoji(REWARD_EMOJI)} Награда за победу (делится по доле урона)")
-        + _gap()
+        + _dots()
         + _tree(last, f"{D.custom_emoji(LAST_HIT_EMOJI)} Награда за последний удар")
     )
 
@@ -988,6 +1040,8 @@ def boss_list_html(user_id: int, with_image: bool = False, ref: str = "") -> str
         (f"{D.custom_emoji(RESPAWN_EMOJI)} Возрождение", fmt_dur(c['respawn_min'] * 60)),
         (f"{D.custom_emoji(REWARD_EMOJI)} Награда", fmt(c["reward"]["coins"])),
     ]
+    if t in LEVEL_CAP_TYPES:
+        about.append(("🔒 Для питомцев", f"до {LEVEL_CAP} уровня"))
     fighters = D.custom_emoji(FIGHTERS_EMOJI)
     rows = []
     for bid in all_ids(t):
@@ -1003,7 +1057,7 @@ def boss_list_html(user_id: int, with_image: bool = False, ref: str = "") -> str
         f"<p><b>{_type_icon(t)} {c['title'].upper()} БОССЫ</b><br>&nbsp;<br><b>Выбери босса</b></p>"
         f"<blockquote><i>{escape(c['story'])}</i></blockquote>"
         + _tree(about, "Характеристики")
-        + _gap()
+        + _dots()
         + _tree(rows, f"Боссы (живых {alive_count(t)} из {c['slots']})")
     )
 
@@ -1016,20 +1070,24 @@ def boss_info_html(user_id: int, with_image: bool = False, ref: str = "") -> str
     if is_dead(bid):
         status = ("☠️ Статус", f"повержен, вернётся через {fmt_dur(b['dead_until'] - time.time())}")
     else:
-        status = (f"{_hp_icon()} Здоровье", f"{fmt(b['hp'])} / {fmt(c['hp'])}")
+        status = (f"{_hp_icon()} Здоровье", f"{fmt(b['hp'])} / {fmt(max_hp(bid))}")
     about = [
         status,
         (f"{_stat_icon('def')} Защита", str(c["def"])),
         (f"{D.custom_emoji(RESPAWN_EMOJI)} Возрождение", fmt_dur(c['respawn_min'] * 60)),
     ]
+    if b.get("hp_mult", 1) > 1:
+        about.append(("🔥 Усилен", f"здоровье ×{b['hp_mult']}"))
+    if type_of(bid) in LEVEL_CAP_TYPES:
+        about.append(("🔒 Для питомцев", f"до {LEVEL_CAP} уровня"))
     return (
         f"{_image(with_image)}"
         + _head(bid, f"<b>{_type_icon(type_of(bid))} {c['one']} босс</b>")
         + f"<blockquote><i>{escape(c['story'])}</i></blockquote>"
         + _tree(about, "О боссе")
-        + _gap()
+        + _dots()
         + _reward_tree(c)
-        + _gap()
+        + _dots()
         + _button(f"boss:skills:{bid}", "Атаковать", D.custom_emoji(ATTACK_EMOJI), "danger")
     )
 
@@ -1836,11 +1894,15 @@ async def on_info(callback: CallbackQuery):
 
 @router.callback_query(F.data.regexp(r"^boss:skills:\w+:\d+$"))
 async def on_skills(callback: CallbackQuery):
-    if await _require_user(callback) is None:
+    user = await _require_user(callback)
+    if user is None:
         return
     bid = _bid_from(callback.data)
     if bid is None:
         await callback.answer("Такого босса нет", show_alert=True)
+        return
+    if level_locked(user, bid):
+        await callback.answer(LEVEL_CAP_TEXT, show_alert=True)
         return
     await callback.answer()
     start_strikes(callback.bot)
@@ -1945,6 +2007,9 @@ async def on_hit(callback: CallbackQuery):
     bid = _bid_from(callback.data)
     if bid is None:
         await callback.answer("Такого босса нет", show_alert=True)
+        return
+    if level_locked(user, bid):
+        await callback.answer(LEVEL_CAP_TEXT, show_alert=True)
         return
     tick()
     b = BOSSES[bid]
@@ -2081,8 +2146,11 @@ async def _refresh_own(bot, uid: int) -> None:
 
 
 async def _can_fight(callback: CallbackQuery, user: dict, bid: str) -> bool:
-    """Общие проверки удара и выстрела: босс жив, питомец не отдыхает."""
+    """Общие проверки удара и выстрела: питомец подходит по уровню, босс жив, питомец не отдыхает."""
     b = BOSSES[bid]
+    if level_locked(user, bid):
+        await callback.answer(LEVEL_CAP_TEXT, show_alert=True)
+        return False
     if is_dead(bid):
         await callback.answer(
             f"Босс повержен. Вернётся через {fmt_dur(b['dead_until'] - time.time())}.", show_alert=True)
