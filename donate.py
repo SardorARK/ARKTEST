@@ -1340,8 +1340,8 @@ def _limits_lines(user: dict, key: str) -> list[str]:
     bought = p["per_player"] - lavka_user_left(user, key)
     lines = [f"{_ce(EM_BUY)} <b>Куплено тобой</b>: <b>{bought} из {p['per_player']}</b>"]
     g = lavka_global_left(key)
-    if g is not None:
-        lines.append(f"{_ce(EM_TOTAL)} <b>Осталось всего</b>: <b>{g}</b>")
+    lines.append(f"{_ce(EM_TOTAL)} <b>Всего доступно</b>: "
+                 + (f"<b>{g} из {p['global']}</b>" if g is not None else "<b>без лимита</b>"))
     return lines
 
 
@@ -1402,11 +1402,14 @@ def lavka_item_html(user_id: int, key: str, with_image: bool = False) -> str:
         f"<p><b>{p['icon']} {p['name'].upper()}</b></p>"
         f"<blockquote><i>{p['tagline']}</i></blockquote>"
         + _GAP
-        + _tree(f"{_ce(EM_PACK)} Внутри", [_item_line(*it) for it in p["items"]])
+        + _tree(f"{_ce(EM_PACK)} Внутри", [_item_line(*it) for it in p["items"]], quote=len(p["items"]) > 2)
         + _GAP
         + _tree("", [
             f"{_ce(EM_PRICE)} <b>Цена</b>: {_ce(EM_CRYSTAL)} <b>{_fmt(p['price'])}</b> {_plural(p['price'])}",
             f"{_ce(EM_CRYSTAL)} <b>Баланс</b>: <b>{_fmt(have)}</b>",
+        ])
+        + _GAP
+        + _tree("", [
             *_limits_lines(user, key),
             f"{_ce(EM_LEFT)} <b>Осталось</b>: <b>{_hms(lavka_left_sec())}</b>",
         ])
@@ -1420,7 +1423,6 @@ def lavka_item_kb(user_id: int, key: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [_btn(f"Купить · {_fmt(p['price'])}", f"donate:lvgo:{key}",
               ButtonStyle.SUCCESS if ok else ButtonStyle.DANGER, EM_BUY[0])],
-        [_btn("Обновить", "donate:lavka", ButtonStyle.PRIMARY)],
         _back_btn("donate:home"),
     ])
 
@@ -1432,7 +1434,7 @@ def lavka_done_html(user_id: int, key: str) -> str:
         f"<p><b>{p['icon']} {p['name'].upper()} КУПЛЕН</b></p>"
         "<blockquote><i>Наборы в «Наборах», ресурсы в мастерской, минералы на счёте.</i></blockquote>"
         + _GAP
-        + _tree(f"{_ce(EM_PACK)} Получено", [_item_line(*it) for it in p["items"]])
+        + _tree(f"{_ce(EM_PACK)} Получено", [_item_line(*it) for it in p["items"]], quote=len(p["items"]) > 2)
         + _GAP
         + _tree("Итог", [
             f"{_ce(EM_CRYSTAL)} <b>Баланс</b>: <b>{_fmt(get_balance(user))}</b>",
