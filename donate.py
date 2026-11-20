@@ -91,7 +91,7 @@ EM_BUY = ("5377660214096974712", "🛍")       # кнопка «Купить», 
 EM_BALANCE = ("5445353829304387411", "💳")   # главный экран: «Баланс»
 EM_RATE = ("5377336227533969892", "💱")      # главный экран: «Курс»
 EM_TOTAL = ("5249273776079640466", "💼")     # лавка: «Осталось всего»
-EM_LEFT = ("5339151799314034719", "⏳")      # лавка: «Осталось» (время до обновления)
+EM_LEFT = ("5339151799314034719", "⏳")      # «Осталось» в лавке и «Срок» везде в разделе
 EM_PACK = ("4958714256343171878", "🛍")      # заголовок «Состав пакета»
 EM_VIP = ("5855102887687887423", "🎤")       # привилегия VIP
 EM_PREMIUM = ("5929328297748996713", "💎")   # привилегия Premium
@@ -103,10 +103,10 @@ EM_NEXT = ("5253767677670862169", "🔜")      # кнопка: следующи�
 EM_CLASS = ("5312026254751313956", "👍")     # класс
 EM_NUMBER = ("5325547803936572038", "✨")    # номер
 EM_SAVED = ("5244837092042750681", "📈")     # накоплено
-EM_STATUS = ("5422439311196834318", "💡")    # статус / результат
+EM_STATUS = ("5262844652964303985", "💡")    # статус / результат
 EM_OPENED = ("5203996991054432397", "🎁")    # заголовок «кейс открыт»
 
-EM_PRICE = ("5417924076503062111", "💰")      # перед «Цена» в окне покупки скина
+EM_PRICE = ("5417924076503062111", "💰")      # перед «Цена» везде в разделе
 EM_LACK = ("5328093774650293878", "❌")       # «не хватает» (как в уровне игрока в профиле)
 EM_SKIN = ("5445224310270633584", "🔤")      # кнопка и текст «Скины ника»
 IMG_KEY = "donate"           # ключ картинки раздела (если добавишь в IMG_TARGETS)
@@ -837,7 +837,7 @@ def pack_html(user_id: int, pack_id: str, with_image: bool = False) -> str:
         + _tree(
             f"{_ce(EM_PACK)} Состав пакета",
             [f"Кристаллы: {_ce(EM_CRYSTAL)} <b>{_fmt(coins)}</b>",
-             f"Цена: {_ce(EM_STAR)} <b>{_fmt(stars)}</b> или {_ce(EM_ROCKET)}{_ce(EM_CRYPTO)} <b>{_usd(_cents(coins))}</b>",
+             f"{_ce(EM_PRICE)} Цена: {_ce(EM_STAR)} <b>{_fmt(stars)}</b> или {_ce(EM_ROCKET)}{_ce(EM_CRYPTO)} <b>{_usd(_cents(coins))}</b>",
              f"Баланс после покупки: {_ce(EM_CRYSTAL)} <b>{_fmt(get_balance(user) + coins)}</b>"],
         )
         + _GAP
@@ -863,7 +863,7 @@ def stars_html(user_id: int, pack_id: str, url: str, with_image: bool = False) -
         + _GAP
         + _tree(
             f"{_ce(EM_PACK)} Состав пакета",
-            [f"Цена: <b>{_ce(EM_STAR)} {_fmt(stars)}</b>",
+            [f"{_ce(EM_PRICE)} Цена: <b>{_ce(EM_STAR)} {_fmt(stars)}</b>",
              f"Кристаллы: {_ce(EM_CRYSTAL)} <b>{_fmt(coins)}</b>",
              f"Баланс после покупки: {_ce(EM_CRYSTAL)} <b>{_fmt(get_balance(user) + coins)}</b>"],
         )
@@ -889,7 +889,7 @@ def rocket_html(user_id: int, pack_id: str, invoice_id: str, rec: dict, with_ima
         + _GAP
         + _tree(
             f"{_ce(EM_PACK)} Счёт",
-            [f"К оплате: {_ce(EM_ROCKET)} <b>{_usd(rec['cents'])}</b> ({XROCKET_CURRENCY})",
+            [f"{_ce(EM_PRICE)} К оплате: {_ce(EM_ROCKET)} <b>{_usd(rec['cents'])}</b> ({XROCKET_CURRENCY})",
              f"Кристаллы: {_ce(EM_CRYSTAL)} <b>{_fmt(coins)}</b>",
              f"Баланс после покупки: {_ce(EM_CRYSTAL)} <b>{_fmt(get_balance(user) + coins)}</b>",
              f"Счёт действует ещё: <b>{mins} мин.</b>"],
@@ -917,7 +917,7 @@ def crypto_html(user_id: int, pack_id: str, invoice_id: str, rec: dict, with_ima
         + _GAP
         + _tree(
             f"{_ce(EM_PACK)} Счёт",
-            [f"К оплате: {_ce(EM_CRYPTO)} <b>{_usd(rec['cents'])}</b> ({CRYPTOBOT_ASSET})",
+            [f"{_ce(EM_PRICE)} К оплате: {_ce(EM_CRYPTO)} <b>{_usd(rec['cents'])}</b> ({CRYPTOBOT_ASSET})",
              f"Кристаллы: {_ce(EM_CRYSTAL)} <b>{_fmt(coins)}</b>",
              f"Баланс после покупки: {_ce(EM_CRYSTAL)} <b>{_fmt(get_balance(user) + coins)}</b>",
              f"Счёт действует ещё: <b>{mins} мин.</b>"],
@@ -951,8 +951,8 @@ def priv_html(user_id: int, with_image: bool = False) -> str:
     blocks = "".join(
         _tree(
             f"{_tier_ce(tier)} {info['name']}",
-            [f"Цена: <b>{_ce(EM_CRYSTAL)} {_fmt(info['price'])}</b> на {PRIVILEGE_DAYS} дней",
-             f"Статус: {_status(user, tier)}"],
+            [f"{_ce(EM_PRICE)} Цена: <b>{_ce(EM_CRYSTAL)} {_fmt(info['price'])}</b> на {PRIVILEGE_DAYS} дней",
+             f"{_ce(EM_STATUS)} Статус: {_status(user, tier)}"],
         )
         for tier, info in PRIVILEGES.items()
     )
@@ -972,9 +972,9 @@ def priv_item_html(user_id: int, tier: str, with_image: bool = False) -> str:
     active = active_tier(user)
     price = info["price"]
     have = get_balance(user)
-    rows = [f"Цена: <b>{_ce(EM_CRYSTAL)} {_fmt(price)}</b>",
-            f"Срок: <b>{PRIVILEGE_DAYS} дней</b>",
-            f"Статус: {_status(user, tier)}"]
+    rows = [f"{_ce(EM_PRICE)} Цена: <b>{_ce(EM_CRYSTAL)} {_fmt(price)}</b>",
+            f"{_ce(EM_LEFT)} Срок: <b>{PRIVILEGE_DAYS} дней</b>",
+            f"{_ce(EM_STATUS)} Статус: {_status(user, tier)}"]
     if active and active != tier and list(PRIVILEGES).index(active) > list(PRIVILEGES).index(tier):
         rows.append(f"Действует {PRIVILEGES[active]['name']}: бонусы не складываются")
     mine = [f"{_ce(EM_CRYSTAL)} У тебя: <b>{_fmt(have)}</b>"]
@@ -984,14 +984,14 @@ def priv_item_html(user_id: int, tier: str, with_image: bool = False) -> str:
         button = _rrows([_rbtn(f"{_ce(EM_BUY)} {verb} за {_ce(EM_CRYSTAL)} {_fmt(price)}",
                                f"donate:privgo:{tier}")])
     else:
-        mine.append(f"Не хватает: <b>{_fmt(price - have)}</b>")
+        mine.append(f"{_ce(EM_LACK)} Не хватает: <b>{_fmt(price - have)}</b>")
         button = _rrows([_rbtn(f"{_ce(EM_CRYSTAL)} Пополнить кристаллы", "donate:shop")])
     return (
         f"{image}"
         f"<p><b>{_tier_ce(tier)} ПРИВИЛЕГИЯ «{escape(info['name'].upper())}»</b></p>"
         f"<blockquote><i>{escape(info['tagline'])}</i></blockquote>"
         + _GAP
-        + _tree(f"{_ce(EM_PACK)} Бонусы", _perk_lines(tier))
+        + _tree(f"{_ce(EM_PACK)} Бонусы", _perk_lines(tier), quote=True)
         + _GAP
         + _tree(f"{_ce(EM_CRYSTAL)} Условия", rows)
         + _GAP
@@ -1009,7 +1009,7 @@ def priv_success_html(tier: str, until: int, balance: int | None = None) -> str:
         + _tree(
             f"{_ce(EM_CRYSTAL)} Итог",
             [f"Привилегия: <b>{_tier_ce(tier)} {escape(info['name'])}</b>",
-             f"Действует до: <b>{_date(until)}</b>"]
+             f"{_ce(EM_LEFT)} Действует до: <b>{_date(until)}</b>"]
             + ([f"Осталось кристаллов: {_ce(EM_CRYSTAL)} <b>{_fmt(balance)}</b>"] if balance is not None else []),
         )
     )
@@ -1726,7 +1726,7 @@ def case_html(user_id: int, n: int, with_image: bool = False) -> str:
         f"<blockquote><i>{c['desc']}</i></blockquote>"
         + _tree("О кейсе", [
             f"{_ce(EM_CLASS)} Класс: <b>{c['tier']}</b>",
-            f"{crystal} Цена: <b>{_fmt(c['price'])}</b>",
+            f"{_ce(EM_PRICE)} Цена: <b>{_fmt(c['price'])}</b> {crystal}",
             f"{_ce(EM_NUMBER)} Номер: <b>{n + 1} из {len(DONATE_CASES)}</b>",
         ])
         + _GAP
@@ -2022,7 +2022,7 @@ def boosts_html(user_id: int, page: int = 0, with_image: bool = False) -> str:
         ])
         + _GAP
         + _tree("Коротко", [
-            f"<i>Цены:</i> <b>{min(prices)}</b>–<b>{max(prices)}</b> {crystal}",
+            f"{_ce(EM_PRICE)} <i>Цены:</i> <b>{min(prices)}</b>–<b>{max(prices)}</b> {crystal}",
             f"<i>Инвентарь:</i> <b>{inv_total(user)}</b> <i>(до</i> <b>{INV_LIMIT}</b> <i>каждого вида)</i>",
             "<i>Повторное применение продлевает срок</i>",
         ])
@@ -2044,9 +2044,9 @@ def boost_html(user_id: int, key: str, with_image: bool = False) -> str:
         for i in range(len(b["levels"])):
             lo, hi = _boost_price_range(b, i)
             levels.append(f"<i>{_effect(b, i)}:</i> <b>{lo}</b>–<b>{hi}</b> {crystal}")
-        terms = [f"<i>Срок на выбор:</i> <b>{', '.join(str(h) for h in BOOST_HOURS[:-1])} или {BOOST_HOURS[-1]} "
+        terms = [f"{_ce(EM_LEFT)} <i>Срок на выбор:</i> <b>{', '.join(str(h) for h in BOOST_HOURS[:-1])} или {BOOST_HOURS[-1]} "
                  f"{_hours_word(BOOST_HOURS[-1])}</b>",
-                 "<i>Срок идёт с момента применения</i>",
+                 f"{_ce(EM_LEFT)} <i>Срок идёт с момента применения</i>",
                  "<i>Тот же уровень продлевает срок</i>"]
     buy_buttons = []
     for i in range(len(b["levels"])):
@@ -2089,7 +2089,7 @@ def boost_level_html(user_id: int, key: str, lvl: int, with_image: bool = False)
         f"<p><b>{_bicon(b)}{b['name'].upper()}</b></p>"
         f"<blockquote><i>{_effect(b, lvl)}. Выбери срок.</i></blockquote>"
         f"{_balance_line(user)}"
-        + _tree("Цены по сроку", [
+        + _tree(f"{_ce(EM_PRICE)} Цены по сроку", [
             f"<i>{_hours(h)}:</i> {crystal} <b>{_boost_price(b, lvl, d)}</b>"
             for d, h in enumerate(BOOST_HOURS)
         ])
@@ -2107,8 +2107,8 @@ def boost_confirm_html(user_id: int, key: str, lvl: int, dur: int, with_image: b
     term = ("до запуска автодобычи" if b.get("charge") else _hours(BOOST_HOURS[dur]))
     rows = [f"<i>Эликсир:</i> <b>{_bicon(b)}{b['name']}</b>",
             f"<i>Эффект:</i> <b>{_effect(b, lvl)}</b>",
-            f"<i>Срок:</i> <b>{term}</b>",
-            f"<i>Цена:</i> {crystal} <b>{_fmt(price)}</b>"]
+            f"{_ce(EM_LEFT)} <i>Срок:</i> <b>{term}</b>",
+            f"{_ce(EM_PRICE)} <i>Цена:</i> {crystal} <b>{_fmt(price)}</b>"]
     after = [f"<i>У тебя:</i> {crystal} <b>{_fmt(have)}</b>",
              f"<i>После покупки:</i> {crystal} <b>{_fmt(max(0, have - price))}</b>"]
     if have < price:
@@ -2138,7 +2138,7 @@ def boost_done_html(user_id: int, key: str, lvl: int, dur: int) -> str:
     crystal = _ce(EM_CRYSTAL)
     term = "до запуска автодобычи" if b.get("charge") else _hours(BOOST_HOURS[dur])
     rows = [f"<i>Эликсир:</i> <b>{_bicon(b)}{b['name']}</b>", f"<i>Эффект:</i> <b>{_effect(b, lvl)}</b>",
-            f"<i>Срок после применения:</i> <b>{term}</b>",
+            f"{_ce(EM_LEFT)} <i>Срок после применения:</i> <b>{term}</b>",
             f"🎒 <i>В инвентаре:</i> <b>{inv_count(user, key)}/{INV_LIMIT}</b>",
             f"{crystal} <i>Осталось:</i> <b>{_fmt(get_balance(user))}</b>"]
     return (
@@ -2394,7 +2394,7 @@ def inv_use_html(user_id: int, key: str, lvl: int, dur: int, with_image: bool = 
     term = ("до запуска автодобычи" if b.get("charge")
             else _hours(BOOST_HOURS[dur]))
     rows = [f"Эликсир: <b>{_bicon(b)}{b['name']}</b>", f"Эффект: <b>{_effect(b, lvl)}</b>",
-            f"Срок: <b>{term}</b>"]
+            f"{_ce(EM_LEFT)} Срок: <b>{term}</b>"]
     cur = None if b.get("charge") else boost_active(user, key)
     if cur and cur[0] == lvl:
         rows.append(f"Уже действует, срок продлится (ещё {_left(cur[1])})")
@@ -2425,7 +2425,7 @@ def inv_done_html(user_id: int, key: str, lvl: int, dur: int, until: int | None)
     user = _cfg["get_user"](user_id)
     b = BOOSTS[key]
     rows = [f"Эликсир: <b>{_bicon(b)}{b['name']}</b>", f"Эффект: <b>{_effect(b, lvl)}</b>"]
-    rows.append(f"Действует до: <b>{_datetime(until)}</b>" if until
+    rows.append(f"{_ce(EM_LEFT)} Действует до: <b>{_datetime(until)}</b>" if until
                 else "Сработает при ближайшем запуске автодобычи")
     rows.append(f"🎒 Осталось в инвентаре: <b>{inv_count(user, key)}/{INV_LIMIT}</b>")
     return (
