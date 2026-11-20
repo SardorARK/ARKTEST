@@ -1919,6 +1919,9 @@ donate.setup(
     pet_images=pet_images,      # чтобы экраны доната брали своё фото или общее фото раздела
     MINERAL_EMOJI=MINERAL_EMOJI,    # «Лавка»: паки с минералами
     MINERALS_FIELD=MINERALS_FIELD,
+    close_mode=quick_cmds.CLOSE_MODE,      # команда «сп»: лавка с кнопкой «Закрыть» вместо «Назад»
+    is_closable=_is_closable,
+    is_virtual=quick_cmds.is_virtual,
 )
 dp.include_router(donate.router)
 
