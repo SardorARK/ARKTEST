@@ -83,6 +83,7 @@ import underground       # «Шахта» (underground.py): открываетс
 import period_stats      # статистика по периодам: команда «стата» (period_stats.py)
 import quick_cmds
 import friends
+import tops              # раздел «Топ» (tops.py): команда «топ»
 import gift              # передача ресурсов игроку: «дать @ник» (gift.py)
 import transfer          # переводы: «перевести» (монеты) и «перечислить» (кристаллы), transfer.py
 import store as market   # раздел «Рынок» (store.py); имя store в main.py занято базой игроков
@@ -2034,6 +2035,21 @@ boss.setup(
     name_plain_of=lambda uid: settings.public_name_plain_by_id(uid),
 )
 dp.include_router(boss.router)
+
+# Раздел «Топ» живёт в tops.py: рефералы, арена, боссы, экспедиции, донаты, монеты, минералы
+tops.setup(
+    get_user=get_user,
+    users=users,
+    show_rich_card=show_rich_card,
+    custom_emoji=custom_emoji,
+    name_html_of=lambda uid: _orig_public_name_html_by_id(uid),
+    BACK_EMOJI_ID=BACK_EMOJI_ID,
+    MINERALS_FIELD=MINERALS_FIELD,
+    COIN_EMOJI=COIN_EMOJI,
+    MINERAL_EMOJI=MINERAL_EMOJI,
+    EXPLORE_EMOJI=exrn.EXPLORE_EMOJI,
+)
+dp.include_router(tops.router)
 
 # Раздел «Бонус» живёт в bonus.py: +10% к урону по боссам, пока юзернейм бота стоит в описании профиля
 bonus.setup(
