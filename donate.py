@@ -619,11 +619,12 @@ def _fmt(n: int) -> str:
 _GAP = "<p>&nbsp;</p>"   # пустая строка между блоками
 
 
-def _tree(title: str, lines: list[str]) -> str:
-    """Блок: заголовок и короткие строки с точками «•», как в экспедициях."""
+def _tree(title: str, lines: list[str], quote: bool = False) -> str:
+    """Блок: заголовок и короткие строки с точками «•».
+    quote=True: весь блок в сворачиваемой цитате (<blockquote expandable>), как в экспедициях."""
     body = "<br>".join(f"• {line}" for line in lines)
     head = f"<b>{title}</b><br>" if title else ""
-    return f"<p>{head}{body}</p>"
+    return f"<blockquote expandable>{head}{body}</blockquote>" if quote else f"<p>{head}{body}</p>"
 
 
 def _plural(n: int) -> str:
@@ -677,7 +678,7 @@ def home_kb() -> InlineKeyboardMarkup:
         [_btn("Привилегии", "donate:priv", ButtonStyle.PRIMARY, EM_PRIV[0]), _btn("Кейсы", "donate:cases", ButtonStyle.PRIMARY, "5285009510300150278")],
         [_btn("Временные бусты", "donate:boosts", ButtonStyle.SUCCESS, "5438571934210082705"),
          _btn("🎒 Инвентарь", "donate:inv", ButtonStyle.SUCCESS)],
-        [_btn("Лавка", "donate:lavka", ButtonStyle.SUCCESS, EM_LAVKA[0]),
+        [_btn("Лавка", "donate:lavka", ButtonStyle.PRIMARY, EM_LAVKA[0]),
          _btn("Скины ника", "set:skin", ButtonStyle.PRIMARY, EM_SKIN[0])],
         _back_btn("menu:back"),
     ])
@@ -738,6 +739,7 @@ def home_html(user_id: int, with_image: bool = False) -> str:
              f"🎒 <b>Инвентарь</b>: <b>{inv_total(user)}</b>",
              f"{_ce(EM_LAVKA)} <b>Лавка</b>: <i>новый пак каждые {LAVKA_HOURS} ч</i>",
              f"{_ce(EM_SKIN)} <b>Скины ника</b>: <i>эмодзи в имени</i>"],
+            quote=True,
         )
     )
 
