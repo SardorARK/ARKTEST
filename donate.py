@@ -723,11 +723,16 @@ def success_kb() -> InlineKeyboardMarkup:
     ])
 
 
+def _bal(label: str, amount) -> str:
+    """Строка баланса одного вида везде в разделе: «💳 Баланс: 42 💎» (подпись жирным вместе с числом)."""
+    return f"<b>{_ce(EM_BALANCE)} {label}: {_fmt(amount)}</b> {_ce(EM_CRYSTAL)}"
+
+
 def _balance_line(user: dict | None, rate: bool = False) -> str:
-    """«Баланс: N». rate=True (главный экран): со значком 💳 и строкой курса в долларах и звёздах."""
+    """«💳 Баланс: N 💎». rate=True (главный экран): ещё и строка курса в долларах и звёздах."""
     if not rate:
-        return f"<p><b>Баланс: {_fmt(get_balance(user))}</b> {_ce(EM_CRYSTAL)}</p>{_GAP}"
-    return (f"<p><b>{_ce(EM_BALANCE)} Баланс: {_fmt(get_balance(user))}</b> {_ce(EM_CRYSTAL)}<br>"
+        return f"<p>{_bal('Баланс', get_balance(user))}</p>{_GAP}"
+    return (f"<p>{_bal('Баланс', get_balance(user))}<br>"
             f"<b>{_ce(EM_RATE)} Курс: 100 {_ce(EM_CRYSTAL)} = 100 {_ce(EM_STAR)} = {_usd(USD_CENTS_PER_100)}</b></p>{_GAP}")
 
 
@@ -756,18 +761,11 @@ def home_html(user_id: int, with_image: bool = False) -> str:
 def shop_html(user_id: int, with_image: bool = False) -> str:
     user = _cfg["get_user"](user_id)
     image = '<img src="tg://photo?id=pet"/>' if with_image else ""
-    packs = _tree(
-        f"{_ce(EM_STAR)} Пакеты (1 {_ce(EM_STAR)} = 1 {_ce(EM_CRYSTAL)}, 100 {_ce(EM_CRYSTAL)} = {_usd(USD_CENTS_PER_100)})",
-        [f"{_ce(EM_STAR)} <b>{_fmt(stars)}</b> / {_ce(EM_ROCKET)}{_ce(EM_CRYPTO)} <b>{_usd(_cents(coins))}</b> → {_ce(EM_CRYSTAL)} {_fmt(coins)} {_plural(coins)}"
-         for stars, coins, _name in PACKS.values()],
-    )
     return (
         f"{image}"
         f"<p><b>{_ce(_cfg['DONATE_EMOJI'])} МАГАЗИН КРИСТАЛЛОВ</b></p>"
         "<blockquote><i>Выбери способ оплаты и пакет. Кристаллы приходят сразу.</i></blockquote>"
         f"{_balance_line(user)}"
-        f"{packs}"
-        + _GAP
         + "<p><b>Выбери способ оплаты</b></p>"
         + _rrows([
             _rbtn(f"{_ce(EM_STAR)} Telegram Stars", "donate:shop:stars", "success"),
@@ -838,7 +836,7 @@ def pack_html(user_id: int, pack_id: str, with_image: bool = False) -> str:
             f"{_ce(EM_PACK)} Состав пакета",
             [f"Кристаллы: {_ce(EM_CRYSTAL)} <b>{_fmt(coins)}</b>",
              f"{_ce(EM_PRICE)} Цена: {_ce(EM_STAR)} <b>{_fmt(stars)}</b> или {_ce(EM_ROCKET)}{_ce(EM_CRYPTO)} <b>{_usd(_cents(coins))}</b>",
-             f"Баланс после покупки: {_ce(EM_CRYSTAL)} <b>{_fmt(get_balance(user) + coins)}</b>"],
+             _bal("Баланс после покупки", get_balance(user) + coins)],
         )
         + _GAP
         + _tree("Выбери способ оплаты", [
@@ -865,7 +863,7 @@ def stars_html(user_id: int, pack_id: str, url: str, with_image: bool = False) -
             f"{_ce(EM_PACK)} Состав пакета",
             [f"{_ce(EM_PRICE)} Цена: <b>{_ce(EM_STAR)} {_fmt(stars)}</b>",
              f"Кристаллы: {_ce(EM_CRYSTAL)} <b>{_fmt(coins)}</b>",
-             f"Баланс после покупки: {_ce(EM_CRYSTAL)} <b>{_fmt(get_balance(user) + coins)}</b>"],
+             _bal("Баланс после покупки", get_balance(user) + coins)],
         )
         + _GAP
         + "<tg-button-row>"
@@ -891,7 +889,7 @@ def rocket_html(user_id: int, pack_id: str, invoice_id: str, rec: dict, with_ima
             f"{_ce(EM_PACK)} Счёт",
             [f"{_ce(EM_PRICE)} К оплате: {_ce(EM_ROCKET)} <b>{_usd(rec['cents'])}</b> ({XROCKET_CURRENCY})",
              f"Кристаллы: {_ce(EM_CRYSTAL)} <b>{_fmt(coins)}</b>",
-             f"Баланс после покупки: {_ce(EM_CRYSTAL)} <b>{_fmt(get_balance(user) + coins)}</b>",
+             _bal("Баланс после покупки", get_balance(user) + coins),
              f"Счёт действует ещё: <b>{mins} мин.</b>"],
         )
         + _GAP
@@ -919,7 +917,7 @@ def crypto_html(user_id: int, pack_id: str, invoice_id: str, rec: dict, with_ima
             f"{_ce(EM_PACK)} Счёт",
             [f"{_ce(EM_PRICE)} К оплате: {_ce(EM_CRYPTO)} <b>{_usd(rec['cents'])}</b> ({CRYPTOBOT_ASSET})",
              f"Кристаллы: {_ce(EM_CRYSTAL)} <b>{_fmt(coins)}</b>",
-             f"Баланс после покупки: {_ce(EM_CRYSTAL)} <b>{_fmt(get_balance(user) + coins)}</b>",
+             _bal("Баланс после покупки", get_balance(user) + coins),
              f"Счёт действует ещё: <b>{mins} мин.</b>"],
         )
         + _GAP
@@ -937,7 +935,7 @@ def _date(ts: int) -> str:
 
 def _perk_lines(tier: str) -> list[str]:
     perks = PRIVILEGES[tier]["perks"]
-    return [f"{PERK_LABELS[k][0]}: <b>{PERK_LABELS[k][1]}{v}%</b>" for k, v in perks.items()]
+    return [f"<i>{PERK_LABELS[k][0]}: {PERK_LABELS[k][1]}{v}%</i>" for k, v in perks.items()]
 
 
 def _status(user: dict | None, tier: str) -> str:
@@ -977,9 +975,9 @@ def priv_item_html(user_id: int, tier: str, with_image: bool = False) -> str:
             f"{_ce(EM_STATUS)} Статус: {_status(user, tier)}"]
     if active and active != tier and list(PRIVILEGES).index(active) > list(PRIVILEGES).index(tier):
         rows.append(f"Действует {PRIVILEGES[active]['name']}: бонусы не складываются")
-    mine = [f"{_ce(EM_CRYSTAL)} У тебя: <b>{_fmt(have)}</b>"]
+    mine = [_bal("Баланс", have)]
     if have >= price:
-        mine.append(f"{_ce(EM_CRYSTAL)} После покупки: <b>{_fmt(have - price)}</b>")
+        mine.append(_bal("Баланс после покупки", have - price))
         verb = "Продлить" if priv_expires(user, tier) > time.time() else "Купить"
         button = _rrows([_rbtn(f"{_ce(EM_BUY)} {verb} за {_ce(EM_CRYSTAL)} {_fmt(price)}",
                                f"donate:privgo:{tier}")])
@@ -1010,7 +1008,7 @@ def priv_success_html(tier: str, until: int, balance: int | None = None) -> str:
             f"{_ce(EM_CRYSTAL)} Итог",
             [f"Привилегия: <b>{_tier_ce(tier)} {escape(info['name'])}</b>",
              f"{_ce(EM_LEFT)} Действует до: <b>{_date(until)}</b>"]
-            + ([f"Осталось кристаллов: {_ce(EM_CRYSTAL)} <b>{_fmt(balance)}</b>"] if balance is not None else []),
+            + ([_bal("Баланс", balance)] if balance is not None else []),
         )
     )
 
@@ -1041,7 +1039,7 @@ def success_html(coins: int, balance: int) -> str:
         + _tree(
             f"{_ce(EM_STAR)} Итог",
             [f"Начислено: {_ce(EM_CRYSTAL)} <b>+{_fmt(coins)}</b>",
-             f"Баланс: {_ce(EM_CRYSTAL)} <b>{_fmt(balance)}</b>"],
+             _bal("Баланс", balance)],
         )
     )
 
@@ -1412,7 +1410,7 @@ def lavka_item_html(user_id: int, key: str, with_image: bool = False) -> str:
         + _GAP
         + _tree("", [
             f"{_ce(EM_PRICE)} <b>Цена</b>: {_ce(EM_CRYSTAL)} <b>{_fmt(p['price'])}</b> {_plural(p['price'])}",
-            f"{_ce(EM_CRYSTAL)} <b>Баланс</b>: <b>{_fmt(have)}</b>",
+            _bal("Баланс", have),
         ])
         + _GAP
         + _tree("", [
@@ -1443,7 +1441,7 @@ def lavka_done_html(user_id: int, key: str) -> str:
         + _tree(f"{_ce(EM_PACK)} Получено", [_item_line(*it) for it in p["items"]], quote=len(p["items"]) > 2)
         + _GAP
         + _tree("Итог", [
-            f"{_ce(EM_CRYSTAL)} <b>Баланс</b>: <b>{_fmt(get_balance(user))}</b>",
+            _bal("Баланс", get_balance(user)),
             *_limits_lines(user, key),
         ])
     )
@@ -1604,7 +1602,7 @@ def skin_done_html(user_id: int, key: str) -> str:
     return (
         f"<p><b>{_ce(EM_SKIN)} СКИН КУПЛЕН</b></p>"
         f"<blockquote><i>«{escape(st.SKINS[key]['name'])}» твой. Надень кнопкой ниже.</i></blockquote>"
-        f"<p>{_ce(EM_CRYSTAL)} Осталось: <b>{_fmt(get_balance(user))}</b></p>"
+        f"<p>{_bal('Баланс', get_balance(user))}</p>"
     )
 
 
@@ -1698,7 +1696,7 @@ def cases_html(user_id: int, with_image: bool = False) -> str:
         f"{_image(with_image)}"
         f"<p><b>{_ce(_cfg['DONATE_EMOJI'])} ДОНАТНЫЕ КЕЙСЫ</b></p>"
         "<blockquote><i>Кейсы за кристаллы. Чем дороже, тем выше шанс на редкое.</i></blockquote>"
-        + _tree("Твои кристаллы", [f"{crystal} Кристаллов: <b>{_fmt(get_balance(user))}</b>"])
+        + _tree("", [_bal("Баланс", get_balance(user))])
         + _GAP
         + _tree("Что внутри", [
             "Артефакты питомца, шахты и исследователей",
@@ -1731,7 +1729,7 @@ def case_html(user_id: int, n: int, with_image: bool = False) -> str:
         ])
         + _GAP
         + _tree("Твои кристаллы", [
-            f"{crystal} У тебя: <b>{_fmt(have)}</b>",
+            _bal("Баланс", have),
             f"{_ce(EM_SAVED)} Накоплено: <b>{_bar(have / c['price'])}</b>",
             f"{_ce(EM_STATUS)} Статус: <b>{status}</b>",
         ])
@@ -1756,7 +1754,7 @@ def case_result_html(user_id: int, n: int, art: dict, is_new: bool, refund: int,
     else:
         rows = [f"{_ce(EM_STATUS)} Результат: <b>дубликат, такой уже есть</b>",
                 f"{crystal} Компенсация: <b>+{_fmt(refund)}</b>"]
-    rows.append(f"{crystal} Осталось кристаллов: <b>{_fmt(get_balance(user))}</b>")
+    rows.append(_bal("Баланс", get_balance(user)))
     return (
         f"{_image(with_image)}"
         f"<p><b>{_ce(EM_OPENED)} {c['name'].upper()} ОТКРЫТ</b></p>"
@@ -2109,8 +2107,8 @@ def boost_confirm_html(user_id: int, key: str, lvl: int, dur: int, with_image: b
             f"<i>Эффект:</i> <b>{_effect(b, lvl)}</b>",
             f"{_ce(EM_LEFT)} <i>Срок:</i> <b>{term}</b>",
             f"{_ce(EM_PRICE)} <i>Цена:</i> {crystal} <b>{_fmt(price)}</b>"]
-    after = [f"<i>У тебя:</i> {crystal} <b>{_fmt(have)}</b>",
-             f"<i>После покупки:</i> {crystal} <b>{_fmt(max(0, have - price))}</b>"]
+    after = [_bal("Баланс", have),
+             _bal("Баланс после покупки", max(0, have - price))]
     if have < price:
         after.append(f"{_ce(EM_STATUS)} <i>Не хватает:</i> <b>{_fmt(price - have)} {_plural(price - have)}</b>")
     n = inv_count(user, key)
@@ -2135,12 +2133,11 @@ def boost_confirm_html(user_id: int, key: str, lvl: int, dur: int, with_image: b
 def boost_done_html(user_id: int, key: str, lvl: int, dur: int) -> str:
     user = _cfg["get_user"](user_id)
     b = BOOSTS[key]
-    crystal = _ce(EM_CRYSTAL)
     term = "до запуска автодобычи" if b.get("charge") else _hours(BOOST_HOURS[dur])
     rows = [f"<i>Эликсир:</i> <b>{_bicon(b)}{b['name']}</b>", f"<i>Эффект:</i> <b>{_effect(b, lvl)}</b>",
             f"{_ce(EM_LEFT)} <i>Срок после применения:</i> <b>{term}</b>",
             f"🎒 <i>В инвентаре:</i> <b>{inv_count(user, key)}/{INV_LIMIT}</b>",
-            f"{crystal} <i>Осталось:</i> <b>{_fmt(get_balance(user))}</b>"]
+            _bal("Баланс", get_balance(user))]
     return (
         f"<p><b>{_ce(_cfg['DONATE_EMOJI'])} ЭЛИКСИР В ИНВЕНТАРЕ</b></p>"
         "<blockquote><i>Спасибо! Примени его, когда нужно.</i></blockquote>"
