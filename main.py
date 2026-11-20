@@ -2020,6 +2020,8 @@ boss.setup(
     get_user=get_user,
     save_users=save_users,
     send_rich_card=send_rich_card,
+    image_for=_image_for,          # фото экрана для чата (в группах без фото): правка на месте как при отправке
+    is_closable=_is_closable,      # раздел открыт командой «босс»: вместо «Назад» кнопка «Закрыть»
     custom_emoji=custom_emoji,
     COIN_EMOJI=COIN_EMOJI,
     INFO_EMOJI=INFO_EMOJI,
