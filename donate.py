@@ -616,13 +616,14 @@ def _fmt(n: int) -> str:
     return f"{int(n):,}".replace(",", " ")
 
 
-_GAP = "<p>&nbsp;</p>"   # пустая строка между блоками
+DOTS = "·" * 25   # точки-разделитель блоков (моно, как в экспедициях)
+_GAP = f"<p><code>{DOTS}</code></p>"   # разделитель между блоками
 
 
 def _tree(title: str, lines: list[str], quote: bool = False) -> str:
-    """Блок: заголовок и короткие строки с точками «•».
-    quote=True: весь блок в сворачиваемой цитате (<blockquote expandable>), как в экспедициях."""
-    body = "<br>".join(f"• {line}" for line in lines)
+    """Блок: жирный заголовок и короткие строки без рамочек (блоки разделяет ряд моно-точек _GAP, как в экспедициях).
+    quote=True: весь блок в сворачиваемой цитате (<blockquote expandable>)."""
+    body = "<br>".join(lines)
     head = f"<b>{title}</b><br>" if title else ""
     return f"<blockquote expandable>{head}{body}</blockquote>" if quote else f"<p>{head}{body}</p>"
 
@@ -985,6 +986,7 @@ def priv_item_html(user_id: int, tier: str, with_image: bool = False) -> str:
         + _tree(f"{_ce(EM_PACK)} Бонусы", _perk_lines(tier))
         + _GAP
         + _tree(f"{_ce(EM_CRYSTAL)} Условия", rows)
+        + _GAP
         + _tree("Твои кристаллы", mine)
         + _GAP
         + button
@@ -1389,7 +1391,9 @@ def lavka_item_html(user_id: int, key: str, with_image: bool = False) -> str:
         f"{image}"
         f"<p><b>{p['icon']} {p['name'].upper()}</b></p>"
         f"<blockquote><i>{p['tagline']}</i></blockquote>"
+        + _GAP
         + _tree(f"{_ce(EM_PACK)} Внутри", [_item_line(*it) for it in p["items"]])
+        + _GAP
         + _tree("Условия", [
             f"{_ce(EM_PRICE)} <b>Цена</b>: {_ce(EM_CRYSTAL)} <b>{_fmt(p['price'])}</b> {_plural(p['price'])}",
             f"{_ce(EM_CRYSTAL)} <b>Твой баланс</b>: <b>{_fmt(have)}</b>",
@@ -1417,7 +1421,9 @@ def lavka_done_html(user_id: int, key: str) -> str:
     return (
         f"<p><b>{p['icon']} {p['name'].upper()} КУПЛЕН</b></p>"
         "<blockquote><i>Наборы в «Наборах», ресурсы в мастерской, минералы на счёте.</i></blockquote>"
+        + _GAP
         + _tree(f"{_ce(EM_PACK)} Получено", [_item_line(*it) for it in p["items"]])
+        + _GAP
         + _tree("Итог", [
             f"{_ce(EM_CRYSTAL)} <b>Баланс</b>: <b>{_fmt(get_balance(user))}</b>",
             *_limits_lines(user, key),
