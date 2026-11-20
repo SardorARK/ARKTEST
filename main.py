@@ -2041,6 +2041,7 @@ tops.setup(
     get_user=get_user,
     users=users,
     show_rich_card=show_rich_card,
+    send_rich_card=send_rich_card,
     custom_emoji=custom_emoji,
     name_html_of=lambda uid: _orig_public_name_html_by_id(uid),
     BACK_EMOJI_ID=BACK_EMOJI_ID,
