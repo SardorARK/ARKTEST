@@ -87,7 +87,9 @@ PAID_KEEP = 100              # сколько последних id хранит
 # Кастомные эмодзи раздела: (id, запасной символ)
 EM_CRYSTAL = ("5251329454801710673", "🎁")   # донатная валюта: кристаллы
 EM_STAR = ("5408869739982246969", "⭐")      # звезда Telegram Stars
-EM_BUY = ("5377660214096974712", "🛍")       # кнопка «Купить»
+EM_BUY = ("5377660214096974712", "🛍")       # кнопка «Купить», в лавке перед «Куплено тобой»
+EM_TOTAL = ("5249273776079640466", "💼")     # лавка: «Осталось всего»
+EM_LEFT = ("5339151799314034719", "⏳")      # лавка: «Осталось» (время до обновления)
 EM_PACK = ("4958714256343171878", "🛍")      # заголовок «Состав пакета»
 EM_VIP = ("5420487630812916881", "❤️")       # привилегия VIP
 EM_PREMIUM = ("5420122777636087041", "😘")   # привилегия Premium
@@ -1217,6 +1219,13 @@ def lavka_global_left(key: str) -> int | None:
     return max(0, cap - int(_LV["sold"].get(key, 0) or 0))
 
 
+def _hms(sec: int) -> str:
+    """9ч 11м 15с (часы и минуты показываются, если они не нулевые)."""
+    h, rest = divmod(max(0, int(sec)), 3600)
+    m, s = divmod(rest, 60)
+    return " ".join(([f"{h}ч"] if h else []) + ([f"{m}м"] if h or m else []) + [f"{s}с"])
+
+
 def _hm(sec: int) -> str:
     h, rest = divmod(max(0, int(sec)), 3600)
     m = rest // 60
@@ -1328,10 +1337,11 @@ def _lv_error(user: dict, key: str) -> str | None:
 
 def _limits_lines(user: dict, key: str) -> list[str]:
     p = LAVKA_PACKS[key]
-    lines = [f"<b>Тебе доступно</b>: <b>{lavka_user_left(user, key)}</b> из {p['per_player']}"]
+    bought = p["per_player"] - lavka_user_left(user, key)
+    lines = [f"{_ce(EM_BUY)} <b>Куплено тобой</b>: <b>{bought} из {p['per_player']}</b>"]
     g = lavka_global_left(key)
     if g is not None:
-        lines.append(f"<b>Осталось на всех</b>: <b>{g}</b> из {p['global']}")
+        lines.append(f"{_ce(EM_TOTAL)} <b>Осталось всего</b>: <b>{g}</b>")
     return lines
 
 
@@ -1351,7 +1361,7 @@ def lavka_html(user_id: int, with_image: bool = False) -> str:
         elif gl is not None and gl <= 0:
             state = "<i>распродано</i>"
         else:
-            state = f"<i>тебе доступно: {lavka_user_left(user, key)} из {p['per_player']}</i>"
+            state = f"<i>куплено: {p['per_player'] - lavka_user_left(user, key)} из {p['per_player']}</i>"
         blocks.append(
             f"<p><b>{p['icon']} {p['name']}</b> · {_ce(EM_CRYSTAL)} <b>{_fmt(p['price'])}</b><br>"
             f"{state}</p>"
@@ -1394,11 +1404,11 @@ def lavka_item_html(user_id: int, key: str, with_image: bool = False) -> str:
         + _GAP
         + _tree(f"{_ce(EM_PACK)} Внутри", [_item_line(*it) for it in p["items"]])
         + _GAP
-        + _tree("Условия", [
+        + _tree("", [
             f"{_ce(EM_PRICE)} <b>Цена</b>: {_ce(EM_CRYSTAL)} <b>{_fmt(p['price'])}</b> {_plural(p['price'])}",
-            f"{_ce(EM_CRYSTAL)} <b>Твой баланс</b>: <b>{_fmt(have)}</b>",
+            f"{_ce(EM_CRYSTAL)} <b>Баланс</b>: <b>{_fmt(have)}</b>",
             *_limits_lines(user, key),
-            f"<b>Обновление через</b>: <b>{_hm(lavka_left_sec())}</b>",
+            f"{_ce(EM_LEFT)} <b>Осталось</b>: <b>{_hms(lavka_left_sec())}</b>",
         ])
     )
 
