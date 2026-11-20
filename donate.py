@@ -164,14 +164,14 @@ PRIV_FIELD = "privileges"      # в профиле: {"vip": время окон�
 PRIVILEGES: dict[str, dict] = {
     "vip": {
         "name": "VIP", "icon": "❤️", "emoji": EM_VIP, "stars": 129, "price": 129,   # price: цена в кристаллах
-        "tagline": "Первый шаг к сильному питомцу: заметная прибавка в боях и экспедициях.",
+        "tagline": "Прибавка в боях и экспедициях.",
         "perks": {"boss_damage": 15, "cooldown": 18, "luck": 15,
                   "artifact_bonus": 3, "explorer_reward": 25,
                   "arena_reward": 15},
     },
     "premium": {
         "name": "Premium", "icon": "😘", "emoji": EM_PREMIUM, "stars": 299, "price": 299,
-        "tagline": "Максимальные бонусы для тех, кто идёт до конца: всё, что даёт VIP, но сильнее.",
+        "tagline": "Бонусы VIP, но сильнее.",
         "perks": {"boss_damage": 30, "cooldown": 36, "luck": 30,
                   "artifact_bonus": 6, "explorer_reward": 50,
                   "arena_reward": 30},
@@ -182,13 +182,13 @@ PRIVILEGES: dict[str, dict] = {
 DONATE_CASES = [
     {"name": "Эпический кейс", "price": 299, "tier": "Эпический", "icon": "🟣", "emoji": ("5431573577059034585", "🤡"),
      "drops": {"Эпический": 75, "Мифический": 22, "Легендарный": 3},
-     "desc": "Фиолетовое свечение пробивается сквозь щели. Внутри точно не мелочь."},
+     "desc": "Фиолетовое свечение из щелей."},
     {"name": "Мифический кейс", "price": 599, "tier": "Мифический", "icon": "🔴", "emoji": ("6206057271173058820", "🪙"),
      "drops": {"Эпический": 60, "Мифический": 33, "Легендарный": 7},
-     "desc": "Тёплый на ощупь, а внутри что-то тихо гудит. Обычного тут не бывает."},
+     "desc": "Тёплый, внутри что-то гудит."},
     {"name": "Легендарный кейс", "price": 1299, "tier": "Легендарный", "icon": "🟡", "emoji": ("5294448688775586437", "🎁"),
      "drops": {"Эпический": 45, "Мифический": 42, "Легендарный": 13},
-     "desc": "Стоит приподнять крышку, и воздух вокруг начинает звенеть. Здесь лежит то, о чём слагают легенды."},
+     "desc": "Внутри то, о чём слагают легенды."},
 ]
 # Компенсация КРИСТАЛЛАМИ, если выпал артефакт, который уже есть: редкость -> кристаллы
 CASE_DUPLICATE = {"Эпический": 35, "Мифический": 55, "Легендарный": 139}
@@ -215,7 +215,7 @@ BOOSTS: dict[str, dict] = {
         "levels": (15, 25, 35),
         "effect": "Урон по боссам +{p}%",
         "short": "урон по боссам +{lo}–{hi}%",
-        "desc": "Питомец бьёт сильнее: урон по боссам растёт, пока действует эликсир.",
+        "desc": "Урон по боссам растёт на время.",
         "prices": ((10, 15, 25, 50), (15, 25, 40, 75), (20, 35, 55, 100)),
     },
     "def": {
@@ -223,7 +223,7 @@ BOOSTS: dict[str, dict] = {
         "levels": (3, 5, 12),
         "effect": "Урон от босса −{p}%",
         "short": "урон от босса −{lo}–{hi}%",
-        "desc": "Босс бьёт слабее: получаемый от него урон снижается на время действия.",
+        "desc": "Урон от босса снижается на время.",
         "prices": ((10, 15, 20, 35), (15, 20, 30, 55), (25, 40, 60, 95)),
     },
     "cd": {
@@ -231,8 +231,7 @@ BOOSTS: dict[str, dict] = {
         "levels": (15, 25, 35),
         "effect": "Перезарядка в боях с боссами −{p}%",
         "short": "перезарядка в боях с боссами −{lo}–{hi}%",
-        "desc": "Навыки питомца перезаряжаются быстрее в боях с боссами. "
-                "Вместе с артефактами и привилегиями сокращение не превысит 70%.",
+        "desc": "Навыки перезаряжаются быстрее. Общее сокращение не больше 70%.",
         "prices": ((10, 15, 25, 50), (15, 25, 40, 75), (20, 35, 55, 100)),
     },
     "stats": {
@@ -240,7 +239,7 @@ BOOSTS: dict[str, dict] = {
         "levels": (5, 15, 25),
         "effect": "Характеристики питомца +{p}%",
         "short": "характеристики питомца +{lo}–{hi}%",
-        "desc": "Здоровье, урон, защита, скорость и удача питомца растут в боях с боссами.",
+        "desc": "Все характеристики растут в боях с боссами.",
         "prices": ((10, 15, 25, 45), (20, 30, 50, 80), (30, 45, 70, 100)),
     },
     "luck": {
@@ -248,8 +247,7 @@ BOOSTS: dict[str, dict] = {
         "levels": (5, 12, 18),
         "effect": "Шанс редких артефактов в кейсах +{p}%",
         "short": "шанс редких артефактов в кейсах +{lo}–{hi}%",
-        "desc": "Во всех кейсах (обычных и донатных) редкие артефакты выпадают чаще. "
-                "Шансы самой низкой редкости кейса не растут, растут шансы выше неё.",
+        "desc": "Редкие артефакты в кейсах выпадают чаще.",
         "prices": ((15, 25, 40, 70), (25, 40, 65, 90), (35, 55, 80, 100)),
     },
     "exp": {
@@ -257,7 +255,7 @@ BOOSTS: dict[str, dict] = {
         "levels": (15, 25, 35),
         "effect": "Награда за исследования +{p}%",
         "short": "награда за исследования +{lo}–{hi}%",
-        "desc": "Исследователи приносят больше: награда за экспедиции растёт.",
+        "desc": "Награда за экспедиции растёт.",
         "prices": ((10, 15, 25, 45), (15, 25, 40, 70), (20, 35, 55, 90)),
     },
     "mine": {
@@ -265,8 +263,7 @@ BOOSTS: dict[str, dict] = {
         "levels": (12, 18, 24, 48),     # часы автодобычи вместо обычных 8
         "effect": "Автодобыча до {p} ч (вместо 8)",
         "short": "автодобыча до {lo}–{hi} ч вместо 8",
-        "desc": "Автодобыча в шахте идёт дольше обычных 8 часов. Эликсир одноразовый: "
-                "срабатывает на ближайший запуск автодобычи.",
+        "desc": "Автодобыча идёт дольше 8 часов. Одноразовый.",
         "prices": (20, 35, 50, 90),
     },
 }
@@ -623,9 +620,8 @@ _GAP = "<p>&nbsp;</p>"   # пустая строка между блоками
 
 
 def _tree(title: str, lines: list[str]) -> str:
-    """Блок «рамочкой»: заголовок и ветки ├ ... └ (последняя строка закрывает ветку)."""
-    last = len(lines) - 1
-    body = "<br>".join(f"{'└' if i == last else '├'} {line}" for i, line in enumerate(lines))
+    """Блок: заголовок и короткие строки с точками «•», как в экспедициях."""
+    body = "<br>".join(f"• {line}" for line in lines)
     head = f"<b>{title}</b><br>" if title else ""
     return f"<p>{head}{body}</p>"
 
@@ -731,18 +727,17 @@ def home_html(user_id: int, with_image: bool = False) -> str:
     return (
         f"{image}"
         f"<p><b>{_ce(_cfg['DONATE_EMOJI'])} ДОНАТ</b></p>"
-        "<blockquote><i>Поддержи игру и получи бонусы. "
-        "Покупки добровольны и не нужны для прохождения.</i></blockquote>"
+        "<blockquote><i>Покупки добровольны, для игры не обязательны.</i></blockquote>"
         f"{_balance_line(user)}"
         + _tree(
             f"{_ce(EM_STAR)} Разделы",
-            ["<b>Магазин кристаллов</b>: <i>Stars, xRocket, CryptoBot, карта / СБП</i>",
-             f"{_ce(EM_PRIV)} <b>Привилегии</b>: {_tier_ce('vip')} <i>VIP и</i> {_tier_ce('premium')} <i>Premium</i>",
-             "<b>Кейсы</b>: <i>артефакты Эпик, Миф и Лега</i>",
-             "<b>Временные бусты</b>: <i>эликсиры на несколько часов</i>",
-             f"🎒 <b>Инвентарь</b>: <i>твои эликсиры, сейчас</i> <b>{inv_total(user)}</b>",
-             f"{_ce(EM_LAVKA)} <b>Лавка</b>: <i>новый пак с наборами и ресурсами каждые {LAVKA_HOURS} ч</i>",
-             f"{_ce(EM_SKIN)} <b>Скины ника</b>: <i>эмодзи вместо букв в имени</i>"],
+            ["<b>Магазин кристаллов</b>: <i>Stars, крипта, карта</i>",
+             f"{_ce(EM_PRIV)} <b>Привилегии</b>: {_tier_ce('vip')} <i>VIP,</i> {_tier_ce('premium')} <i>Premium</i>",
+             "<b>Кейсы</b>: <i>редкие артефакты</i>",
+             "<b>Бусты</b>: <i>эликсиры на время</i>",
+             f"🎒 <b>Инвентарь</b>: <b>{inv_total(user)}</b>",
+             f"{_ce(EM_LAVKA)} <b>Лавка</b>: <i>новый пак каждые {LAVKA_HOURS} ч</i>",
+             f"{_ce(EM_SKIN)} <b>Скины ника</b>: <i>эмодзи в имени</i>"],
         )
     )
 
@@ -758,8 +753,7 @@ def shop_html(user_id: int, with_image: bool = False) -> str:
     return (
         f"{image}"
         f"<p><b>{_ce(_cfg['DONATE_EMOJI'])} МАГАЗИН КРИСТАЛЛОВ</b></p>"
-        "<blockquote><i>Сначала выбери способ оплаты, затем пакет. "
-        "Кристаллы поступят на баланс сразу после оплаты.</i></blockquote>"
+        "<blockquote><i>Выбери способ оплаты и пакет. Кристаллы приходят сразу.</i></blockquote>"
         f"{_balance_line(user)}"
         f"{packs}"
         + _GAP
@@ -792,15 +786,15 @@ def method_html(user_id: int, method: str, links: dict[str, str] | None = None,
             buttons.append(_rbtn(label, f"donate:rocket:{pack_id}", "primary"))
     if method == "stars":
         title = f"{_ce(EM_STAR)} ОПЛАТА TELEGRAM STARS"
-        hint = "Нажми на пакет, подтверди оплату в окне Telegram, и кристаллы сразу придут на баланс."
+        hint = "Нажми на пакет и подтверди оплату. Кристаллы придут сразу."
     elif method == "crypto":
         title = f"{_ce(EM_CRYPTO)} ОПЛАТА CRYPTOBOT"
-        hint = (f"Нажми на пакет, и появится счёт в {CRYPTOBOT_ASSET}. Оплати его в @send (@CryptoBot), "
-                f"кристаллы придут сами. Курс: 100 {_ce(EM_CRYSTAL)} = {_usd(USD_CENTS_PER_100)}.")
+        hint = (f"Нажми на пакет и оплати счёт в @send. "
+                f"Курс: 100 {_ce(EM_CRYSTAL)} = {_usd(USD_CENTS_PER_100)}.")
     else:
         title = f"{_ce(EM_ROCKET)} ОПЛАТА XROCKET PAY"
-        hint = (f"Нажми на пакет, и появится счёт в {XROCKET_CURRENCY}. Оплати его в @xrocket, "
-                f"кристаллы придут сами. Курс: 100 {_ce(EM_CRYSTAL)} = {_usd(USD_CENTS_PER_100)}.")
+        hint = (f"Нажми на пакет и оплати счёт в @xrocket. "
+                f"Курс: 100 {_ce(EM_CRYSTAL)} = {_usd(USD_CENTS_PER_100)}.")
     return (
         f"{image}"
         f"<p><b>{title}</b></p>"
@@ -827,8 +821,7 @@ def pack_html(user_id: int, pack_id: str, with_image: bool = False) -> str:
     return (
         f"{image}"
         f"<p><b>{_ce(_cfg['DONATE_EMOJI'])} ПАКЕТ «{escape(name.upper())}»</b></p>"
-        f"<blockquote><i>{_fmt(coins)} {_plural(coins)} для твоего баланса. "
-        "Кристаллы пригодятся в привилегиях, кейсах и временных бустах.</i></blockquote>"
+        f"<blockquote><i>{_fmt(coins)} {_plural(coins)} на твой баланс.</i></blockquote>"
         + _GAP
         + _tree(
             f"{_ce(EM_PACK)} Состав пакета",
@@ -837,11 +830,12 @@ def pack_html(user_id: int, pack_id: str, with_image: bool = False) -> str:
              f"Баланс после покупки: {_ce(EM_CRYSTAL)} <b>{_fmt(get_balance(user) + coins)}</b>"],
         )
         + _GAP
-        + "<p><b>Выбери способ оплаты</b></p>"
-        f"<p>{_ce(EM_STAR)} <b>Telegram Stars</b>: оплата звёздами прямо в Telegram<br>"
-        f"{_ce(EM_ROCKET)} <b>xRocket Pay</b>: оплата криптовалютой ({XROCKET_CURRENCY})<br>"
-        f"{_ce(EM_CRYPTO)} <b>CryptoBot</b>: оплата криптовалютой ({CRYPTOBOT_ASSET}) в @send<br>"
-        f"{_ce(EM_CARD)} <b>Карты / СБП</b>: напиши @IIARKII, оплата вручную</p>"
+        + _tree("Выбери способ оплаты", [
+            f"{_ce(EM_STAR)} <b>Telegram Stars</b>: звёздами в Telegram",
+            f"{_ce(EM_ROCKET)} <b>xRocket Pay</b>: криптой",
+            f"{_ce(EM_CRYPTO)} <b>CryptoBot</b>: криптой в @send",
+            f"{_ce(EM_CARD)} <b>Карты / СБП</b>: напиши @IIARKII",
+        ])
     )
 
 
@@ -854,7 +848,7 @@ def stars_html(user_id: int, pack_id: str, url: str, with_image: bool = False) -
         f"{image}"
         f"<p><b>{_ce(EM_STAR)} ОПЛАТА TELEGRAM STARS</b></p>"
         f"<blockquote><i>Пакет «{escape(name)}»: {_fmt(coins)} {_plural(coins)}. "
-        "Нажми «Купить», подтверди оплату, и кристаллы сразу придут на баланс.</i></blockquote>"
+        "Нажми «Купить» и подтверди оплату.</i></blockquote>"
         + _GAP
         + _tree(
             f"{_ce(EM_PACK)} Состав пакета",
@@ -880,8 +874,7 @@ def rocket_html(user_id: int, pack_id: str, invoice_id: str, rec: dict, with_ima
         f"{image}"
         f"<p><b>{_ce(EM_ROCKET)} ОПЛАТА XROCKET PAY</b></p>"
         f"<blockquote><i>Пакет «{escape(name)}»: {_fmt(coins)} {_plural(coins)}. "
-        "Нажми «Оплатить», заплати в @xrocket, а затем вернись сюда. "
-        "Кристаллы придут сами, кнопка проверки нужна, если хочешь не ждать.</i></blockquote>"
+        "Оплати счёт в @xrocket, кристаллы придут сами.</i></blockquote>"
         + _GAP
         + _tree(
             f"{_ce(EM_PACK)} Счёт",
@@ -909,8 +902,7 @@ def crypto_html(user_id: int, pack_id: str, invoice_id: str, rec: dict, with_ima
         f"{image}"
         f"<p><b>{_ce(EM_CRYPTO)} ОПЛАТА CRYPTOBOT</b></p>"
         f"<blockquote><i>Пакет «{escape(name)}»: {_fmt(coins)} {_plural(coins)}. "
-        "Нажми «Оплатить», заплати в @send (@CryptoBot), а затем вернись сюда. "
-        "Кристаллы придут сами, кнопка проверки нужна, если хочешь не ждать.</i></blockquote>"
+        "Оплати счёт в @send, кристаллы придут сами.</i></blockquote>"
         + _GAP
         + _tree(
             f"{_ce(EM_PACK)} Счёт",
@@ -956,8 +948,7 @@ def priv_html(user_id: int, with_image: bool = False) -> str:
     return (
         f"{image}"
         f"<p><b>{_ce(EM_PRIV)} ПРИВИЛЕГИИ</b></p>"
-        "<blockquote><i>Бонусы к урону по боссам, перезарядке, артефактам и наградам. "
-        "Бонусы привилегий не складываются: действует сильнейшая из активных.</i></blockquote>"
+        "<blockquote><i>Бонусы не складываются: действует сильнейшая.</i></blockquote>"
         f"{_GAP}{_balance_line(user)}{blocks}"
     )
 
@@ -974,7 +965,7 @@ def priv_item_html(user_id: int, tier: str, with_image: bool = False) -> str:
             f"Срок: <b>{PRIVILEGE_DAYS} дней</b>",
             f"Статус: {_status(user, tier)}"]
     if active and active != tier and list(PRIVILEGES).index(active) > list(PRIVILEGES).index(tier):
-        rows.append(f"Сейчас действует {PRIVILEGES[active]['name']}: бонусы не складываются")
+        rows.append(f"Действует {PRIVILEGES[active]['name']}: бонусы не складываются")
     mine = [f"{_ce(EM_CRYSTAL)} У тебя: <b>{_fmt(have)}</b>"]
     if have >= price:
         mine.append(f"{_ce(EM_CRYSTAL)} После покупки: <b>{_fmt(have - price)}</b>")
@@ -1002,8 +993,7 @@ def priv_success_html(tier: str, until: int, balance: int | None = None) -> str:
     info = PRIVILEGES[tier]
     return (
         f"<p><b>{_ce(_cfg['DONATE_EMOJI'])} ПРИВИЛЕГИЯ АКТИВНА</b></p>"
-        f"<blockquote><i>Спасибо за поддержку игры! Привилегия «{escape(info['name'])}» "
-        "уже работает.</i></blockquote>"
+        f"<blockquote><i>Спасибо за поддержку! «{escape(info['name'])}» работает.</i></blockquote>"
         + _tree(
             f"{_ce(EM_CRYSTAL)} Итог",
             [f"Привилегия: <b>{_tier_ce(tier)} {escape(info['name'])}</b>",
@@ -1035,7 +1025,7 @@ def priv_success_kb() -> InlineKeyboardMarkup:
 def success_html(coins: int, balance: int) -> str:
     return (
         f"<p><b>{_ce(_cfg['DONATE_EMOJI'])} ОПЛАТА ПРОШЛА</b></p>"
-        "<blockquote><i>Спасибо за поддержку игры! Кристаллы уже на твоём балансе.</i></blockquote>"
+        "<blockquote><i>Спасибо за поддержку! Кристаллы на балансе.</i></blockquote>"
         + _tree(
             f"{_ce(EM_STAR)} Итог",
             [f"Начислено: {_ce(EM_CRYSTAL)} <b>+{_fmt(coins)}</b>",
@@ -1109,34 +1099,34 @@ EM_LAVKA = EM_BUY
 LAVKA_PACKS: dict[str, dict] = {
     "start": {
         "name": "Стартовый пак", "icon": "🎁", "price": 89, "per_player": 3, "global": None, "weight": 3,
-        "tagline": "Лучший способ начать: два базовых набора и один элитный.",
+        "tagline": "Два базовых набора и один элитный.",
         "items": [("set", "basic", 2), ("set", "elite", 1)],
     },
     "wealth": {
         "name": "Богатство", "icon": "💰", "price": 359, "per_player": 2, "global": None, "weight": 2,
-        "tagline": "Сразу сто тысяч минералов: хватит на несколько уровней вперёд.",
+        "tagline": "Сто тысяч минералов.",
         "items": [("minerals", None, 100_000)],
     },
     "elite": {
         "name": "Элитный пак", "icon": "👑", "price": 249, "per_player": 2, "global": 50, "weight": 2,
-        "tagline": "Для тех, кто любит качество: элитные наборы, предметы и чистая эссенция света.",
+        "tagline": "Элитные наборы, предметы и эссенция света.",
         "items": [("set", "elite", 2), ("set", "items", 1), ("res", ("эссенц", "свет"), 20.0)],
     },
     "res": {
         "name": "Пак ресурсов", "icon": "📦", "price": 129, "per_player": 2, "global": None, "weight": 3,
-        "tagline": "Всё для крафта в одной коробке: по сто штук каждого материала.",
+        "tagline": "По сто штук каждого материала.",
         "items": [("res", ("волокн",), 100), ("res", ("древес",), 100), ("res", ("лоз",), 100),
                   ("res", ("панцир",), 100), ("res", ("глин",), 100)],
     },
     "royal": {
         "name": "Королевский пак", "icon": "🏆", "price": 1599, "per_player": 2, "global": 25, "weight": 1,
-        "tagline": "Царская сокровищница: горы наборов, предметы и редкие материалы.",
+        "tagline": "Наборы, предметы и редкие материалы.",
         "items": [("set", "basic", 10), ("set", "elite", 3), ("set", "items", 1),
                   ("res", ("ледя",), 25), ("res", ("ядр",), 25)],
     },
     "master": {
         "name": "Пак мастера", "icon": "🛠", "price": 689, "per_player": 2, "global": None, "weight": 1.5,
-        "tagline": "Выбор настоящего мастера: наборы предметов и снаряжения.",
+        "tagline": "Наборы предметов и снаряжения.",
         "items": [("set", "items", 3), ("set", "gear", 2)],
     },
 }
@@ -1353,11 +1343,11 @@ def lavka_html(user_id: int, with_image: bool = False) -> str:
         p = LAVKA_PACKS[key]
         gl = lavka_global_left(key)
         if lavka_user_left(user, key) <= 0:
-            state = "<i>ты купил максимум</i>"
+            state = "<i>куплено максимум</i>"
         elif gl is not None and gl <= 0:
             state = "<i>распродано</i>"
         else:
-            state = f"<i>доступно тебе: {lavka_user_left(user, key)} из {p['per_player']}</i>"
+            state = f"<i>тебе доступно: {lavka_user_left(user, key)} из {p['per_player']}</i>"
         blocks.append(
             f"<p><b>{p['icon']} {p['name']}</b> · {_ce(EM_CRYSTAL)} <b>{_fmt(p['price'])}</b><br>"
             f"{state}</p>"
@@ -1365,9 +1355,8 @@ def lavka_html(user_id: int, with_image: bool = False) -> str:
     return (
         f"{image}"
         f"<p><b>{_ce(EM_LAVKA)} ЛАВКА</b></p>"
-        "<blockquote><i>Редкие паки с наборами, ресурсами и минералами. "
-        f"Каждые {LAVKA_HOURS} часа в лавку привозят один новый пак, а прежний уходит навсегда. "
-        "Количество паков ограничено, так что не зевай.</i></blockquote>"
+        f"<blockquote><i>Паки с наборами и ресурсами. Каждые {LAVKA_HOURS} ч новый пак, старый уходит. "
+        "Количество ограничено.</i></blockquote>"
         f"{_balance_line(user)}"
         f"<p>{_lv_head()}</p>"
         + "".join(blocks)
@@ -1425,8 +1414,7 @@ def lavka_done_html(user_id: int, key: str) -> str:
     p = LAVKA_PACKS[key]
     return (
         f"<p><b>{p['icon']} {p['name'].upper()} КУПЛЕН</b></p>"
-        "<blockquote><i>Всё содержимое уже у тебя: наборы лежат в разделе «Наборы», "
-        "ресурсы в мастерской, минералы на счёте.</i></blockquote>"
+        "<blockquote><i>Наборы в «Наборах», ресурсы в мастерской, минералы на счёте.</i></blockquote>"
         + _tree(f"{_ce(EM_PACK)} Получено", [_item_line(*it) for it in p["items"]])
         + _tree("Итог", [
             f"{_ce(EM_CRYSTAL)} <b>Баланс</b>: <b>{_fmt(get_balance(user))}</b>",
@@ -1569,7 +1557,7 @@ def skin_buy_html(user_id: int, key: str, with_image: bool = False) -> str:
     have = get_balance(user)
     out = (f"{_image(with_image)}"
            f"<p><b>{_ce(EM_SKIN)} СКИН НИКА</b></p>"
-           "<blockquote><i>Эмодзи вместо букв в твоём нике. Скин остаётся навсегда.</i></blockquote>"
+           "<blockquote><i>Эмодзи вместо букв в нике. Скин навсегда.</i></blockquote>"
            f"{_balance_line(user)}"
            + _tree("Скин", [f"{_ce(EM_BUY)} <b>{escape(meta['name'])}</b>",
                             f"{_ce(EM_PRICE)} Цена: <b>{_fmt(price)}</b> {crystal}"])
@@ -1589,8 +1577,7 @@ def skin_done_html(user_id: int, key: str) -> str:
     st = _skins_mod()
     return (
         f"<p><b>{_ce(EM_SKIN)} СКИН КУПЛЕН</b></p>"
-        f"<blockquote><i>«{escape(st.SKINS[key]['name'])}» теперь твой. "
-        "Надень его кнопкой ниже.</i></blockquote>"
+        f"<blockquote><i>«{escape(st.SKINS[key]['name'])}» твой. Надень кнопкой ниже.</i></blockquote>"
         f"<p>{_ce(EM_CRYSTAL)} Осталось: <b>{_fmt(get_balance(user))}</b></p>"
     )
 
@@ -1684,17 +1671,15 @@ def cases_html(user_id: int, with_image: bool = False) -> str:
     return (
         f"{_image(with_image)}"
         f"<p><b>{_ce(_cfg['DONATE_EMOJI'])} ДОНАТНЫЕ КЕЙСЫ</b></p>"
-        "<blockquote><i>Открывай кейсы за кристаллы и забирай редкие артефакты. "
-        "Чем дороже кейс, тем выше шанс на мифический и легендарный предмет.</i></blockquote>"
+        "<blockquote><i>Кейсы за кристаллы. Чем дороже, тем выше шанс на редкое.</i></blockquote>"
         + _tree("Твои кристаллы", [f"{crystal} Кристаллов: <b>{_fmt(get_balance(user))}</b>"])
         + _GAP
         + _tree("Что внутри", [
             "Артефакты питомца, шахты и исследователей",
-            "Только начиная с <b>Эпического</b>: обычных и редких артефактов нет",
             "Редкости: <b>Эпический, Мифический, Легендарный</b>",
         ])
         + _GAP
-        + _tree("Если артефакт уже есть", [
+        + _tree("Если артефакт уже есть (компенсация)", [
             f"{tier}: {crystal} <b>+{_fmt(coins)}</b>" for tier, coins in CASE_DUPLICATE.items()
         ])
     )
@@ -1725,10 +1710,7 @@ def case_html(user_id: int, n: int, with_image: bool = False) -> str:
             f"{_ce(EM_STATUS)} Статус: <b>{status}</b>",
         ])
         + _GAP
-        + _tree("Содержимое", [
-            "Только начиная с <b>Эпического</b>: обычных и редких артефактов нет",
-            *[f"{tier}: <b>{chance}%</b>" for tier, chance in c["drops"].items()],
-        ])
+        + _tree("Шансы", [f"{tier}: <b>{chance}%</b>" for tier, chance in c["drops"].items()])
     )
 
 
@@ -2003,8 +1985,7 @@ def boosts_html(user_id: int, page: int = 0, with_image: bool = False) -> str:
     return (
         f"{_image(with_image)}"
         f"<p><b>{_ce(_cfg['DONATE_EMOJI'])} ВРЕМЕННЫЕ БУСТЫ · {page + 1}/{_boost_pages()}</b></p>"
-        "<blockquote><i>Эликсиры усиливают питомца на время. "
-        "Купленный лежит в инвентаре, включаешь его сам.</i></blockquote>"
+        "<blockquote><i>Эликсиры усиливают на время. Включаешь их сам из инвентаря.</i></blockquote>"
         f"{_balance_line(user)}"
         + _tree("Активные", _active_lines(user) or ["<i>Пока нет</i>"])
         + _GAP
@@ -2016,7 +1997,7 @@ def boosts_html(user_id: int, page: int = 0, with_image: bool = False) -> str:
         + _GAP
         + _tree("Коротко", [
             f"<i>Цены:</i> <b>{min(prices)}</b>–<b>{max(prices)}</b> {crystal}",
-            f"<i>В инвентаре: до</i> <b>{INV_LIMIT}</b> <i>каждого вида, сейчас</i> <b>{inv_total(user)}</b>",
+            f"<i>Инвентарь:</i> <b>{inv_total(user)}</b> <i>(до</i> <b>{INV_LIMIT}</b> <i>каждого вида)</i>",
             "<i>Повторное применение продлевает срок</i>",
         ])
     )
@@ -2031,7 +2012,7 @@ def boost_html(user_id: int, key: str, with_image: bool = False) -> str:
         levels = [f"<i>{_effect(b, i)}:</i> <b>{_boost_price(b, i)}</b> {crystal}"
                   for i in range(len(b["levels"]))]
         terms = ["<i>Одноразовый: тратится при запуске автодобычи</i>",
-                 "<i>Применяется кнопкой из инвентаря</i>"]
+                 "<i>Включается из инвентаря</i>"]
     else:
         levels = []
         for i in range(len(b["levels"])):
@@ -2097,7 +2078,7 @@ def boost_confirm_html(user_id: int, key: str, lvl: int, dur: int, with_image: b
     crystal = _ce(EM_CRYSTAL)
     price = _boost_price(b, lvl, dur)
     have = get_balance(user)
-    term = ("до запуска автодобычи (одноразовый)" if b.get("charge") else _hours(BOOST_HOURS[dur]))
+    term = ("до запуска автодобычи" if b.get("charge") else _hours(BOOST_HOURS[dur]))
     rows = [f"<i>Эликсир:</i> <b>{_bicon(b)}{b['name']}</b>",
             f"<i>Эффект:</i> <b>{_effect(b, lvl)}</b>",
             f"<i>Срок:</i> <b>{term}</b>",
@@ -2112,7 +2093,7 @@ def boost_confirm_html(user_id: int, key: str, lvl: int, dur: int, with_image: b
     return (
         f"{_image(with_image)}"
         f"<p><b>{_ce(_cfg['DONATE_EMOJI'])} ПОДТВЕРЖДЕНИЕ ПОКУПКИ</b></p>"
-        "<blockquote><i>Эликсир попадёт в инвентарь, включишь его сам.</i></blockquote>"
+        "<blockquote><i>Эликсир попадёт в инвентарь.</i></blockquote>"
         + _tree("Покупка", rows)
         + _GAP
         + _tree("Кристаллы", after)
@@ -2136,7 +2117,7 @@ def boost_done_html(user_id: int, key: str, lvl: int, dur: int) -> str:
             f"{crystal} <i>Осталось:</i> <b>{_fmt(get_balance(user))}</b>"]
     return (
         f"<p><b>{_ce(_cfg['DONATE_EMOJI'])} ЭЛИКСИР В ИНВЕНТАРЕ</b></p>"
-        "<blockquote><i>Спасибо за поддержку! Примени его, когда понадобится.</i></blockquote>"
+        "<blockquote><i>Спасибо! Примени его, когда нужно.</i></blockquote>"
         + _tree("Итог", rows)
     )
 
@@ -2325,15 +2306,13 @@ def inv_html(user_id: int, with_image: bool = False) -> str:
     return (
         f"{_image(with_image)}"
         "<p><b>🎒 ИНВЕНТАРЬ</b></p>"
-        "<blockquote><i>Здесь лежат купленные эликсиры. Время действия идёт с момента, когда ты "
-        f"применяешь эликсир. Каждого вида можно хранить не больше {INV_LIMIT}.</i></blockquote>"
+        f"<blockquote><i>Срок идёт с момента применения. Каждого вида не больше {INV_LIMIT}.</i></blockquote>"
         f"{_balance_line(user)}"
-        + _tree("Мои эликсиры", mine or ["Пока пусто. Эликсиры продаются в разделе «Временные бусты»"])
+        + _tree("Мои эликсиры", mine or ["Пока пусто. Эликсиры в разделе «Бусты»"])
         + _GAP
         + _tree("Действуют сейчас", _active_lines(user) or ["Пока нет активных"])
         + _GAP
-        + _tree("Итого", [f"Эликсиров в инвентаре: <b>{inv_total(user)}</b>",
-                          f"Лимит: <b>{INV_LIMIT}</b> на каждый вид"])
+        + _tree("Итого", [f"Всего: <b>{inv_total(user)}</b> (лимит {INV_LIMIT} на вид)"])
     )
 
 
@@ -2386,13 +2365,13 @@ def inv_use_html(user_id: int, key: str, lvl: int, dur: int, with_image: bool = 
     user = _cfg["get_user"](user_id)
     b = BOOSTS[key]
     cnt = next((c for l, d, c in inv_variants(user, key) if (l, d) == (lvl, dur)), 0)
-    term = ("до ближайшего запуска автодобычи (одноразовый)" if b.get("charge")
+    term = ("до запуска автодобычи" if b.get("charge")
             else _hours(BOOST_HOURS[dur]))
     rows = [f"Эликсир: <b>{_bicon(b)}{b['name']}</b>", f"Эффект: <b>{_effect(b, lvl)}</b>",
             f"Срок: <b>{term}</b>"]
     cur = None if b.get("charge") else boost_active(user, key)
     if cur and cur[0] == lvl:
-        rows.append(f"Уже действует, срок продлится (сейчас ещё {_left(cur[1])})")
+        rows.append(f"Уже действует, срок продлится (ещё {_left(cur[1])})")
     err = _use_error(user, key, lvl) if user else None
     tail = _GAP + _tree("Нельзя применить сейчас", [escape(err)]) if err else ""
     return (
@@ -2422,7 +2401,7 @@ def inv_done_html(user_id: int, key: str, lvl: int, dur: int, until: int | None)
     rows = [f"Эликсир: <b>{_bicon(b)}{b['name']}</b>", f"Эффект: <b>{_effect(b, lvl)}</b>"]
     rows.append(f"Действует до: <b>{_datetime(until)}</b>" if until
                 else "Сработает при ближайшем запуске автодобычи")
-    rows.append(f"🎒 В инвентаре осталось: <b>{inv_count(user, key)}/{INV_LIMIT}</b> этого вида")
+    rows.append(f"🎒 Осталось в инвентаре: <b>{inv_count(user, key)}/{INV_LIMIT}</b>")
     return (
         f"<p><b>{_ce(_cfg['DONATE_EMOJI'])} ЭЛИКСИР ПРИМЕНЁН</b></p>"
         f"<blockquote><i>{'Эликсир ждёт запуска автодобычи.' if until is None else 'Эликсир уже работает.'}</i></blockquote>"
