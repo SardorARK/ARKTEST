@@ -58,6 +58,7 @@ SECTIONS: list[tuple[str, str, tuple[str, ...]]] = [
     ("cb", "menu:cases", ("кейс", "кейсы", "сундук", "сундуки")),
     ("cb", "menu:ach", ("ач", "ачивки", "достижение", "достижения")),
     ("cb", "stat:open", ("стата", "статы", "статистика")),   # статистика по периодам с кнопкой «Закрыть» (main.py)
+    ("cb", "top:open", ("топ", "топы", "рейтинг", "рейтинги")),   # раздел «Топ» (tops.py) с кнопкой «Закрыть»
     ("cb", "menu:donate", ("донат", "донаты", "кристал", "кристалл",
                            "кристаллы", "кристалы")),
     ("text", "Арена", ("арн", "арена", "бой", "противник")),
@@ -75,7 +76,7 @@ SECTIONS: list[tuple[str, str, tuple[str, ...]]] = [
 
 # Разделы, которые по команде открываются с кнопкой «Закрыть» вместо «Назад» в меню
 # (подмену делает show_rich_card/send_rich_card в main.py, пока CLOSE_MODE = True).
-CLOSE_TARGETS = {"menu:stock", "menu:cases", "menu:exrn", "menu:ach", "me:open", "menu:boss"}
+CLOSE_TARGETS = {"menu:stock", "menu:cases", "menu:exrn", "menu:ach", "me:open", "menu:boss", "top:open"}
 CLOSE_MODE: ContextVar[bool] = ContextVar("quick_close_mode", default=False)
 
 ALIASES: dict[str, tuple[str, str]] = {}
