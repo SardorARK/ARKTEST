@@ -1420,14 +1420,32 @@ def lavka_item_html(user_id: int, key: str, with_image: bool = False) -> str:
     )
 
 
-def lavka_item_kb(user_id: int, key: str) -> InlineKeyboardMarkup:
+def _closing(msg=None) -> bool:
+    """Лавка открыта командой «сп» (или экран уже «закрываемый»): вместо «Назад» нужна кнопка «Закрыть»."""
+    cm = _cfg.get("close_mode")
+    if cm is not None and cm.get():
+        return True
+    if msg is None:
+        return False
+    for name in ("is_closable", "is_virtual"):
+        fn = _cfg.get(name)
+        if fn is not None and fn(msg):
+            return True
+    return False
+
+
+def _close_row() -> list[InlineKeyboardButton]:
+    return [InlineKeyboardButton(text="Закрыть", callback_data="me:close", style=ButtonStyle.DANGER)]
+
+
+def lavka_item_kb(user_id: int, key: str, closable: bool = False) -> InlineKeyboardMarkup:
     user = _cfg["get_user"](user_id) or {}
     p = LAVKA_PACKS[key]
     ok = _lv_error(user, key) is None and get_balance(user) >= p["price"]
     return InlineKeyboardMarkup(inline_keyboard=[
         [_btn(f"Купить · {_fmt(p['price'])}", f"donate:lvgo:{key}",
               ButtonStyle.SUCCESS if ok else ButtonStyle.DANGER, EM_BUY[0])],
-        _back_btn("donate:home"),
+        _close_row() if closable else _back_btn("donate:home"),
     ])
 
 
@@ -1447,10 +1465,10 @@ def lavka_done_html(user_id: int, key: str) -> str:
     )
 
 
-def lavka_done_kb(key: str) -> InlineKeyboardMarkup:
+def lavka_done_kb(key: str, closable: bool = False) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [_btn("В лавку", "donate:lavka", ButtonStyle.SUCCESS, EM_BUY[0])],
-        _back_btn("donate:home"),
+        _close_row() if closable else _back_btn("donate:home"),
     ])
 
 
@@ -1460,7 +1478,7 @@ async def _show_lavka(callback: CallbackQuery) -> None:
     _lv_roll()
     key = lavka_stock()[0]
     await _cfg["show_rich_card"](callback, IMG_KEY, lambda wi: lavka_item_html(uid, key, wi),
-                                 lavka_item_kb(uid, key))
+                                 lavka_item_kb(uid, key, _closing(callback.message)))
 
 
 @router.callback_query(F.data == "donate:lavka")
@@ -1483,7 +1501,7 @@ async def on_lavka_item(callback: CallbackQuery):
     await callback.answer()
     uid = callback.from_user.id
     await _cfg["show_rich_card"](callback, IMG_KEY, lambda wi: lavka_item_html(uid, key, wi),
-                                 lavka_item_kb(uid, key))
+                                 lavka_item_kb(uid, key, _closing(callback.message)))
 
 
 @router.callback_query(F.data.regexp(r"^donate:lvgo:\w+$"))
@@ -1531,7 +1549,35 @@ async def on_lavka_buy(callback: CallbackQuery):
     ledger("donate_lavka", user=uid, pack=key, price=p["price"], slot=lavka_slot(),
            balance=user[BALANCE_FIELD])
     await callback.answer()
-    await _cfg["show_rich_card"](callback, IMG_KEY, lambda wi: lavka_done_html(uid, key), lavka_done_kb(key))
+    await _cfg["show_rich_card"](callback, IMG_KEY, lambda wi: lavka_done_html(uid, key),
+                                 lavka_done_kb(key, _closing(callback.message)))
+
+
+# Команда «сп» (а также «/сп»): открывает лавку в любом чате ответом на сообщение игрока.
+# Вместо «Назад» у такой лавки кнопка «Закрыть», переходы внутри неё остаются «закрываемыми».
+@router.message(F.text.regexp(r"(?i)^\s*/?сп(@\w+)?\s*$"))
+async def on_lavka_command(message: Message):
+    if message.from_user is None or message.from_user.is_bot:
+        return
+    uid = message.from_user.id
+    if _cfg["get_user"](uid) is None:
+        await message.reply("<i>Сначала выбери питомца: /start</i>")
+        return
+    _lv_roll()
+    key = lavka_stock()[0]
+    cm = _cfg.get("close_mode")
+    token = cm.set(True) if cm is not None else None   # send_rich_card запомнит сообщение как «закрываемое»
+    try:
+        await _cfg["send_rich_card"](
+            message.bot, message.chat.id, IMG_KEY,
+            lambda wi: lavka_item_html(uid, key, wi), lavka_item_kb(uid, key, True),
+            reply_to=message.message_id,
+        )
+    except TelegramAPIError:
+        log.exception("не удалось открыть лавку по команде у игрока %s", uid)
+    finally:
+        if token is not None:
+            cm.reset(token)
 
 
 # ---------- «Донат» в чате: текст раздела и кнопка «Перейти» ----------
@@ -2017,7 +2063,7 @@ def boosts_html(user_id: int, page: int = 0, with_image: bool = False) -> str:
             f"{_bicon(b)}<b>{b['name']}</b>: <i>"
             + b["short"].format(lo=b["levels"][0], hi=b["levels"][-1]) + "</i>"
             for _key, b in _page_items(page)
-        ])
+        ], quote=True)
         + _GAP
         + _tree("Коротко", [
             f"{_ce(EM_PRICE)} <i>Цены:</i> <b>{min(prices)}</b>–<b>{max(prices)}</b> {crystal}",
@@ -2331,11 +2377,9 @@ def inv_html(user_id: int, with_image: bool = False) -> str:
         "<p><b>🎒 ИНВЕНТАРЬ</b></p>"
         f"<blockquote><i>Срок идёт с момента применения. Каждого вида не больше {INV_LIMIT}.</i></blockquote>"
         f"{_balance_line(user)}"
-        + _tree("Мои эликсиры", mine or ["Пока пусто. Эликсиры в разделе «Бусты»"])
+        + _tree("Мои эликсиры", mine or ["<i>Пока пусто</i>"])
         + _GAP
-        + _tree("Действуют сейчас", _active_lines(user) or ["Пока нет активных"])
-        + _GAP
-        + _tree("Итого", [f"Всего: <b>{inv_total(user)}</b> (лимит {INV_LIMIT} на вид)"])
+        + _tree("Действуют сейчас", _active_lines(user) or ["<i>Нет активных</i>"])
     )
 
 
@@ -2344,7 +2388,7 @@ def inv_kb(user_id: int) -> InlineKeyboardMarkup:
     rows = [[_btn(f"{b['name']}  ·  {inv_count(user, key)}/{INV_LIMIT}", f"donate:invk:{key}",
                   ButtonStyle.SUCCESS, _bemoji(b))]
             for key, b in BOOSTS.items() if inv_count(user, key)]
-    rows.append([_btn("Купить эликсиры", "donate:boosts", ButtonStyle.SUCCESS, EM_CRYSTAL[0])])
+    rows.append([_btn("Купить эликсиры", "donate:boosts", ButtonStyle.SUCCESS, BOOSTS["dmg"]["emoji"][0])])
     rows.append(_back_btn("donate:home"))
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
