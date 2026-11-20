@@ -2047,14 +2047,11 @@ def _page_items(page: int) -> list[tuple[str, dict]]:
 
 
 def boosts_html(user_id: int, page: int = 0, with_image: bool = False) -> str:
-    page = min(max(page, 0), _boost_pages() - 1)
+    """Список всех эликсиров одной страницей (параметр page оставлен для старых кнопок)."""
     user = _cfg["get_user"](user_id)
-    crystal = _ce(EM_CRYSTAL)
-    prices = [x for b in BOOSTS.values() for x in
-              (b["prices"] if b.get("charge") else [p for row in b["prices"] for p in row])]
     return (
         f"{_image(with_image)}"
-        f"<p><b>{_ce(_cfg['DONATE_EMOJI'])} ВРЕМЕННЫЕ БУСТЫ · {page + 1}/{_boost_pages()}</b></p>"
+        f"<p><b>{_ce(_cfg['DONATE_EMOJI'])} ВРЕМЕННЫЕ БУСТЫ</b></p>"
         "<blockquote><i>Эликсиры усиливают на время. Включаешь их сам из инвентаря.</i></blockquote>"
         f"{_balance_line(user)}"
         + _tree("Активные", _active_lines(user) or ["<i>Пока нет</i>"])
@@ -2062,14 +2059,8 @@ def boosts_html(user_id: int, page: int = 0, with_image: bool = False) -> str:
         + _tree("Эликсиры", [
             f"{_bicon(b)}<b>{b['name']}</b>: <i>"
             + b["short"].format(lo=b["levels"][0], hi=b["levels"][-1]) + "</i>"
-            for _key, b in _page_items(page)
+            for b in BOOSTS.values()
         ], quote=True)
-        + _GAP
-        + _tree("Коротко", [
-            f"{_ce(EM_PRICE)} <i>Цены:</i> <b>{min(prices)}</b>–<b>{max(prices)}</b> {crystal}",
-            f"<i>Инвентарь:</i> <b>{inv_total(user)}</b> <i>(до</i> <b>{INV_LIMIT}</b> <i>каждого вида)</i>",
-            "<i>Повторное применение продлевает срок</i>",
-        ])
     )
 
 
@@ -2192,16 +2183,11 @@ def boost_done_html(user_id: int, key: str, lvl: int, dur: int) -> str:
 
 
 def boosts_kb(user_id: int, page: int = 0) -> InlineKeyboardMarkup:
-    page = min(max(page, 0), _boost_pages() - 1)
-    rows = [[_btn(b["name"], f"donate:boost:{key}", ButtonStyle.SUCCESS, _bemoji(b))]
-            for key, b in _page_items(page)]
-    nav = []
-    if page > 0:
-        nav.append(_btn(f"{page}/{_boost_pages()}", f"donate:boosts:{page - 1}", ButtonStyle.SUCCESS, EM_PREV[0]))
-    if page < _boost_pages() - 1:
-        nav.append(_btn(f"{page + 2}/{_boost_pages()}", f"donate:boosts:{page + 1}", ButtonStyle.SUCCESS, EM_NEXT[0]))
-    if nav:
-        rows.append(nav)
+    """Эликсиры кнопками только с эмодзи: 4 в первом ряду, остальные во втором."""
+    btns = [_btn("\u2800", f"donate:boost:{key}", ButtonStyle.SUCCESS, _bemoji(b))
+            for key, b in BOOSTS.items()]
+    rows = [btns[:4], btns[4:]]
+    rows = [r for r in rows if r]
     rows.append(_back_btn("donate:home"))
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
