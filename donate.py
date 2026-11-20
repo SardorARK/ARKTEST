@@ -93,8 +93,8 @@ EM_RATE = ("5377336227533969892", "💱")      # главный экран: «К
 EM_TOTAL = ("5249273776079640466", "💼")     # лавка: «Осталось всего»
 EM_LEFT = ("5339151799314034719", "⏳")      # лавка: «Осталось» (время до обновления)
 EM_PACK = ("4958714256343171878", "🛍")      # заголовок «Состав пакета»
-EM_VIP = ("5420487630812916881", "❤️")       # привилегия VIP
-EM_PREMIUM = ("5420122777636087041", "😘")   # привилегия Premium
+EM_VIP = ("5855102887687887423", "🎤")       # привилегия VIP
+EM_PREMIUM = ("5929328297748996713", "💎")   # привилегия Premium
 EM_PRIV = ("5258040062028822951", "🍀")      # кнопка и текст «Привилегии»
 
 # Эмодзи донатных кейсов (те же, что в «Сокровищнице»)
@@ -167,14 +167,14 @@ PRIVILEGE_DAYS = 30
 PRIV_FIELD = "privileges"      # в профиле: {"vip": время окончания, "premium": ...}
 PRIVILEGES: dict[str, dict] = {
     "vip": {
-        "name": "VIP", "icon": "❤️", "emoji": EM_VIP, "stars": 129, "price": 129,   # price: цена в кристаллах
+        "name": "VIP", "icon": "🎤", "emoji": EM_VIP, "stars": 129, "price": 129,   # price: цена в кристаллах
         "tagline": "Прибавка в боях и экспедициях.",
         "perks": {"boss_damage": 15, "cooldown": 18, "luck": 15,
                   "artifact_bonus": 3, "explorer_reward": 25,
                   "arena_reward": 15},
     },
     "premium": {
-        "name": "Premium", "icon": "😘", "emoji": EM_PREMIUM, "stars": 299, "price": 299,
+        "name": "Premium", "icon": "💎", "emoji": EM_PREMIUM, "stars": 299, "price": 299,
         "tagline": "Бонусы VIP, но сильнее.",
         "perks": {"boss_damage": 30, "cooldown": 36, "luck": 30,
                   "artifact_bonus": 6, "explorer_reward": 50,
@@ -726,8 +726,8 @@ def success_kb() -> InlineKeyboardMarkup:
 def _balance_line(user: dict | None, rate: bool = False) -> str:
     """«Баланс: N». rate=True (главный экран): со значком 💳 и строкой курса в долларах и звёздах."""
     if not rate:
-        return f"<p><b>{_ce(EM_CRYSTAL)} Баланс: {_fmt(get_balance(user))}</b></p>{_GAP}"
-    return (f"<p><b>{_ce(EM_BALANCE)} Баланс: {_fmt(get_balance(user))}</b><br>"
+        return f"<p><b>Баланс: {_fmt(get_balance(user))}</b> {_ce(EM_CRYSTAL)}</p>{_GAP}"
+    return (f"<p><b>{_ce(EM_BALANCE)} Баланс: {_fmt(get_balance(user))}</b> {_ce(EM_CRYSTAL)}<br>"
             f"<b>{_ce(EM_RATE)} Курс: 100 {_ce(EM_CRYSTAL)} = 100 {_ce(EM_STAR)} = {_usd(USD_CENTS_PER_100)}</b></p>{_GAP}")
 
 
