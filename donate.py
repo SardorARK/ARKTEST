@@ -88,6 +88,8 @@ PAID_KEEP = 100              # сколько последних id хранит
 EM_CRYSTAL = ("5251329454801710673", "🎁")   # донатная валюта: кристаллы
 EM_STAR = ("5408869739982246969", "⭐")      # звезда Telegram Stars
 EM_BUY = ("5377660214096974712", "🛍")       # кнопка «Купить», в лавке перед «Куплено тобой»
+EM_BALANCE = ("5445353829304387411", "💳")   # главный экран: «Баланс»
+EM_RATE = ("5377336227533969892", "💱")      # главный экран: «Курс»
 EM_TOTAL = ("5249273776079640466", "💼")     # лавка: «Осталось всего»
 EM_LEFT = ("5339151799314034719", "⏳")      # лавка: «Осталось» (время до обновления)
 EM_PACK = ("4958714256343171878", "🛍")      # заголовок «Состав пакета»
@@ -721,8 +723,12 @@ def success_kb() -> InlineKeyboardMarkup:
     ])
 
 
-def _balance_line(user: dict | None) -> str:
-    return f"<p><b>{_ce(EM_CRYSTAL)} Твой баланс: {_fmt(get_balance(user))}</b></p>{_GAP}"
+def _balance_line(user: dict | None, rate: bool = False) -> str:
+    """«Баланс: N». rate=True (главный экран): со значком 💳 и строкой курса в долларах и звёздах."""
+    if not rate:
+        return f"<p><b>{_ce(EM_CRYSTAL)} Баланс: {_fmt(get_balance(user))}</b></p>{_GAP}"
+    return (f"<p><b>{_ce(EM_BALANCE)} Баланс: {_fmt(get_balance(user))}</b><br>"
+            f"<b>{_ce(EM_RATE)} Курс: 100 {_ce(EM_CRYSTAL)} = 100 {_ce(EM_STAR)} = {_usd(USD_CENTS_PER_100)}</b></p>{_GAP}")
 
 
 def home_html(user_id: int, with_image: bool = False) -> str:
@@ -732,7 +738,7 @@ def home_html(user_id: int, with_image: bool = False) -> str:
         f"{image}"
         f"<p><b>{_ce(_cfg['DONATE_EMOJI'])} ДОНАТ</b></p>"
         "<blockquote><i>Покупки добровольны, для игры не обязательны.</i></blockquote>"
-        f"{_balance_line(user)}"
+        f"{_balance_line(user, rate=True)}"
         + _tree(
             f"{_ce(EM_STAR)} Разделы",
             ["<b>Магазин кристаллов</b>: <i>Stars, крипта, карта</i>",
