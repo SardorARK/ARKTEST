@@ -195,7 +195,7 @@ def _rows(key: str) -> list[tuple[str, int]]:
 def _line(n: int, uid: str, value: int, show_value: bool, short: bool = False) -> str:
     place = _ce(boss.RANK_EMOJI[n - 1])
     name = D.name_html_of(int(uid)) if str(uid).isdigit() else "Игрок"
-    shown = _short(value) if short else _fmt(value)       # монеты и минералы: 1.5K, 2.35M, как в main.py
+    shown = _short(value) if short else _fmt(value)       # монеты, минералы и урон по боссам: 1.5K, 2.35M, как в main.py
     return f"{place} {name}" + (f" · <b>{shown}</b>" if show_value else "")
 
 
@@ -206,7 +206,7 @@ def top_html(user_id: int, key: str, with_image: bool = False) -> str:
     rows = _rows(key)
     show_value = key != "don"          # в донатах только ник
     if rows:
-        body = "<p>" + "<br>".join(_line(n, u, v, show_value, key in ("coins", "min"))
+        body = "<p>" + "<br>".join(_line(n, u, v, show_value, key in ("coins", "min", "boss"))
                                       for n, (u, v) in enumerate(rows, start=1)) + "</p>"
     else:
         body = "<p><i>Пока никого нет.</i></p>"
