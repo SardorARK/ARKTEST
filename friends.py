@@ -255,6 +255,12 @@ def _stats(user_id: int) -> dict:
     }
 
 
+def top_inviters(limit: int = 10) -> list[tuple[str, int]]:
+    """Лучшие по числу приглашённых друзей: [(id игрока, сколько друзей)]. Для раздела «Топ» (tops.py)."""
+    board = ((uid, len(ids)) for uid, ids in _by_inviter.items() if ids)
+    return sorted(board, key=lambda kv: -kv[1])[:limit]
+
+
 # ---------- Экраны ----------
 
 def _gem(n: int) -> str:
