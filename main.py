@@ -298,6 +298,20 @@ MEAT_STEP = (COST_MEAT_L11 - COST_MEAT_L2) / 9      # ≈ +3.78 мяса за у
 FRUIT_STEP = (COST_FRUIT_L11 - COST_FRUIT_L2) / 9   # ≈ +4.22 фрукта за уровень
 
 
+# Множитель цены мяса и фруктов по уровню питомца (уровень, с которого качаем).
+# До 30 включительно: ×1, 31–60: ×2, 61–100: ×4, 101–150: ×8, 151–250: ×16. Касается и эволюций.
+def price_tier_mult(level: int) -> int:
+    if level <= 30:
+        return 1
+    if level <= 60:
+        return 2
+    if level <= 100:
+        return 4
+    if level <= 150:
+        return 8
+    return 16
+
+
 def upgrade_cost(level: int) -> tuple[int, int]:
     """Сколько (мяса, фруктов) нужно, чтобы поднять уровень с текущего."""
     if level <= 1:
@@ -307,7 +321,8 @@ def upgrade_cost(level: int) -> tuple[int, int]:
         fruit = round(COST_FRUIT_L2 + (level - 2) * FRUIT_STEP)
     if is_evolution(level):
         meat, fruit = meat * EVO_COST_MULT, fruit * EVO_COST_MULT
-    return meat, fruit
+    k = price_tier_mult(level)
+    return meat * k, fruit * k
 
 
 def evo_coin_cost(level: int) -> int:
