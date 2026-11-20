@@ -36,6 +36,11 @@ from aiogram import F, Router
 from storage import atomic_write_json, read_json_safe
 
 try:
+    import quick_cmds       # быстрые команды: «босс» открывает раздел и в чате (ответом на команду игрока)
+except ImportError:
+    quick_cmds = None
+
+try:
     import achives          # «Достижения»: победы над боссами
 except ImportError:
     achives = None
@@ -1509,7 +1514,7 @@ async def _edit_battle(bot, user_id: int, v: dict) -> bool:
         except Exception as e:
             logging.warning("Не удалось переслать окно боя %s: %s", user_id, e)
             return False
-    file_id = D.pet_images.get("boss_skills")
+    file_id = _img(v["chat"], "boss_skills")
     kwargs = {"html": skills_html(user_id, bool(file_id), v["bid"])}
     if file_id:
         kwargs["media"] = [
@@ -1676,11 +1681,48 @@ def _mark_dirty(bot, *bids: str) -> None:
         _task = asyncio.create_task(_live_loop(bot))
 
 
-# Кастомные эмодзи в группах: при правке сообщения Telegram может заменять их обычными.
-# Поэтому в группах и супергруппах вместо правки на месте старое сообщение удаляется,
-# а экран отправляется заново (как в main.py: RESEND_IN_GROUPS). В личке правим на месте.
-# Живое окно боя (_edit_battle) обновляется часто, его слать заново нельзя (лимиты Telegram).
-RESEND_IN_GROUPS = True
+# Раздел работает и в чате: команда «босс» отправляет экран ответом на сообщение игрока, дальше
+# все переходы и обновления боя идут правкой этого же сообщения (баг Telegram с кастомными эмодзи при
+# правке не проявляется, пока сообщение отправлено ответом). Новые сообщения шлются, только если
+# правка невозможна. True вернёт старое поведение: в группах удалять и слать экран заново.
+RESEND_IN_GROUPS = False
+
+
+def _img(chat_id: int, key: str):
+    """file_id фото экрана для этого чата (в группах main.py фото не ставит), как при отправке."""
+    fn = getattr(D, "image_for", None)
+    return fn(chat_id, key) if fn else D.pet_images.get(key)
+
+
+def _virtual(msg) -> bool:
+    return quick_cmds is not None and quick_cmds.is_virtual(msg)
+
+
+def _closing(msg) -> bool:
+    """Раздел открыт командой («босс»): вместо «Назад» в меню кнопка «Закрыть»."""
+    if quick_cmds is not None and quick_cmds.CLOSE_MODE.get():
+        return True
+    if _virtual(msg):
+        return False
+    fn = getattr(D, "is_closable", None)
+    return bool(fn and msg is not None and fn(msg))
+
+
+def _closable_kb(msg, kb: InlineKeyboardMarkup) -> InlineKeyboardMarkup:
+    """В «закрываемом» сообщении «Назад» в главное меню (menu:back) заменяется на «Закрыть»."""
+    if not _closing(msg):
+        return kb
+    rows = [[InlineKeyboardButton(text="Закрыть", callback_data="me:close", style=ButtonStyle.DANGER)
+             if b.callback_data == "menu:back" else b for b in row] for row in kb.inline_keyboard]
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def _reply_to(msg) -> int | None:
+    """Новый экран тоже идёт ответом на команду игрока (в группе иначе правки теряют эмодзи)."""
+    if getattr(msg.chat, "type", "private") == "private":
+        return None
+    parent = getattr(msg, "reply_to_message", None)
+    return parent.message_id if parent is not None else None
 
 
 def _can_edit_in_place(msg: Message) -> bool:
@@ -1697,7 +1739,9 @@ async def _edit_screen(callback: CallbackQuery, key: str, ref: str = "") -> Mess
         return None   # в группе: _show удалит сообщение и пришлёт новое, эмодзи не пропадут
     uid = callback.from_user.id
     html, kb = SCREENS[key]
-    file_id = D.pet_images.get(key)
+    if _virtual(msg):
+        return None   # команда: сообщения ещё нет, экран отправит _show
+    file_id = _img(msg.chat.id, key)
     kwargs = {"html": html(uid, bool(file_id), ref)}
     if file_id:
         kwargs["media"] = [InputRichMessageMedia(id="pet", media=InputMediaPhoto(media=file_id))]
@@ -1706,7 +1750,7 @@ async def _edit_screen(callback: CallbackQuery, key: str, ref: str = "") -> Mess
             chat_id=msg.chat.id,
             message_id=msg.message_id,
             rich_message=InputRichMessage(**kwargs),
-            reply_markup=kb(uid, ref),
+            reply_markup=_closable_kb(msg, kb(uid, ref)),
         )
         return msg
     except TelegramBadRequest as e:
@@ -1722,14 +1766,26 @@ async def _show(callback: CallbackQuery, key: str, ref: str = "", new: bool = Fa
     """Показывает экран раздела. По умолчанию правит то же сообщение; new=True (открытие раздела)
     или невозможность правки: старое сообщение удаляется, присылается новое."""
     uid = callback.from_user.id
+    src = callback.message
     msg = None if new else await _edit_screen(callback, key, ref)
     if msg is None:
+        closing = _closing(src)
         try:
-            await callback.message.delete()
+            await src.delete()
         except Exception as e:
             logging.warning("Не удалось удалить сообщение: %s", e)
         VIEWERS.pop(uid, None)
-        msg = await send_screen(callback.bot, callback.message.chat.id, uid, key, ref)
+        # новый экран идёт ответом на команду игрока; для закрываемого раздела main.py поставит «Закрыть»
+        token = quick_cmds.CLOSE_MODE.set(True) if (closing and quick_cmds is not None) else None
+        try:
+            html, kb = SCREENS[key]
+            msg = await D.send_rich_card(
+                callback.bot, src.chat.id, key, lambda wi: html(uid, wi, ref),
+                _closable_kb(src, kb(uid, ref)), reply_to=_reply_to(src),
+            )
+        finally:
+            if token is not None:
+                quick_cmds.CLOSE_MODE.reset(token)
     else:
         VIEWERS.pop(uid, None)
     if key == "boss_skills" and msg is not None:
@@ -1793,10 +1849,10 @@ async def on_skills(callback: CallbackQuery):
 
 async def _edit_top(callback: CallbackQuery, ref: str) -> bool:
     """Переключение периода или показателя: правим окно топа на месте."""
-    if not _can_edit_in_place(callback.message):
+    if not _can_edit_in_place(callback.message) or _virtual(callback.message):
         return False
     uid = callback.from_user.id
-    file_id = D.pet_images.get("boss_top")
+    file_id = _img(callback.message.chat.id, "boss_top")
     kwargs = {"html": top_html(uid, bool(file_id), ref)}
     if file_id:
         kwargs["media"] = [InputRichMessageMedia(id="pet", media=InputMediaPhoto(media=file_id))]
@@ -1805,7 +1861,7 @@ async def _edit_top(callback: CallbackQuery, ref: str) -> bool:
             chat_id=callback.message.chat.id,
             message_id=callback.message.message_id,
             rich_message=InputRichMessage(**kwargs),
-            reply_markup=top_kb(uid, ref),
+            reply_markup=_closable_kb(callback.message, top_kb(uid, ref)),
         )
         return True
     except TelegramBadRequest as e:
