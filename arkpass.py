@@ -520,100 +520,77 @@ def _progress_block(st: dict) -> str:
     ])
 
 
-def home_html(user: dict, with_image: bool = False, gained: int = 0) -> str:
+def default_view(user: dict) -> int:
+    """Какой уровень показать первым: ближайший с наградой к получению, иначе следующий за текущим."""
     st = _state(user)
-    plus = bool(st["plus"])
     avail = _available(user, st)
-    status = (f"{EM_PLUS} <b>ARK+ активен</b> до конца сезона" if plus
-              else f"{EM_LOCK} ARK+ не куплен: премиум-награды закрыты")
-    lines = [status]
     if avail:
-        lines.append(f"{EM_NEW} Ждут тебя: <b>{len(avail)}</b> наград")
-    lines.append(f"{dn._ce(dn.EM_CRYSTAL)} Баланс: <b>{dn._fmt(dn.get_balance(user))}</b>")
-    gain = f"<p>{EM_XP} За задания начислено: <b>+{dn._fmt(gained)} ОП</b></p>" if gained else ""
+        return min(lv for _p, lv in avail)
+    return min(MAX_LEVEL, pass_level(st) + 1)
+
+
+def _row(title: str, items: list[Item], claimed: bool, reached: bool, locked_plus: bool, missing: int) -> str:
+    if claimed:
+        tag = f"{EM_OK} получено"
+    elif locked_plus:
+        tag = f"{EM_LOCK} нужен ARK+"
+    elif reached:
+        tag = f"{EM_NEW} можно забрать"
+    else:
+        tag = f"{EM_LOCK} ещё {dn._fmt(missing)} ОП"
+    return f"<p><b>{title}</b> · {tag}<br>" + "<br>".join(_item_text(i) for i in items) + "</p>"
+
+
+def home_html(user: dict, view: int = -1, with_image: bool = False, gained: int = 0) -> str:
+    """Один компактный экран: уровень, ОП, награды Free и ARK+ выбранного уровня."""
+    st = _state(user)
+    lvl = pass_level(st)
+    view = default_view(user) if view < 1 else min(MAX_LEVEL, view)
+    n, _s, end = season_info()
+    if lvl >= MAX_LEVEL:
+        xp_line = f"{EM_XP} <b>Пасс пройден до конца</b>"
+        bar = f"<code>{dn._bar(1.0)}</code>"
+    else:
+        into, need = st["xp"] - CUM[lvl], level_cost(lvl + 1)
+        xp_line = f"{EM_XP} ОП: <b>{dn._fmt(into)}/{dn._fmt(need)}</b>"
+        bar = f"<code>{dn._bar(into / need)}</code>"
+    gain = f"<p>{EM_XP} За задания: <b>+{dn._fmt(gained)} ОП</b></p>" if gained else ""
+    reached = view <= lvl
+    missing = max(0, CUM[view] - st["xp"])
+    star = " ⭐" if view % 10 == 0 else ""
     return (
-        _head(user, st, with_image)
-        + "<blockquote><i>60 уровней за 30 дней. Бейся, качай питомца и забирай добычу: "
-          "у ARK+ награды вдвое богаче.</i></blockquote>"
-        + dn._GAP + gain + _progress_block(st) + dn._GAP
-        + dn._tree(f"{EM_PASS} Твой пасс", lines)
+        f"{dn._image(with_image)}"
+        f"<p><b>{EM_PASS} ARK Pass {lvl}/{MAX_LEVEL}</b>"
+        + (f" {EM_PLUS}" if st["plus"] else "")
+        + f"<br>{xp_line}<br>{bar}</p>"
+        + gain
+        + dn._GAP
+        + f"<p><b>Уровень {view}</b>{star}</p>"
+        + _row("Free", FREE[view], view in st["fr"], reached, False, missing)
+        + _row(f"{EM_PLUS} ARK+", PLUS[view], view in st["pr"], reached, not st["plus"], missing)
+        + dn._GAP
+        + f"<p><i>Сезон {n} «{season_name(n)}» · {dn._ce(dn.EM_LEFT)} {_dur(end - time.time())}</i></p>"
     )
 
 
-def home_kb(user: dict, closable: bool) -> InlineKeyboardMarkup:
+def home_kb(user: dict, closable: bool, view: int = -1) -> InlineKeyboardMarkup:
     st = _state(user)
-    rows = []
+    view = default_view(user) if view < 1 else min(MAX_LEVEL, view)
+    mine = pass_level(st)
+    rows = [[dn._btn("◀", f"ark:v:{MAX_LEVEL if view <= 1 else view - 1}", ButtonStyle.PRIMARY),
+             dn._btn(f"{view}/{MAX_LEVEL}", "ark:v:-1", ButtonStyle.PRIMARY),
+             dn._btn("▶", f"ark:v:{1 if view >= MAX_LEVEL else view + 1}", ButtonStyle.PRIMARY)]]
     avail = _available(user, st)
     if avail:
         rows.append([dn._btn(f"Забрать всё ({len(avail)})", "ark:cl", ButtonStyle.SUCCESS)])
-    rows.append([dn._btn("Награды", "ark:r:-1", ButtonStyle.PRIMARY),
-                 dn._btn("Задания", "ark:q", ButtonStyle.PRIMARY)])
+    second = [dn._btn("Задания", "ark:q", ButtonStyle.PRIMARY)]
+    if mine < MAX_LEVEL:
+        second.append(dn._btn("Уровни", "ark:lv", ButtonStyle.PRIMARY))
+    rows.append(second)
     if not st["plus"]:
         rows.append([dn._btn(f"Купить ARK+ · {dn._fmt(ARK_PLUS_PRICE)}", "ark:plus", ButtonStyle.SUCCESS,
                              dn.EM_CRYSTAL[0])])
-    if pass_level(st) < MAX_LEVEL:
-        rows.append([dn._btn("Купить уровни", "ark:lv", ButtonStyle.PRIMARY, dn.EM_BUY[0])])
     rows.append(dn._close_row() if closable else dn._back_btn("donate:home"))
-    return InlineKeyboardMarkup(inline_keyboard=rows)
-
-
-PAGE = 10
-PAGES = MAX_LEVEL // PAGE
-
-
-def _page_of(st: dict) -> int:
-    """Страница, на которой лежит ближайшая нераскрытая награда."""
-    avail = _available({}, st)
-    lv = min((l for _p, l in avail), default=min(MAX_LEVEL, pass_level(st) + 1))
-    return min(PAGES - 1, max(0, (lv - 1) // PAGE))
-
-
-def _mark(claimed: bool, reached: bool, locked_plus: bool) -> str:
-    if claimed:
-        return EM_OK
-    if locked_plus:
-        return EM_PLUS
-    return EM_NEW if reached else EM_LOCK
-
-
-def rewards_html(user: dict, page: int, with_image: bool = False) -> str:
-    st = _state(user)
-    lvl = pass_level(st)
-    lo, hi = page * PAGE + 1, (page + 1) * PAGE
-    lines = []
-    for lv in range(lo, hi + 1):
-        reached = lv <= lvl
-        f = _mark(lv in st["fr"], reached, False)
-        p = _mark(lv in st["pr"], reached, not st["plus"])
-        lines.append(f"<b>Уровень {lv}</b>{' ⭐' if lv % 10 == 0 else ''}")
-        lines.append(f"{f} {_short(FREE[lv])}")
-        lines.append(f"{p} {EM_PLUS} {_short(PLUS[lv])}")
-        if lv != hi:
-            lines.append("")
-    legend = f"<i>{EM_OK} получено · {EM_NEW} можно забрать · {EM_LOCK} уровень не набран · {EM_PLUS} нужен ARK+</i>"
-    return (
-        f"{dn._image(with_image)}"
-        f"<p><b>{EM_PASS} НАГРАДЫ</b> · уровни {lo}–{hi}</p>"
-        f"<p>Твой уровень: <b>{lvl}/{MAX_LEVEL}</b></p>"
-        + dn._GAP
-        + f"<blockquote expandable>{'<br>'.join(lines)}</blockquote>"
-        + f"<p>{legend}</p>"
-    )
-
-
-def rewards_kb(user: dict, page: int) -> InlineKeyboardMarkup:
-    st = _state(user)
-    avail = _available(user, st)
-    nav = [dn._btn("◀", f"ark:r:{(page - 1) % PAGES}", ButtonStyle.PRIMARY),
-           dn._btn(f"{page + 1}/{PAGES}", f"ark:r:{page}", ButtonStyle.PRIMARY),
-           dn._btn("▶", f"ark:r:{(page + 1) % PAGES}", ButtonStyle.PRIMARY)]
-    rows = [nav]
-    if avail:
-        rows.append([dn._btn(f"Забрать всё ({len(avail)})", "ark:cl", ButtonStyle.SUCCESS)])
-    if not st["plus"]:
-        rows.append([dn._btn(f"Открыть ARK+ · {dn._fmt(ARK_PLUS_PRICE)}", "ark:plus", ButtonStyle.SUCCESS,
-                             dn.EM_CRYSTAL[0])])
-    rows.append(dn._back_btn("ark:home"))
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -770,30 +747,25 @@ def _save() -> None:
     dn._cfg["save_users"]()
 
 
-@dn.router.callback_query(F.data == "ark:home")
-async def on_home(callback: CallbackQuery):
+async def _open(callback: CallbackQuery, view: int) -> None:
     user = await dn._require_user(callback)
     if user is None:
         return
     gained = sync(user)
     _save()
     await callback.answer()
-    await _show(callback, lambda wi: home_html(user, wi, gained), home_kb(user, _closable(callback)))
+    await _show(callback, lambda wi: home_html(user, view, wi, gained), home_kb(user, _closable(callback), view))
 
 
-@dn.router.callback_query(F.data.regexp(r"^ark:r:-?\d+$"))
-async def on_rewards(callback: CallbackQuery):
-    user = await dn._require_user(callback)
-    if user is None:
-        return
-    sync(user)
-    _save()
-    page = int(callback.data.rsplit(":", 1)[-1])
-    if page < 0:
-        page = _page_of(_state(user))
-    page = min(PAGES - 1, page)
-    await callback.answer()
-    await _show(callback, lambda wi: rewards_html(user, page, wi), rewards_kb(user, page))
+@dn.router.callback_query(F.data == "ark:home")
+async def on_home(callback: CallbackQuery):
+    await _open(callback, -1)
+
+
+@dn.router.callback_query(F.data.regexp(r"^ark:v:-?\d+$"))
+async def on_view(callback: CallbackQuery):
+    """Листание уровней стрелками; «-1» (центральная кнопка) возвращает к ближайшей награде."""
+    await _open(callback, int(callback.data.rsplit(":", 1)[-1]))
 
 
 @dn.router.callback_query(F.data == "ark:q")
@@ -840,7 +812,7 @@ async def on_claim(callback: CallbackQuery):
     await callback.answer()
     await _show(callback, lambda wi: done_html(f"{EM_NEW} НАГРАДЫ ПОЛУЧЕНЫ", _total_lines(total), user, text),
                 InlineKeyboardMarkup(inline_keyboard=[
-                    [dn._btn("К наградам", "ark:r:-1", ButtonStyle.PRIMARY)], dn._back_btn("ark:home")]))
+                    dn._back_btn("ark:home")]))
 
 
 @dn.router.callback_query(F.data == "ark:plus")
@@ -942,4 +914,4 @@ async def on_levels_buy(callback: CallbackQuery):
                 lambda wi: done_html(f"{EM_XP} УРОВНИ КУПЛЕНЫ", lines, user, "Награды новых уровней можно забрать."),
                 InlineKeyboardMarkup(inline_keyboard=[
                     [dn._btn("Забрать награды", "ark:cl", ButtonStyle.SUCCESS)] if _available(user, st) else
-                    [dn._btn("Награды", "ark:r:-1", ButtonStyle.PRIMARY)], dn._back_btn("ark:home")]))
+                    dn._back_btn("ark:home")]))
