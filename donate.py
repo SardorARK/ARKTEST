@@ -677,7 +677,8 @@ def _back_btn(data: str) -> list[InlineKeyboardButton]:
     return [_btn("Назад", data, ButtonStyle.PRIMARY, _cfg["BACK_EMOJI_ID"])]
 
 
-def home_kb() -> InlineKeyboardMarkup:
+def home_kb(closable: bool = False) -> InlineKeyboardMarkup:
+    """closable=True: раздел открыт командой в чате, вместо «Назад» в меню кнопка «Закрыть»."""
     return InlineKeyboardMarkup(inline_keyboard=[
         [_btn("Магазин кристаллов", "donate:shop", ButtonStyle.SUCCESS, EM_CRYSTAL[0])],
         [_btn("Привилегии", "donate:priv", ButtonStyle.PRIMARY, EM_PRIV[0]), _btn("Кейсы", "donate:cases", ButtonStyle.PRIMARY, "5285009510300150278")],
@@ -685,7 +686,7 @@ def home_kb() -> InlineKeyboardMarkup:
          _btn("🎒 Инвентарь", "donate:inv", ButtonStyle.SUCCESS)],
         [_btn("Лавка", "donate:lavka", ButtonStyle.PRIMARY, EM_LAVKA[0]),
          _btn("Скины ника", "set:skin", ButtonStyle.PRIMARY, EM_SKIN[0])],
-        _back_btn("menu:back"),
+        _close_row() if closable else _back_btn("menu:back"),
     ])
 
 
@@ -1054,7 +1055,8 @@ async def open_home(callback: CallbackQuery, force_new: bool = True) -> None:
     await callback.answer()
     uid = callback.from_user.id
     await _cfg["show_rich_card"](
-        callback, IMG_KEY, lambda wi: home_html(uid, wi), home_kb(), force_new=force_new
+        callback, IMG_KEY, lambda wi: home_html(uid, wi), home_kb(_closing(callback.message)),
+        force_new=force_new,
     )
 
 
@@ -1583,8 +1585,8 @@ async def on_lavka_command(message: Message):
 # ---------- «Донат» в чате: текст раздела и кнопка «Перейти» ----------
 
 async def send_group_card(bot, chat_id: int, user_id: int, url: str) -> bool:
-    """В группе раздел «Донат» не открывается: показываем его текст и одну кнопку «Перейти» в личку
-    с ботом. False: у игрока нет питомца."""
+    """Больше не используется: «донат» в чате открывается как профиль (ответом на команду, с кнопкой
+    «Закрыть», см. quick_cmds). Функция оставлена, чтобы не ломать старые вызовы из main.py."""
     if _cfg["get_user"](user_id) is None:
         return False
     kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(
