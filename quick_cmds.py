@@ -10,6 +10,8 @@
   * Сами разделы (mine.py, boss.py, ...) не меняются.
   * Срабатывает, только если сообщение целиком состоит из команды и игрок не находится
     в FSM-состоянии (ввод ника и т.п.).
+  * Донат («донат», «кристалы») в группах открывается как профиль: ответом на сообщение игрока, дальше правкой
+    на месте, вместо «Назад» кнопка «Закрыть» (кнопки «Перейти» нет).
   * Профиль («я»), «Уровень» («ур») и «Шахта» в группах открываются как в личке: ответом на сообщение игрока,
     дальше экран обновляется правкой на месте (кнопки «Перейти» у них нет).
   * Боссы («босс», «боссы», «охота») в группах открываются как в личке: ответом на сообщение игрока, дальше
@@ -76,7 +78,11 @@ SECTIONS: list[tuple[str, str, tuple[str, ...]]] = [
 
 # Разделы, которые по команде открываются с кнопкой «Закрыть» вместо «Назад» в меню
 # (подмену делает show_rich_card/send_rich_card в main.py, пока CLOSE_MODE = True).
-CLOSE_TARGETS = {"menu:stock", "menu:cases", "menu:exrn", "menu:ach", "me:open", "menu:boss", "top:open"}
+CLOSE_TARGETS = {"menu:stock", "menu:cases", "menu:exrn", "menu:ach", "me:open", "menu:boss", "top:open",
+                 "menu:donate"}
+# Разделы, для которых в группах не нужна карточка с кнопкой «Перейти»: они открываются как в личке
+# (ответом на сообщение игрока, дальше правкой этого же сообщения, кнопка «Закрыть»).
+NO_GROUP_CARD = {("cb", "menu:donate")}
 CLOSE_MODE: ContextVar[bool] = ContextVar("quick_close_mode", default=False)
 
 ALIASES: dict[str, tuple[str, str]] = {}
@@ -113,11 +119,6 @@ GROUP_REDIRECT: dict[tuple[str, str], tuple[str, str]] = {
 # (у игрока нет питомца), отвечаем обычным текстом с кнопкой «Перейти».
 group_cards: dict[tuple[str, str], tuple[str, Callable[..., Awaitable[bool]]]] = {}
 GROUP_FALLBACK: dict[tuple[str, str], tuple[str, str]] = {
-    ("cb", "menu:donate"): (
-        "donate",
-        "<b>Донат</b>\n\n"
-        "<i>В чате донат не открывается. Нажми кнопку, и он откроется в личных сообщениях с ботом.</i>",
-    ),
     ("cb", "menu:cases"): (
         "cases",
         f"{_emoji(TREASURY_EMOJI)} <b>Сокровищница</b>\n\n"
@@ -312,7 +313,7 @@ class QuickCommands(BaseMiddleware):
             return None
         kind, target = found
 
-        if msg.chat.type != "private" and found in group_cards:
+        if msg.chat.type != "private" and found in group_cards and found not in NO_GROUP_CARD:
             param, card = group_cards[found]
             now = time.monotonic()
             key = (msg.chat.id, msg.from_user.id, param)
