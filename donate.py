@@ -680,6 +680,7 @@ def _back_btn(data: str) -> list[InlineKeyboardButton]:
 def home_kb(closable: bool = False) -> InlineKeyboardMarkup:
     """closable=True: раздел открыт командой в чате, вместо «Назад» в меню кнопка «Закрыть»."""
     return InlineKeyboardMarkup(inline_keyboard=[
+        [_btn("ARK Pass", "ark:home", ButtonStyle.SUCCESS, EM_STAR[0])],
         [_btn("Магазин кристаллов", "donate:shop", ButtonStyle.SUCCESS, EM_CRYSTAL[0])],
         [_btn("Привилегии", "donate:priv", ButtonStyle.PRIMARY, EM_PRIV[0]), _btn("Кейсы", "donate:cases", ButtonStyle.PRIMARY, "5285009510300150278")],
         [_btn("Временные бусты", "donate:boosts", ButtonStyle.SUCCESS, "5438571934210082705"),
@@ -747,7 +748,8 @@ def home_html(user_id: int, with_image: bool = False) -> str:
         f"{_balance_line(user, rate=True)}"
         + _tree(
             f"{_ce(EM_STAR)} Разделы",
-            ["<b>Магазин кристаллов</b>: <i>Stars, крипта, карта</i>",
+            ["🏆 <b>ARK Pass</b>: <i>сезон на 30 дней, 60 уровней наград</i>",
+             "<b>Магазин кристаллов</b>: <i>Stars, крипта, карта</i>",
              f"{_ce(EM_PRIV)} <b>Привилегии</b>: {_tier_ce('vip')} <i>VIP,</i> {_tier_ce('premium')} <i>Premium</i>",
              "<b>Кейсы</b>: <i>редкие артефакты</i>",
              "<b>Бусты</b>: <i>эликсиры на время</i>",
@@ -3428,3 +3430,7 @@ async def on_paysupport(message: Message):
         "напиши администратору и приложи время платежа и свой ID: "
         f"<code>{message.from_user.id}</code>.</i>"
     )
+
+
+# ARK Pass (arkpass.py) вешает свои кнопки на этот же router: отдельно подключать его в main.py не нужно.
+import arkpass  # noqa: E402,F401
