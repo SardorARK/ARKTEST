@@ -28,10 +28,12 @@ import logging
 import math
 import random
 import time
+from pathlib import Path
 from types import SimpleNamespace
 
 from aiogram import BaseMiddleware, F, Router
 from aiogram.enums import ButtonStyle
+from aiogram.exceptions import TelegramAPIError, TelegramForbiddenError
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 from mine import _bar, fmt, fmt_dur   # оформление как в «Шахтах»
@@ -758,6 +760,11 @@ def load(user_id: int) -> tuple[dict, dict]:
         D.save_users()
     if ug["run"] is not None:
         _active.add(user_id)                     # фоновый цикл начнёт его вести
+        if "nt" not in ug:                       # запуск начат до появления уведомлений
+            run = ug["run"]
+            ug["nt"] = {"done": run["end"], "rest": run["end"] + COOLDOWN_MIN * 60, "pick": run.get("pick", 0)}
+            schedule_alerts(user_id, ug)
+            D.save_users()
     return user, ug
 
 
@@ -790,6 +797,135 @@ async def background_loop() -> None:
                 logging.exception("Шахта: ошибка фонового начисления у %s", uid)
         if changed:
             D.save_users()
+
+
+# ---------- Уведомления: копание завершено, шахта отдохнула, открыта новая шахта ----------
+# «Копание завершено» и «Шахта отдохнула» игрок может отключить в «Настройки» → «Уведомления»
+# (notify_mine_done, notify_mine_rest). «Открыта новая шахта» отключить нельзя.
+# ug["nt"] = {"done": когда закончится копание, "rest": когда шахта отдохнёт, "pick": номер шахты};
+# 0 значит «уже отправлено или не нужно». Кому что-то ждёт, лежит в ug_alerts.json
+# (uid -> ближайшее время), поэтому бот не перебирает всех игроков. Рассылку ведёт settings.notifier_loop.
+try:
+    from storage import atomic_write_json, read_json_safe
+except ImportError:                      # запуск без storage (например, в тестах)
+    atomic_write_json = read_json_safe = None
+
+_UG_ALERTS_FILE = Path(__file__).with_name("ug_alerts.json")
+_UG_ALERTS: dict[str, float] = {}
+_UG_ALERTS_LOADED = False
+UG_ALERTS_PER_TICK = 30
+
+
+def _alerts_load() -> None:
+    global _UG_ALERTS_LOADED
+    if _UG_ALERTS_LOADED:
+        return
+    _UG_ALERTS_LOADED = True
+    if read_json_safe is None:
+        return
+    try:
+        saved = read_json_safe(_UG_ALERTS_FILE)
+    except Exception:
+        log.warning("Шахта: ug_alerts.json не прочитан, уведомления начаты с нуля", exc_info=True)
+        return
+    if isinstance(saved, dict):
+        for uid, ts in saved.items():
+            try:
+                _UG_ALERTS[str(uid)] = float(ts)
+            except (TypeError, ValueError):
+                continue
+
+
+def _alerts_save() -> None:
+    if atomic_write_json is None:
+        return
+    try:
+        atomic_write_json(_UG_ALERTS_FILE, _UG_ALERTS, backup_every=300)
+    except Exception:
+        log.warning("Шахта: не удалось сохранить ug_alerts.json", exc_info=True)
+
+
+def schedule_alerts(uid, ug: dict) -> None:
+    """Запоминает ближайшее уведомление игрока (или убирает, если ждать нечего)."""
+    _alerts_load()
+    nt = ug.get("nt")
+    times = [t for t in ((nt or {}).get("done"), (nt or {}).get("rest"))
+             if isinstance(t, (int, float)) and t > 0]
+    if times:
+        _UG_ALERTS[str(uid)] = float(min(times))
+    else:
+        _UG_ALERTS.pop(str(uid), None)
+    _alerts_save()
+
+
+def _wants(user: dict, key: str) -> bool:
+    try:
+        import settings
+        return settings.get_setting(user, key)
+    except Exception:
+        return True
+
+
+def _mine_name(nt: dict) -> str:
+    try:
+        return PICKS[int(nt.get("pick", 0))]["name"]
+    except Exception:
+        return "Шахта"
+
+
+async def notify_due(bot) -> None:
+    """Шлёт «копание завершено» и «шахта отдохнула», когда подошло время. Зовёт settings.notifier_loop."""
+    _alerts_load()
+    now = time.time()
+    due = [uid for uid, ts in _UG_ALERTS.items() if ts <= now][:UG_ALERTS_PER_TICK]
+    if not due:
+        return
+    changed = False
+    for uid in due:
+        user = D.get_user(int(uid)) if uid.isdigit() else None
+        ug = user.get("ug") if user else None
+        nt = ug.get("nt") if isinstance(ug, dict) else None
+        if not isinstance(nt, dict):
+            _UG_ALERTS.pop(uid, None)
+            continue
+        name = _mine_name(nt)
+        texts = []
+        for key, setting, text in (
+            ("done", "notify_mine_done", f"{_ug()} Шахта <b>{name}</b> завершила копание."),
+            ("rest", "notify_mine_rest", f"{_ug()} Шахта <b>{name}</b> отдохнула и готова к запуску."),
+        ):
+            ts = nt.get(key) or 0
+            if ts and ts <= now:
+                nt[key] = 0
+                changed = True
+                if _wants(user, setting):
+                    texts.append(text)
+        schedule_alerts(uid, ug)
+        if ug.get("run") is not None:       # шахту уже запустили заново: старые новости не нужны
+            continue
+        if texts:
+            try:
+                await bot.send_message(int(uid), texts[-1])   # если бот долго не работал, шлём только последнее
+            except TelegramForbiddenError:
+                st = user.setdefault("settings", {})
+                st["notify_mine_done"] = st["notify_mine_rest"] = False
+            except TelegramAPIError as e:
+                log.warning("Шахта: не удалось отправить уведомление игроку %s: %s", uid, e)
+            await asyncio.sleep(0.05)
+    if changed:
+        D.save_users()
+
+
+async def notify_new_mines(bot, uid: int, old_level: int, new_level: int) -> None:
+    """Игрок поднял уровень: если открылась новая шахта, говорим об этом (отключить нельзя)."""
+    names = [p["name"] for p in PICKS if old_level < p["need_level"] <= new_level]
+    if not names:
+        return
+    head = "Открыта новая шахта" if len(names) == 1 else "Открыты новые шахты"
+    try:
+        await bot.send_message(uid, f"{_ug()} {head}: <b>{', '.join(names)}</b>.")
+    except TelegramAPIError as e:
+        log.warning("Шахта: не удалось сообщить игроку %s об открытой шахте: %s", uid, e)
 
 
 # ---------- Оформление ----------
@@ -1633,6 +1769,8 @@ async def on_start(callback: CallbackQuery):
     except Exception:
         log.warning("Шахта: не удалось бросить наборы", exc_info=True)
     _ach("on_ug_start", user)
+    ug["nt"] = {"done": ug["run"]["end"], "rest": ug["run"]["end"] + COOLDOWN_MIN * 60, "pick": i}
+    schedule_alerts(callback.from_user.id, ug)
     D.save_users()
     _active.add(callback.from_user.id)
     await callback.answer(f"{p['name']} запущена на {label}!")
@@ -1663,6 +1801,9 @@ async def on_stop(callback: CallbackQuery):
         log.warning("Шахта: не удалось вернуть часы наборов", exc_info=True)
     ug["last_end"] = now
     ug["run"] = None
+    # «копание завершено» не шлём (игрок сам остановил), а «отдохнула» придёт после паузы
+    ug["nt"] = {"done": 0, "rest": now + COOLDOWN_MIN * 60, "pick": run.get("pick", 0)}
+    schedule_alerts(callback.from_user.id, ug)
     D.save_users()
     await callback.answer("Шахта остановлена. Добытое можно забрать.")
     await _show(callback, "ug")
