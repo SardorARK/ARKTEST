@@ -2517,7 +2517,10 @@ def player_profile_kb() -> InlineKeyboardMarkup:
                     style=ButtonStyle.SUCCESS,
                     icon_custom_emoji_id=workshop_sets.SETS_EMOJI[0],
                 ),
-                InlineKeyboardButton(text="🏷 Титул", callback_data="ttl:pick", style=ButtonStyle.SUCCESS),
+                InlineKeyboardButton(
+                    text="Титул", callback_data="ttl:pick", style=ButtonStyle.SUCCESS,
+                    icon_custom_emoji_id=titles.EMO_TITLE[0],
+                ),
             ],
             [InlineKeyboardButton(
                 text="Назад",
