@@ -1087,8 +1087,8 @@ def player_profile_html(user_id: int, with_image: bool = False, note: str = "") 
         f"{GAP}"
         f"<p><b>{custom_emoji(COIN_EMOJI)} Монеты:</b> {_fmt(user['coins'])}<br>"
         f"<b>{MINERAL_EMOJI} Минералы:</b> {_fmt(player_minerals(user))}<br>"
-        f"<b>{custom_emoji(PRIVILEGE_EMOJI)} Привилегия:</b> {privilege}<br>"
-        f"{titles.profile_line(user)}</p>"
+        f"<b>{custom_emoji(PRIVILEGE_EMOJI)} Привилегия:</b> {privilege}</p>"
+        f"{titles.profile_line(user)}"
         f"{GAP}"
         + (f"<p>{note}</p>" if note else "")
     )
