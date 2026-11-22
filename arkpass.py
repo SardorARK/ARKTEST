@@ -15,8 +15,7 @@
 в конце файла делает import arkpass) и берёт все функции из donate._cfg (show_rich_card, get_user, save_users...).
 
 Дополнительно (необязательно): чтобы шли задания про боссов, шахту и экспедиции, добавь в TRACKED_KINDS нужные
-виды и вызывай из этих разделов arkpass.note(user_id, "boss") / "mine" / "explore". А для общего значка
-в профиле есть arkpass.badge(user).
+виды и вызывай из этих разделов arkpass.note(user_id, "boss") / "mine" / "explore".
 """
 
 from __future__ import annotations
@@ -59,18 +58,31 @@ EM_OK = "✅"
 EM_NEW = "🎁"
 EM_LOCK = "🔒"
 EM_PLUS = "👑"                                   # запасной значок, если кастомные эмодзи недоступны
-EMO_PASS = ("5917752342979024268", "🔥")         # заголовок пасса и ОП (вместо кубка)
-EMO_HEAD = ("5226893221191237996", "👾")         # заголовок «ARK Pass 12/60»
+EMO_PASS = ("5775927158450950245", "⭐")         # ARK Pass: заголовки экранов
+EMO_OP = ("5325547803936572038", "✨")           # очки пасса (ОП)
 EMO_FREE = ("5411307602074163455", "🎫")         # обычный трек (Free)
 EMO_PLUS = ("5314784791986453963", "🎫")         # ARK+ (текст и кнопка)
 
 
 def _e_head() -> str:
-    return dn._ce(EMO_HEAD)
+    return dn._ce(EMO_PASS)
 
 
 def _e_pass() -> str:
     return dn._ce(EMO_PASS)
+
+
+def _e_op() -> str:
+    return dn._ce(EMO_OP)
+
+
+def _frag() -> str:
+    """Значок фрагмента из cases.py (там FRAG = «🧩»), чтобы не расходился с «Сокровищницей»."""
+    try:
+        import cases
+        return str(cases.FRAG)
+    except Exception:
+        return "🧩"
 
 
 def _e_free() -> str:
@@ -133,7 +145,7 @@ def _quests(weekly: bool) -> list[dict]:
 #   ("set", ключ_набора, штук)               наборы мастерской (basic / elite / items / gear)
 #   ("elixir", ключ, уровень, срок, штук)    эликсиры из donate.BOOSTS, кладутся в инвентарь
 #   ("priv", "vip" | "premium", дней)        привилегия
-#   ("badge", None)                          значок сезона ARK+ (только для витрины, выдаётся при покупке)
+#   ("frag", n)                              фрагменты сундуков (раздел «Сокровищница», cases.py)
 Item = tuple
 
 FREE: dict[int, list[Item]] = {}
@@ -185,8 +197,12 @@ def _build() -> None:
         50: [("crystals", 20), ("set", "elite", 3)],
         55: [("crystals", 10), ("elixir", "mine", 3, 0, 1)],
         58: [("set", "items", 2)],
-        60: [("crystals", 40), ("priv", "premium", 7), ("set", "elite", 5), ("badge", None)],
+        60: [("crystals", 40), ("priv", "premium", 7), ("set", "elite", 5), ("frag", 30)],
     }
+    for lv, n in {3: 2, 9: 3, 14: 3, 19: 4, 24: 4, 29: 5, 34: 5, 39: 6, 44: 6, 49: 6, 54: 6}.items():   # всего 50
+        free_extra.setdefault(lv, []).append(("frag", n))
+    for lv, n in {2: 5, 6: 5, 11: 6, 16: 8, 21: 8, 26: 10, 31: 10, 36: 12, 41: 12, 46: 14, 51: 15, 56: 15}.items():   # всего 120, ещё 30 на 60-м
+        plus_extra.setdefault(lv, []).append(("frag", n))
     for lv, extra in free_extra.items():
         FREE[lv] += extra
     for lv, extra in plus_extra.items():
@@ -267,7 +283,7 @@ def _state(user: dict, now: float | None = None) -> dict:
     if not isinstance(st, dict):
         st = user[FIELD] = {}
     if st.get("s") != n:                       # новый сезон: прогресс с нуля, значки и счётчики остаются
-        keep = {"badges": _ints(st.get("badges")), "seen": st.get("seen") if isinstance(st.get("seen"), dict) else {}}
+        keep = {"seen": st.get("seen") if isinstance(st.get("seen"), dict) else {}}
         st.clear()
         st.update(keep)
         st.update(s=n, xp=0, plus=0, fr=[], pr=[], q={})
@@ -287,11 +303,6 @@ def has_plus(user: dict | None) -> bool:
         return False
     st = user.get(FIELD)
     return isinstance(st, dict) and st.get("s") == season_info()[0] and bool(st.get("plus"))
-
-
-def badge(user: dict | None) -> str:
-    """Значок для профиля: «👑» у владельца ARK+ в текущем сезоне, иначе пустая строка."""
-    return _e_plus() if has_plus(user) else ""
 
 
 def pass_level(st: dict) -> int:
@@ -413,7 +424,7 @@ def _item_text(it: Item) -> str:
     if kind == "priv":
         info = dn.PRIVILEGES[it[1]]
         return f"{dn._ce(info['emoji'])} {info['name']}: <b>{it[2]} дн.</b>"
-    return f"{_e_plus()} Значок <b>ARK+</b> сезона"
+    return f"{_frag()} Фрагменты: <b>{dn._fmt(it[1])}</b>"
 
 
 def _k(n: int) -> str:
@@ -450,7 +461,7 @@ def _item_short(it: Item) -> str:
         return f"{body}{dn._bicon(b).strip()}" + (f"×{it[4]}" if it[4] > 1 else "")
     if kind == "priv":
         return f"{it[2]}д{dn._ce(dn.PRIVILEGES[it[1]]['emoji'])}"
-    return _e_plus()
+    return f"{_k(it[1])}{_frag()}"
 
 
 def _apply(user: dict, it: Item, total: dict) -> None:
@@ -469,16 +480,12 @@ def _apply(user: dict, it: Item, total: dict) -> None:
             raise RuntimeError("инвентарь эликсиров переполнен")
     elif kind == "priv":
         dn.grant_privilege(user, it[1], int(it[2]))
-    elif kind == "badge":
-        st = _state(user)
-        if st["s"] not in st.setdefault("badges", []):
-            st["badges"].append(st["s"])
+    elif kind == "frag":
+        user["fragments"] = int(user.get("fragments", 0) or 0) + int(it[1])
     if kind == "elixir":
         key, cnt = (kind, it[1], it[2], it[3]), int(it[4])
     elif kind in ("set", "priv"):
         key, cnt = (kind, it[1]), int(it[2])
-    elif kind == "badge":
-        key, cnt = (kind,), 1
     else:
         key, cnt = (kind,), int(it[1])
     total[key] = total.get(key, 0) + cnt
@@ -524,7 +531,7 @@ def claim_all(user: dict) -> tuple[dict, int, int]:
 
 
 def _total_lines(total: dict) -> list[str]:
-    order = ("coins", "meat", "fruit", "minerals", "crystals", "set", "elixir", "priv", "badge")
+    order = ("coins", "meat", "fruit", "minerals", "crystals", "set", "elixir", "priv", "frag")
     lines = []
     for kind in order:
         for key in sorted((k for k in total if k[0] == kind), key=str):
@@ -535,8 +542,6 @@ def _total_lines(total: dict) -> list[str]:
                 lines.append(_item_text(("elixir", key[1], key[2], key[3], n)))
             elif kind == "priv":
                 lines.append(_item_text(("priv", key[1], n)))
-            elif kind == "badge":
-                lines.append(_item_text(("badge", None)))
             else:
                 lines.append(_item_text((kind, n)))
     return lines
@@ -609,13 +614,13 @@ def home_html(user: dict, view: int = -1, with_image: bool = False, gained: int 
     view = default_view(user) if view < 1 else min(MAX_LEVEL, view)
     n, _s, end = season_info()
     if lvl >= MAX_LEVEL:
-        xp_line = f"{_e_pass()} <b>Пасс пройден до конца</b>"
+        xp_line = f"{_e_op()} <b>Пасс пройден до конца</b>"
         bar = f"<code>{dn._bar(1.0)}</code>"
     else:
         into, need = st["xp"] - CUM[lvl], level_cost(lvl + 1)
-        xp_line = f"{_e_pass()} ОП: <b>{dn._fmt(into)}/{dn._fmt(need)}</b>"
+        xp_line = f"{_e_op()} ОП: <b>{dn._fmt(into)}/{dn._fmt(need)}</b>"
         bar = f"<code>{dn._bar(into / need)}</code>"
-    gain = f"<p>{_e_pass()} За задания: <b>+{dn._fmt(gained)} ОП</b></p>" if gained else ""
+    gain = f"<p>{_e_op()} За задания: <b>+{dn._fmt(gained)} ОП</b></p>" if gained else ""
     reached = view <= lvl
     return (
         f"{dn._image(with_image)}"
@@ -689,6 +694,7 @@ def plus_html(user: dict, with_image: bool = False) -> str:
     n, _s, end = season_info()
     have = dn.get_balance(user)
     crystals = _sum_kind(PLUS, "crystals")
+    frags = _sum_kind(PLUS, "frag")
     sets_n = sum(int(it[2]) for items in PLUS.values() for it in items if it[0] == "set")
     elixirs = sum(int(it[4]) for items in PLUS.values() for it in items if it[0] == "elixir")
     vip_days = sum(int(it[2]) for items in PLUS.values() for it in items if it[0] == "priv" and it[1] == "vip")
@@ -705,7 +711,7 @@ def plus_html(user: dict, with_image: bool = False) -> str:
             f"Наборы мастерской: <b>×{sets_n}</b>",
             f"Эликсиры: <b>×{elixirs}</b>",
             "Монеты, мясо, фрукты и минералы в 2,5 раза больше",
-            f"{_e_plus()} Значок ARK+ в профиле",
+            f"{_frag()} Фрагменты сундуков: <b>{dn._fmt(frags)}</b>",
         ], quote=True)
         + dn._GAP
         + dn._tree(f"{EM_XP} Бонусы сразу", [
@@ -898,8 +904,6 @@ async def on_plus_buy(callback: CallbackQuery):
     try:
         user[dn.BALANCE_FIELD] = have - ARK_PLUS_PRICE
         st["plus"] = 1
-        if st["s"] not in st.setdefault("badges", []):
-            st["badges"].append(st["s"])
         target = min(MAX_LEVEL, pass_level(st) + PLUS_BONUS_LEVELS)
         st["xp"] = max(st["xp"], CUM[target])
         dn._bump(user, spent_ark=ARK_PLUS_PRICE, ark_plus=1)
