@@ -109,6 +109,7 @@ EM_OPENED = ("5203996991054432397", "🎁")    # заголовок «кейс �
 EM_PRICE = ("5417924076503062111", "💰")      # перед «Цена» везде в разделе
 EM_LACK = ("5328093774650293878", "❌")       # «не хватает» (как в уровне игрока в профиле)
 EM_SKIN = ("5445224310270633584", "🔤")      # кнопка и текст «Скины ника»
+EM_TITLE = ("5372848794163486495", "👨‍🎓")    # кнопка и текст «Титулы»
 EM_ARKPLUS = ("5314784791986453963", "🎫")   # кнопка и текст «ARK+» (тот же значок, что в arkpass.py)
 IMG_KEY = "donate"           # ключ картинки раздела (если добавишь в IMG_TARGETS)
 CASES_KEY = IMG_KEY          # одно общее фото на весь раздел: все экраны используют IMG_KEY
@@ -687,7 +688,7 @@ def home_kb(closable: bool = False) -> InlineKeyboardMarkup:
          _btn("🎒 Инвентарь", "donate:inv", ButtonStyle.SUCCESS)],
         [_btn("Лавка", "donate:lavka", ButtonStyle.PRIMARY, EM_LAVKA[0]),
          _btn("Скины ника", "set:skin", ButtonStyle.PRIMARY, EM_SKIN[0])],
-        [_btn("🏷 Титулы", "donate:titles", ButtonStyle.PRIMARY),
+        [_btn("Титулы", "donate:titles", ButtonStyle.SUCCESS, EM_TITLE[0]),
          _btn("ARK+", "donate:arkplus", ButtonStyle.SUCCESS, EM_ARKPLUS[0])],
         _close_row() if closable else _back_btn("menu:back"),
     ])
@@ -757,7 +758,7 @@ def home_html(user_id: int, with_image: bool = False) -> str:
              f"🎒 <b>Инвентарь</b>: <b>{inv_total(user)}</b>",
              f"{_ce(EM_LAVKA)} <b>Лавка</b>: <i>новый пак каждые {LAVKA_HOURS} ч</i>",
              f"{_ce(EM_SKIN)} <b>Скины ника</b>: <i>эмодзи в имени</i>",
-             "🏷 <b>Титулы</b>: <i>10 в магазине, 20 в Сундуке чудес</i>",
+             f"{_ce(EM_TITLE)} <b>Титулы</b>: <i>Сундук чудес</i>",
              f"{_ce(EM_ARKPLUS)} <b>ARK+</b>: <i>премиум-награды сезона</i>"],
             quote=True,
         )
