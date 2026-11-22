@@ -72,6 +72,7 @@ import boss
 import bonus             # +10% к урону по боссам за юзернейм бота в описании (bonus.py)
 import cases
 import donate
+import titles  # титулы: строка в профиле, регистрируется вместе с donate
 import equipment
 import arena
 import exrn
@@ -1086,7 +1087,8 @@ def player_profile_html(user_id: int, with_image: bool = False, note: str = "") 
         f"{GAP}"
         f"<p><b>{custom_emoji(COIN_EMOJI)} Монеты:</b> {_fmt(user['coins'])}<br>"
         f"<b>{MINERAL_EMOJI} Минералы:</b> {_fmt(player_minerals(user))}<br>"
-        f"<b>{custom_emoji(PRIVILEGE_EMOJI)} Привилегия:</b> {privilege}</p>"
+        f"<b>{custom_emoji(PRIVILEGE_EMOJI)} Привилегия:</b> {privilege}<br>"
+        f"{titles.profile_line(user)}</p>"
         f"{GAP}"
         + (f"<p>{note}</p>" if note else "")
     )
@@ -2508,12 +2510,15 @@ def player_profile_kb() -> InlineKeyboardMarkup:
                 ),
             ],
             # «Наборы»: тот же список, что по команде «н-наборы-набор», но с кнопкой «Назад»
-            [InlineKeyboardButton(
-                text="Наборы",
-                callback_data=workshop_sets.OPEN_DATA,
-                style=ButtonStyle.SUCCESS,
-                icon_custom_emoji_id=workshop_sets.SETS_EMOJI[0],
-            )],
+            [
+                InlineKeyboardButton(
+                    text="Наборы",
+                    callback_data=workshop_sets.OPEN_DATA,
+                    style=ButtonStyle.SUCCESS,
+                    icon_custom_emoji_id=workshop_sets.SETS_EMOJI[0],
+                ),
+                InlineKeyboardButton(text="🏷 Титул", callback_data="ttl:pick", style=ButtonStyle.SUCCESS),
+            ],
             [InlineKeyboardButton(
                 text="Назад",
                 callback_data="menu:back",
@@ -2529,8 +2534,9 @@ def player_me_kb() -> InlineKeyboardMarkup:
     kb = player_profile_kb()
     rows = [list(r) for r in kb.inline_keyboard[:-1]]
     # «Уровень» и «Статистика» открываются в режиме «я», чтобы «Назад» вёл в этот же профиль
-    for b in rows[0]:
-        b.callback_data = {"plv:open": "me:lvl", "pst:open": "me:stat"}.get(b.callback_data, b.callback_data)
+    for b in (b for row in rows for b in row):
+        b.callback_data = {"plv:open": "me:lvl", "pst:open": "me:stat", "ttl:pick": "ttlc:pick"}.get(
+            b.callback_data, b.callback_data)
     rows.append([InlineKeyboardButton(
         text="Закрыть", callback_data="me:close", style=ButtonStyle.DANGER,
     )])
