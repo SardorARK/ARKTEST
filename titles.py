@@ -40,6 +40,7 @@ TITLE_FIELD = "title"       # в профиле: ключ надетого ти�
 CHEST_PRICE = 59            # цена открытия «Сундука чудес»
 EMO_CHEST = ("5235599734080556928", "🏆")   # эмодзи сундука (тексты и кнопки)
 EMO_TITLE = ("5372848794163486495", "👨‍🎓")   # эмодзи титулов (кнопки и тексты)
+PER_PAGE = 6               # титулов на одной странице выбора в профиле
 EMO_COLLECTED = ("5337080053119336309", "👍")   # эмодзи у строк «Собрано»
 
 # Все титулы лежат только в сундуке
@@ -164,7 +165,7 @@ def chest_result_html(user: dict, key: str) -> str:
         + title_block(f"<b>{escape(NAMES[key])}</b>")
         + "<p><i>Выпал новый титул, он твой навсегда. Надеть его можно в профиле.</i></p>"
         + dn._GAP
-        + dn._tree("Итог", [dn._bal("Баланс", dn.get_balance(user))])
+        + f"<p>{dn._bal('Баланс', dn.get_balance(user))}</p>"
     )
 
 
@@ -199,50 +200,83 @@ def pick_html(user: dict, with_image: bool = False, note: str = "") -> str:
     )
 
 
-def pick_kb(user: dict, prefix: str, back: str) -> InlineKeyboardMarkup:
+def _pages(user: dict) -> int:
+    return max(1, -(-len(owned(user)) // PER_PAGE))
+
+
+def _page_of(user: dict, key: str | None, page: int | None = None) -> int:
+    """Номер страницы: заданный (в пределах списка) или та, где лежит титул key, иначе первая."""
+    last = _pages(user) - 1
+    if page is not None:
+        return min(max(0, page), last)
+    mine = owned(user)
+    return mine.index(key) // PER_PAGE if key in mine else 0
+
+
+def pick_kb(user: dict, prefix: str, back: str, page: int = 0) -> InlineKeyboardMarkup:
     cur = active(user)
-    btns = [dn._btn(f"✅ {NAMES[k]}" if k == cur else NAMES[k], f"{prefix}:set:{k}",
+    page = _page_of(user, None, page)
+    chunk = owned(user)[page * PER_PAGE:(page + 1) * PER_PAGE]
+    btns = [dn._btn(f"✅ {NAMES[k]}" if k == cur else NAMES[k], f"{prefix}:set:{k}:{page}",
                     ButtonStyle.SUCCESS if k == cur else ButtonStyle.PRIMARY)
-            for k in owned(user)]
+            for k in chunk]
     rows = [btns[i:i + 2] for i in range(0, len(btns), 2)]
+    pages = _pages(user)
+    if pages > 1:
+        rows.append([dn._btn("‹", f"{prefix}:pick:{(page - 1) % pages}", ButtonStyle.PRIMARY),
+                     dn._btn(f"{page + 1}/{pages}", f"{prefix}:np", ButtonStyle.PRIMARY),
+                     dn._btn("›", f"{prefix}:pick:{(page + 1) % pages}", ButtonStyle.PRIMARY)])
     if cur:
-        rows.append([dn._btn("Снять титул", f"{prefix}:off", ButtonStyle.DANGER)])
+        rows.append([dn._btn("Снять титул", f"{prefix}:off:{page}", ButtonStyle.DANGER)])
     if _chest_left(user):
         rows.append([dn._btn("Сундук чудес", "donate:titles", ButtonStyle.SUCCESS, EMO_CHEST[0])])
     rows.append(dn._back_btn(back))
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-async def _pick_screen(callback: CallbackQuery, user: dict, note: str = "") -> None:
+async def _pick_screen(callback: CallbackQuery, user: dict, note: str = "", page: int = 0) -> None:
     prefix, back = _mode(callback)
-    await _show(callback, lambda wi: pick_html(user, wi, note), pick_kb(user, prefix, back), key="player")
+    await _show(callback, lambda wi: pick_html(user, wi, note), pick_kb(user, prefix, back, page), key="player")
 
 
-@dn.router.callback_query(F.data.regexp(r"^ttlc?:pick$"))
+def _page_arg(data: str) -> int | None:
+    """Необязательный номер страницы в конце callback_data («ttl:pick:2», «ttl:set:c01:2»)."""
+    tail = (data or "").rsplit(":", 1)[-1]
+    return int(tail) if tail.isdigit() else None
+
+
+@dn.router.callback_query(F.data.regexp(r"^ttlc?:pick(:\d+)?$"))
 async def on_pick(callback: CallbackQuery):
     user = await dn._require_user(callback)
     if user is None:
         return
     await callback.answer()
-    await _pick_screen(callback, user)
+    page = _page_arg(callback.data)
+    await _pick_screen(callback, user, page=_page_of(user, active(user), page))
 
 
-@dn.router.callback_query(F.data.regexp(rf"^ttlc?:set:{_KEY_RE}$"))
+@dn.router.callback_query(F.data.regexp(r"^ttlc?:np$"))
+async def on_noop(callback: CallbackQuery):
+    await callback.answer()
+
+
+@dn.router.callback_query(F.data.regexp(rf"^ttlc?:set:{_KEY_RE}(:\d+)?$"))
 async def on_set(callback: CallbackQuery):
     user = await dn._require_user(callback)
     if user is None:
         return
-    key = callback.data.rsplit(":", 1)[-1]
+    key = callback.data.split(":")[2]
     if key not in NAMES or key not in owned(user):
         await callback.answer("Этого титула у тебя нет.", show_alert=True)
         return
     user[TITLE_FIELD] = key
     dn._cfg["save_users"]()
     await callback.answer(f"Титул надет: {NAMES[key]}")
-    await _pick_screen(callback, user, "Титул надет, он уже виден в профиле.")
+    page = _page_of(user, key, _page_arg(callback.data) if callback.data.count(":") >= 3 else None)
+    await _pick_screen(callback, user, "Титул надет, он уже виден в профиле.", page)
 
 
-@dn.router.callback_query(F.data.regexp(r"^ttlc?:off$"))
+@dn.router.callback_query(F.data.regexp(r"^ttlc?:off(:\d+)?$"))
 async def on_off(callback: CallbackQuery):
     user = await dn._require_user(callback)
     if user is None:
@@ -250,7 +284,7 @@ async def on_off(callback: CallbackQuery):
     user[TITLE_FIELD] = ""
     dn._cfg["save_users"]()
     await callback.answer("Титул снят.")
-    await _pick_screen(callback, user)
+    await _pick_screen(callback, user, page=_page_of(user, None, _page_arg(callback.data)))
 
 
 # ---------- Донат: обработчики ----------
