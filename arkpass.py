@@ -68,6 +68,7 @@ EMO_LEVELS = "5247160991472446906"               # иконка кнопки «�
 EMO_OP = ("5325547803936572038", "✨")           # очки пасса (ОП)
 EMO_FREE = ("5411307602074163455", "🎫")         # обычный трек (Free)
 EMO_PLUS = ("5314784791986453963", "🎫")         # ARK+ (текст и кнопка)
+BACK_DATA = "donate:home"   # куда ведёт «Назад» с главного экрана ARK Pass: callback_data раздела «Заработать»
 
 
 def _e_head() -> str:
@@ -799,7 +800,7 @@ def home_kb(user: dict, closable: bool, view: int = -1) -> InlineKeyboardMarkup:
     rows.append(second)
     if not st["plus"]:
         rows.append([dn._btn("ARK+", "ark:plus", ButtonStyle.SUCCESS, EMO_PLUS[0])])
-    rows.append(dn._close_row() if closable else dn._back_btn("donate:home"))
+    rows.append(dn._close_row() if closable else dn._back_btn(BACK_DATA))
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
