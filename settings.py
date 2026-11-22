@@ -26,7 +26,7 @@
     user["nick_plain"]  тот же никнейм обычным текстом
     user["nick_at"]     время последней смены
     user["tg_name"]     имя из Telegram (запасной вариант, обновляет панель админа)
-    user["settings"]    {"notify_exrn": True/False, "hidden": True/False}
+    user["settings"]    {"notify_exrn", "notify_mine_done", "notify_mine_rest", "hidden": True/False}
     user["support_at"], user["support_day"]  защита обращений в поддержку
 
 Подключение в main.py: settings.setup(...), dp.include_router(settings.router) и запуск
@@ -95,7 +95,8 @@ FORBIDDEN_ENTITIES = {"url", "text_link", "mention", "text_mention", "email", "p
 
 ALERT_TICK = 20                  # как часто проверять уведомления, секунд
 ALERTS_PER_TICK = 30             # сколько уведомлений отправлять за один проход
-DEFAULT_SETTINGS = {"notify_exrn": True, "hidden": False}
+DEFAULT_SETTINGS = {"notify_exrn": True, "notify_mine_done": True, "notify_mine_rest": True,
+                    "hidden": False}
 HIDDEN_NAME = "Скрытый игрок"    # так видят игрока с режимом скрытости
 
 SUPPORT_USERNAME = "IIARKII"                       # поддержка в Telegram
@@ -1078,6 +1079,13 @@ async def notifier_loop(bot: Bot) -> None:
             raise
         except Exception:
             log.exception("ошибка в цикле уведомлений")
+        try:
+            import underground      # «копание завершено» и «шахта отдохнула»
+            await underground.notify_due(bot)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            log.exception("ошибка в уведомлениях шахты")
 
 
 async def _notify_due(bot: Bot) -> None:
@@ -1194,6 +1202,8 @@ def settings_html(user: dict, uid: int, with_image: bool = False, note: str = ""
     notify = get_setting(user, "notify_exrn")
     alerts = [
         (f"{_ic('expedition')} Возвращение экспедиции", _onoff(notify)),
+        (f"{_ic('mine')} Копание завершено", _onoff(get_setting(user, "notify_mine_done"))),
+        (f"{_ic('mine')} Шахта отдохнула", _onoff(get_setting(user, "notify_mine_rest"))),
         (f"{_em(EM_PRIV)} Режим скрытости", _onoff(is_hidden(user), "включён", "выключен")),
     ]
     return (
@@ -1325,7 +1335,14 @@ def skin_html(user: dict, with_image: bool = False, page: int = 1, lang: str = "
     )
 
 
-def skin_kb(user: dict, page: int = 1, lang: str = "en") -> InlineKeyboardMarkup:
+_SKIN_FROM_DONATE: set[int] = set()   # кто открыл скины из раздела «Донат»: «Назад» ведёт обратно в донат
+
+
+def _skin_back(uid: int) -> str:
+    return "donate:home" if uid in _SKIN_FROM_DONATE else "menu:player"
+
+
+def skin_kb(user: dict, page: int = 1, lang: str = "en", back: str = "menu:player") -> InlineKeyboardMarkup:
     """Скины лежат кнопками в самом сообщении, внизу переключатель страниц и «Назад»."""
     lang = _lang_no(lang)
     page = _skin_page_no(page, lang)
@@ -1333,26 +1350,35 @@ def skin_kb(user: dict, page: int = 1, lang: str = "en") -> InlineKeyboardMarkup
     nav = [_btn("‹", f"set:skinp:{lang}:{(page - 2) % total + 1}"),
            _btn(f"{page}/{total}", "set:skinnoop"),
            _btn("›", f"set:skinp:{lang}:{page % total + 1}")] if total > 1 else []
-    return _kb(nav, [_back("menu:player")])
+    return _kb(nav, [_back(back)])
 
 
 def notif_html(user: dict, with_image: bool = False) -> str:
-    notify = get_setting(user, "notify_exrn")
     return (
         f"{_image(with_image)}"
         f"<p><b>{_em(EM_NOTIF)} УВЕДОМЛЕНИЯ</b></p>"
-        "<blockquote><i>Бот может сообщить, когда твой отряд вернётся из экспедиции, "
-        "чтобы добыча не ждала в лагере.</i></blockquote>"
-        + _tree([(f"{_ic('expedition')} Возвращение экспедиции", _onoff(notify))], "Сейчас")
-        + _p("<i>Сообщение приходит один раз, когда экспедиция завершилась.</i>")
+        "<blockquote><i>Бот может сообщить, когда вернётся отряд, шахта закончит копание "
+        "или отдохнёт и будет готова к запуску.</i></blockquote>"
+        + _tree([
+            (f"{_ic('expedition')} Возвращение экспедиции", _onoff(get_setting(user, "notify_exrn"))),
+            (f"{_ic('mine')} Копание завершено", _onoff(get_setting(user, "notify_mine_done"))),
+            (f"{_ic('mine')} Шахта отдохнула", _onoff(get_setting(user, "notify_mine_rest"))),
+        ], "Сейчас")
+        + _p("<i>Каждое сообщение приходит один раз. О том, что открыта новая шахта, бот сообщает всегда.</i>")
     )
 
 
+def _toggle_btn(user: dict, key: str, data: str, what: str) -> list:
+    on = get_setting(user, key)
+    return [_btn(f"{'Выключить' if on else 'Включить'}: {what}", data,
+                 ButtonStyle.DANGER if on else ButtonStyle.SUCCESS)]
+
+
 def notif_kb(user: dict) -> InlineKeyboardMarkup:
-    notify = get_setting(user, "notify_exrn")
     return _kb(
-        [_btn("Выключить: возвращение отряда" if notify else "Включить: возвращение отряда",
-              "set:notif_toggle", ButtonStyle.DANGER if notify else ButtonStyle.SUCCESS)],
+        _toggle_btn(user, "notify_exrn", "set:notif_toggle", "возвращение отряда"),
+        _toggle_btn(user, "notify_mine_done", "set:notif_t:mdone", "копание завершено"),
+        _toggle_btn(user, "notify_mine_rest", "set:notif_t:mrest", "шахта отдохнула"),
         [_back("set:main")],
     )
 
@@ -1427,14 +1453,20 @@ async def on_nick(callback: CallbackQuery, state: FSMContext):
     await _show(callback, "settings_nick", lambda wi: nick_html_screen(user, wi), nick_kb(user))
 
 
-@router.callback_query(F.data == "set:skin")
+@router.callback_query(F.data.in_({"set:skin", "set:skind"}))
 async def on_skin(callback: CallbackQuery, state: FSMContext):
+    """set:skin открывают из профиля («Назад» в профиль), set:skind из раздела «Донат» («Назад» в донат)."""
     await state.clear()
     user = await _need_user(callback)
     if user is None:
         return
+    uid = callback.from_user.id
+    if callback.data == "set:skind":
+        _SKIN_FROM_DONATE.add(uid)
+    else:
+        _SKIN_FROM_DONATE.discard(uid)
     await callback.answer()
-    await _show(callback, "settings_skin", lambda wi: skin_html(user, wi, 1), skin_kb(user, 1))
+    await _show(callback, "settings_skin", lambda wi: skin_html(user, wi, 1), skin_kb(user, 1, "en", _skin_back(uid)))
 
 
 @router.callback_query(F.data == "set:skinnoop")
@@ -1452,7 +1484,7 @@ async def on_skin_page(callback: CallbackQuery):
     page = _skin_page_no(int(parts[-1]), lang)
     await callback.answer()
     await _show(callback, "settings_skin", lambda wi: skin_html(user, wi, page, lang),
-                skin_kb(user, page, lang))
+                skin_kb(user, page, lang, _skin_back(callback.from_user.id)))
 
 
 @router.callback_query(F.data.regexp(r"^set:skin:\w+(?::[a-z]{2})?$"))
@@ -1494,7 +1526,7 @@ async def on_skin_pick(callback: CallbackQuery):
     await callback.answer(f"Скин: {SKINS[key]['name']}")
     page = skin_page_of(key) if key != DEFAULT_SKIN else 1
     await _show(callback, "settings_skin", lambda wi: skin_html(user, wi, page, lang),
-                skin_kb(user, page, lang))
+                skin_kb(user, page, lang, _skin_back(callback.from_user.id)))
 
 
 @router.callback_query(F.data == "set:nick_reset")
@@ -1590,6 +1622,26 @@ async def on_notif_toggle(callback: CallbackQuery):
     _save_users()
     _led("settings_toggle", uid=str(callback.from_user.id), key="notify_exrn", value=st["notify_exrn"])
     await callback.answer("Уведомления включены" if st["notify_exrn"] else "Уведомления выключены")
+    await _show(callback, "settings_notify", lambda wi: notif_html(user, wi), notif_kb(user))
+
+
+_NOTIF_KEYS = {"mdone": ("notify_mine_done", "Уведомление «копание завершено»"),
+               "mrest": ("notify_mine_rest", "Уведомление «шахта отдохнула»")}
+
+
+@router.callback_query(F.data.regexp(r"^set:notif_t:(mdone|mrest)$"))
+async def on_notif_toggle_mine(callback: CallbackQuery):
+    user = await _need_user(callback)
+    if user is None:
+        return
+    key, title = _NOTIF_KEYS[callback.data.split(":")[2]]
+    st = user.get("settings")
+    if not isinstance(st, dict):
+        st = user["settings"] = {}
+    st[key] = not get_setting(user, key)
+    _save_users()
+    _led("settings_toggle", uid=str(callback.from_user.id), key=key, value=st[key])
+    await callback.answer(f"{title}: {'включено' if st[key] else 'выключено'}")
     await _show(callback, "settings_notify", lambda wi: notif_html(user, wi), notif_kb(user))
 
 
