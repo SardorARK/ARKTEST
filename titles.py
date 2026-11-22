@@ -164,7 +164,7 @@ def chest_result_html(user: dict, key: str) -> str:
         + title_block(f"<b>{escape(NAMES[key])}</b>")
         + "<p><i>Выпал новый титул, он твой навсегда. Надеть его можно в профиле.</i></p>"
         + dn._GAP
-        + dn._tree("Итог", [_collected(len(owned(user))), dn._bal("Баланс", dn.get_balance(user))])
+        + dn._tree("Итог", [dn._bal("Баланс", dn.get_balance(user))])
     )
 
 
@@ -194,7 +194,6 @@ def pick_html(user: dict, with_image: bool = False, note: str = "") -> str:
         "<blockquote><i>Выбери титул: он показывается в твоём профиле.</i></blockquote>"
         + dn._GAP
         + title_block(f"<b>{escape(NAMES[cur])}</b>" if cur else "<i>Не выбран</i>")
-        + f"<p>{_collected(len(mine))}</p>"
         + (f"<p><i>{note}</i></p>" if note else "")
         + ("" if mine else "<p><i>У тебя пока нет титулов. Их можно получить в «Донат → Титулы».</i></p>")
     )
