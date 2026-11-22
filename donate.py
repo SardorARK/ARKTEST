@@ -1451,7 +1451,7 @@ def lavka_item_kb(user_id: int, key: str, closable: bool = False) -> InlineKeybo
     p = LAVKA_PACKS[key]
     ok = _lv_error(user, key) is None and get_balance(user) >= p["price"]
     return InlineKeyboardMarkup(inline_keyboard=[
-        [_btn(f"Купить · {_fmt(p['price'])}", f"donate:lvgo:{key}",
+        [_btn(f"Купить · {_fmt(p['price'])}", f"donate:lvgo{'c' if closable else ''}:{key}",
               ButtonStyle.SUCCESS if ok else ButtonStyle.DANGER, EM_BUY[0])],
         _close_row() if closable else _back_btn("donate:home"),
     ])
@@ -1475,9 +1475,16 @@ def lavka_done_html(user_id: int, key: str) -> str:
 
 def lavka_done_kb(key: str, closable: bool = False) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
-        [_btn("В лавку", "donate:lavka", ButtonStyle.SUCCESS, EM_BUY[0])],
+        [_btn("В лавку", "donate:lavkac" if closable else "donate:lavka", ButtonStyle.SUCCESS, EM_BUY[0])],
         _close_row() if closable else _back_btn("donate:home"),
     ])
+
+
+def _lv_closable(callback: CallbackQuery) -> bool:
+    """Лавка открыта командой «сп» (кнопки «…c» в callback_data): вместо «Назад» кнопка «Закрыть».
+    Лавка, открытая из раздела «Донат» (даже если он сам открыт командой), всегда с «Назад» в донат."""
+    parts = (callback.data or "").split(":")
+    return len(parts) > 1 and parts[1] in ("lavkac", "lvc", "lvgoc")
 
 
 async def _show_lavka(callback: CallbackQuery) -> None:
@@ -1486,10 +1493,10 @@ async def _show_lavka(callback: CallbackQuery) -> None:
     _lv_roll()
     key = lavka_stock()[0]
     await _cfg["show_rich_card"](callback, IMG_KEY, lambda wi: lavka_item_html(uid, key, wi),
-                                 lavka_item_kb(uid, key, _closing(callback.message)))
+                                 lavka_item_kb(uid, key, _lv_closable(callback)))
 
 
-@router.callback_query(F.data == "donate:lavka")
+@router.callback_query(F.data.in_({"donate:lavka", "donate:lavkac"}))
 async def on_lavka(callback: CallbackQuery):
     if await _require_user(callback) is None:
         return
@@ -1497,7 +1504,7 @@ async def on_lavka(callback: CallbackQuery):
     await _show_lavka(callback)
 
 
-@router.callback_query(F.data.regexp(r"^donate:lv:\w+$"))
+@router.callback_query(F.data.regexp(r"^donate:lvc?:\w+$"))
 async def on_lavka_item(callback: CallbackQuery):
     if await _require_user(callback) is None:
         return
@@ -1509,10 +1516,10 @@ async def on_lavka_item(callback: CallbackQuery):
     await callback.answer()
     uid = callback.from_user.id
     await _cfg["show_rich_card"](callback, IMG_KEY, lambda wi: lavka_item_html(uid, key, wi),
-                                 lavka_item_kb(uid, key, _closing(callback.message)))
+                                 lavka_item_kb(uid, key, _lv_closable(callback)))
 
 
-@router.callback_query(F.data.regexp(r"^donate:lvgo:\w+$"))
+@router.callback_query(F.data.regexp(r"^donate:lvgoc?:\w+$"))
 async def on_lavka_buy(callback: CallbackQuery):
     """Покупка пака за кристаллы. Проверки, списание и выдача идут без await между ними:
     лимит нельзя обойти быстрыми нажатиями. Если выдача упала, игрок и счётчик возвращаются как были."""
@@ -1558,7 +1565,7 @@ async def on_lavka_buy(callback: CallbackQuery):
            balance=user[BALANCE_FIELD])
     await callback.answer()
     await _cfg["show_rich_card"](callback, IMG_KEY, lambda wi: lavka_done_html(uid, key),
-                                 lavka_done_kb(key, _closing(callback.message)))
+                                 lavka_done_kb(key, _lv_closable(callback)))
 
 
 # Команда «сп» (а также «/сп»): открывает лавку в любом чате ответом на сообщение игрока.
