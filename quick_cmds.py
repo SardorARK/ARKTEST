@@ -16,6 +16,7 @@
     дальше экран обновляется правкой на месте (кнопки «Перейти» у них нет).
   * «проф» / «профиль» в группе ответом на сообщение другого игрока показывает его профиль без кнопок
     (титул, привилегия и остальное, как в обычном профиле).
+  * «т» / «титул» ответом на сообщение игрока показывает его титул (одна строка), без ответа свой.
   * Боссы («босс», «боссы», «охота») в группах открываются как в личке: ответом на сообщение игрока, дальше
     все экраны раздела обновляются правкой этого же сообщения, вместо «Назад» в меню кнопка «Закрыть».
   * Меню и арена в группах не открываются: вместо них бот отвечает текстом и кнопкой «Перейти»,
@@ -152,6 +153,11 @@ pet_group_card: Callable[..., Awaitable[bool]] | None = None
 # если у игрока нет профиля, и возвращает True, когда ответ отправлен.
 profile_view: Callable[..., Awaitable[bool]] | None = None
 PROFILE_VIEW_WORDS = ("проф", "профиль")   # «я» так не работает: это всегда свой профиль
+
+# «титул» / «т»: ответом на сообщение игрока показывает его титул, без ответа свой (одна строка в цитате).
+# Функцию ставит main.py: quick_cmds.title_view = send_title_view(bot, msg, id_игрока).
+title_view: Callable[..., Awaitable[bool]] | None = None
+TITLE_WORDS = ("т", "титул")
 PET_REDIRECT_TEXT = ("<b>Мой питомец</b>\n\n"
                      "<i>В чате питомец не открывается. Нажми кнопку, и он откроется в личных сообщениях с ботом.</i>")
 
@@ -309,6 +315,20 @@ class QuickCommands(BaseMiddleware):
                     return None   # команда адресована другому боту
                 await self._redirect(bot, msg, "", START_TEXT)
                 return _HANDLED
+
+        if title_view is not None and normalize(msg.text) in TITLE_WORDS:
+            who = getattr(msg.reply_to_message, "from_user", None)
+            target_id = who.id if who is not None and not who.is_bot else msg.from_user.id
+            now = time.monotonic()
+            key = (msg.chat.id, msg.from_user.id, f"title:{target_id}")
+            if now - _redirect_last.get(key, 0.0) < REDIRECT_COOLDOWN:
+                return _HANDLED
+            _redirect_last[key] = now
+            try:
+                await title_view(bot, msg, target_id)
+            except Exception:
+                log.exception("quick_cmds: не удалось показать титул игрока %s", target_id)
+            return _HANDLED
 
         found = None
         if msg.chat.type == "private":   # ссылка из группы: /start menu, /start boss
