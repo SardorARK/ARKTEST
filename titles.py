@@ -13,7 +13,7 @@
     user["titles"] — список ключей полученных титулов, user["title"] — ключ надетого ("" если нет).
 
 Подключение: donate.py в конце файла делает import titles, обработчики вешаются на router доната.
-main.py берёт отсюда titles.profile_line(user) и titles.EMO_TITLE.
+main.py берёт отсюда titles.profile_line(user) (блок-цитата) и titles.EMO_TITLE.
 """
 
 from __future__ import annotations
@@ -40,6 +40,7 @@ TITLE_FIELD = "title"       # в профиле: ключ надетого ти�
 CHEST_PRICE = 59            # цена открытия «Сундука чудес»
 EMO_CHEST = ("5235599734080556928", "🏆")   # эмодзи сундука (тексты и кнопки)
 EMO_TITLE = ("5372848794163486495", "👨‍🎓")   # эмодзи титулов (кнопки и тексты)
+EMO_COLLECTED = ("5337080053119336309", "👍")   # эмодзи у строк «Собрано»
 
 # Все титулы лежат только в сундуке
 TITLES: list[tuple[str, str]] = [
@@ -83,11 +84,19 @@ def active_name(user: dict | None) -> str:
     return NAMES[k] if k else ""
 
 
+def title_block(name_html: str) -> str:
+    """Титул всегда в цитате: и в профиле, и при выпадении."""
+    return f"<blockquote><b>{dn._ce(EMO_TITLE)} Титул:</b> {name_html}</blockquote>"
+
+
 def profile_line(user: dict | None) -> str:
-    """Строка для профиля, ниже «Привилегии»: «Титул: Ветеран»."""
+    """Блок для профиля, ниже «Привилегии»: цитата «Титул: Ветеран»."""
     k = active(user)
-    val = f"<b>{escape(NAMES[k])}</b>" if k else "<i>Не выбран</i>"
-    return f"<b>{dn._ce(EMO_TITLE)} Титул:</b> {val}"
+    return title_block(f"<b>{escape(NAMES[k])}</b>" if k else "<i>Не выбран</i>")
+
+
+def _collected(n: int) -> str:
+    return f"{dn._ce(EMO_COLLECTED)} Собрано: <b>{n}/{TOTAL}</b>"
 
 
 def _give(user: dict, key: str) -> None:
@@ -127,7 +136,7 @@ def chest_html(user: dict, with_image: bool = False) -> str:
         f"{dn._balance_line(user)}"
         + dn._tree(f"{dn._ce(EMO_TITLE)} Титулы",
                    [f"{dn._ce(dn.EM_PRICE)} Цена: <b>{dn._fmt(CHEST_PRICE)}</b> {_crystal()}",
-                    f"Собрано: <b>{TOTAL - len(left)}/{TOTAL}</b>"])
+                    _collected(TOTAL - len(left))])
     )
     if not left:
         return out + "<p><b>Ты собрал все титулы.</b></p>"
@@ -150,14 +159,12 @@ def chest_kb(user: dict) -> InlineKeyboardMarkup:
 
 
 def chest_result_html(user: dict, key: str) -> str:
-    left = len(_chest_left(user))
     return (
         f"<p><b>{dn._ce(EMO_CHEST)} СУНДУК ОТКРЫТ</b></p>"
-        f"<blockquote><i>Тебе выпал титул «{escape(NAMES[key])}». Он твой навсегда.</i></blockquote>"
+        + title_block(f"<b>{escape(NAMES[key])}</b>")
+        + "<p><i>Выпал новый титул, он твой навсегда. Надеть его можно в профиле.</i></p>"
         + dn._GAP
-        + dn._tree("Итог", [f"{dn._ce(EMO_TITLE)} Титул: <b>{escape(NAMES[key])}</b>",
-                            f"Осталось собрать: <b>{left}</b>",
-                            dn._bal("Баланс", dn.get_balance(user))])
+        + dn._tree("Итог", [_collected(len(owned(user))), dn._bal("Баланс", dn.get_balance(user))])
     )
 
 
@@ -186,8 +193,8 @@ def pick_html(user: dict, with_image: bool = False, note: str = "") -> str:
         f"<p><b>{dn._ce(EMO_TITLE)} ТИТУЛ</b></p>"
         "<blockquote><i>Выбери титул: он показывается в твоём профиле.</i></blockquote>"
         + dn._GAP
-        + f"<p><b>Сейчас:</b> {escape(NAMES[cur]) if cur else '<i>не выбран</i>'}<br>"
-          f"<b>Собрано:</b> {len(mine)}/{TOTAL}</p>"
+        + title_block(f"<b>{escape(NAMES[cur])}</b>" if cur else "<i>Не выбран</i>")
+        + f"<p>{_collected(len(mine))}</p>"
         + (f"<p><i>{note}</i></p>" if note else "")
         + ("" if mine else "<p><i>У тебя пока нет титулов. Их можно получить в «Донат → Титулы».</i></p>")
     )
