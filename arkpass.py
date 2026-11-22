@@ -95,7 +95,7 @@ BAR_IDS = (
     "5818696361180146573", "5818938026104986343", "5816775999697722671", "5819068438491963439", "5816938409591054266",  # середина
     "5819075482238328464", "5818709546729742458", "5816796052900028202", "5819105263541559058", "5816960644636745988",  # право
 )
-BAR_PIECES = 6           # сколько эмодзи в шкале: левый край + (BAR_PIECES - 2) середины + правый край (минимум 2)
+BAR_PIECES = 9           # сколько эмодзи в шкале: левый край + (BAR_PIECES - 2) середины + правый край (минимум 2)
 BAR_BALL_STATES = 3      # сколько положений шарика внутри одного эмодзи (состояния 1..3)
 
 
@@ -727,7 +727,7 @@ def _progress_block(st: dict) -> str:
     need = level_cost(lvl + 1)
     return dn._tree(f"{_bonus_e()} Прогресс", [
         f"Уровень: <b>{lvl}/{MAX_LEVEL}</b>",
-        f"ОП до уровня {lvl + 1}: <b>{dn._fmt(into)}/{dn._fmt(need)}</b>",
+        f"<b>ОП до уровня {lvl + 1}: {dn._fmt(into)}/{dn._fmt(need)}</b>",
         op_bar_line(into, need),
     ])
 
@@ -769,16 +769,14 @@ def home_html(user: dict, view: int = -1, with_image: bool = False, gained: int 
         bar_html = ""   # на максимальном уровне шкалы нет
     else:
         into, need = st["xp"] - CUM[lvl], level_cost(lvl + 1)
-        xp_line = f"{_e_op()} ОП до уровня {lvl + 1}: <b>{dn._fmt(into)}/{dn._fmt(need)}</b>"
+        xp_line = f"{_e_op()} <b>ОП до уровня {lvl + 1}: {dn._fmt(into)}/{dn._fmt(need)}</b>"
         bar_html = f"<br>{op_bar_line(into, need)}"
-    gain = f"<p>{_e_op()} За задания: <b>+{dn._fmt(gained)} ОП</b></p>" if gained else ""
     reached = view <= lvl
     return (
         f"{dn._image(with_image)}"
         f"<p><b>{_e_head()} ARK Pass {lvl}/{MAX_LEVEL}</b>"
         + (f" {_e_plus()}" if st["plus"] else "")
         + f"<br>{xp_line}{bar_html}</p>"
-        + gain
         + _row(_e_free(), "Free", _items(False, view, st["s"]), view in st["fr"], reached, False)
         + _row(_e_plus(), "ARK+", _items(True, view, st["s"]), view in st["pr"], reached, not st["plus"])
         + f"<p><i>Сезон {n} «{season_name(n)}» · {dn._ce(dn.EM_LEFT)} {_dur(end - time.time())}</i></p>"
@@ -825,14 +823,13 @@ def quests_html(user: dict, with_image: bool = False, gained: int = 0) -> str:
         lines.append(f"<i>Обновится через {_dur(left)}</i>")
         return dn._tree(title, lines, quote=True)
 
-    gain = f"<p>{_e_op()} Начислено: <b>+{dn._fmt(gained)} ОП</b></p>" if gained else ""
     bonus = (f"<p><i>У ARK+ все ОП ×{PLUS_XP_BONUS:g}.</i></p>" if st["plus"]
              else f"<p><i>С ARK+ все ОП ×{PLUS_XP_BONUS:g}.</i></p>")
     return (
         f"{dn._image(with_image)}"
         f"<p><b>{_e_pass()} ЗАДАНИЯ</b> · сезон {n}</p>"
         "<blockquote><i>ОП за задания начисляются сами, как только выполнишь.</i></blockquote>"
-        + dn._GAP + gain
+        + dn._GAP
         + block("Сегодня", _quests(False), q.get("dp", {}), q.get("dd", []), day_left)
         + dn._GAP
         + block("Неделя", _quests(True), q.get("wp", {}), q.get("wd", []), week_left)
