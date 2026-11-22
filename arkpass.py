@@ -59,6 +59,9 @@ EM_NEW = "🎁"
 EM_LOCK = "🔒"
 EM_PLUS = "👑"                                   # запасной значок, если кастомные эмодзи недоступны
 EMO_PASS = ("5775927158450950245", "⭐")         # ARK Pass: заголовки экранов
+EMO_OK = ("5390846416530716134", "✅")           # галочка (задание выполнено, награда получена)
+EMO_TASKS = "5310273663281417659"                # иконка кнопки «Задания»
+EMO_LEVELS = "5247160991472446906"               # иконка кнопки «Уровни»
 EMO_OP = ("5325547803936572038", "✨")           # очки пасса (ОП)
 EMO_FREE = ("5411307602074163455", "🎫")         # обычный трек (Free)
 EMO_PLUS = ("5314784791986453963", "🎫")         # ARK+ (текст и кнопка)
@@ -70,6 +73,10 @@ def _e_head() -> str:
 
 def _e_pass() -> str:
     return dn._ce(EMO_PASS)
+
+
+def _ok() -> str:
+    return dn._ce(EMO_OK)
 
 
 def _e_op() -> str:
@@ -97,7 +104,7 @@ _TZ = timezone(timedelta(hours=DAY_TZ_HOURS))
 
 def level_cost(level: int) -> int:
     """Сколько ОП нужно, чтобы с уровня level - 1 подняться на level."""
-    return 100 if level <= 20 else 150 if level <= 40 else 200
+    return 100 if level <= 5 else 150 if level <= 15 else 200
 
 
 CUM = [0]
@@ -119,10 +126,10 @@ def level_of(xp: int) -> int:
 TRACKED_KINDS = {"visit", "arena_fight", "arena_win", "upgrade"}
 
 DAILY = [
-    {"id": "d_visit", "kind": "visit", "need": 1, "xp": 40, "name": "Загляни в ARK Pass"},
-    {"id": "d_fight", "kind": "arena_fight", "need": 5, "xp": 60, "name": "Проведи 5 боёв на арене"},
-    {"id": "d_win", "kind": "arena_win", "need": 3, "xp": 90, "name": "Выиграй 3 боя на арене"},
-    {"id": "d_up", "kind": "upgrade", "need": 1, "xp": 70, "name": "Прокачай питомца"},
+    {"id": "d_visit", "kind": "visit", "need": 1, "xp": 50, "name": "Загляни в ARK Pass"},
+    {"id": "d_fight", "kind": "arena_fight", "need": 5, "xp": 70, "name": "Проведи 5 боёв на арене"},
+    {"id": "d_win", "kind": "arena_win", "need": 3, "xp": 100, "name": "Выиграй 3 боя на арене"},
+    {"id": "d_up", "kind": "upgrade", "need": 1, "xp": 110, "name": "Прокачай питомца"},
     {"id": "d_boss", "kind": "boss", "need": 1, "xp": 90, "name": "Ударь босса"},
     {"id": "d_mine", "kind": "mine", "need": 1, "xp": 60, "name": "Сходи в шахту"},
 ]
@@ -593,7 +600,7 @@ def default_view(user: dict) -> int:
 def _row(title_emoji: str, title: str, items: list[Item], claimed: bool, reached: bool, locked: bool) -> str:
     """Один трек: заголовок с пометкой и награды в сворачиваемой цитате."""
     if claimed:
-        tag = f" · {EM_OK} получено"
+        tag = f" · {_ok()} получено"
     elif locked:
         tag = " · <i>недоступно</i>"
     elif reached:
@@ -644,9 +651,9 @@ def home_kb(user: dict, closable: bool, view: int = -1) -> InlineKeyboardMarkup:
     avail = _available(user, st)
     if avail:
         rows.append([dn._btn(f"Забрать всё ({len(avail)})", "ark:cl", ButtonStyle.SUCCESS)])
-    second = [dn._btn("Задания", "ark:q", ButtonStyle.PRIMARY)]
+    second = [dn._btn("Задания", "ark:q", ButtonStyle.PRIMARY, EMO_TASKS)]
     if mine < MAX_LEVEL:
-        second.append(dn._btn("Уровни", "ark:lv", ButtonStyle.PRIMARY))
+        second.append(dn._btn("Уровни", "ark:lv", ButtonStyle.PRIMARY, EMO_LEVELS))
     rows.append(second)
     if not st["plus"]:
         rows.append([dn._btn("ARK+", "ark:plus", ButtonStyle.SUCCESS, EMO_PLUS[0])])
@@ -668,13 +675,13 @@ def quests_html(user: dict, with_image: bool = False, gained: int = 0) -> str:
         for quest in quests:
             p = int(prog.get(quest["id"], 0))
             ok = quest["id"] in done
-            mark = EM_OK if ok else "▫️"
+            mark = _ok() if ok else "▫️"
             lines.append(f"{mark} <b>{quest['name']}</b>")
-            lines.append(f"    {min(p, quest['need'])}/{quest['need']} · {EM_XP} <b>+{quest['xp']} ОП</b>")
+            lines.append(f"{min(p, quest['need'])}/{quest['need']} · {_e_op()} <b>+{quest['xp']} ОП</b>")
         lines.append(f"<i>Обновится через {_dur(left)}</i>")
-        return dn._tree(title, lines)
+        return dn._tree(title, lines, quote=True)
 
-    gain = f"<p>{EM_XP} Начислено: <b>+{dn._fmt(gained)} ОП</b></p>" if gained else ""
+    gain = f"<p>{_e_op()} Начислено: <b>+{dn._fmt(gained)} ОП</b></p>" if gained else ""
     bonus = (f"<p><i>У ARK+ все ОП ×{PLUS_XP_BONUS:g}.</i></p>" if st["plus"]
              else f"<p><i>С ARK+ все ОП ×{PLUS_XP_BONUS:g}.</i></p>")
     return (
@@ -724,7 +731,7 @@ def plus_html(user: dict, with_image: bool = False) -> str:
         + f"<p>{dn._bal('Баланс', have)}</p>"
     )
     if st["plus"]:
-        return out + f"<p><b>{EM_OK} ARK+ уже у тебя.</b></p>"
+        return out + f"<p><b>{_ok()} ARK+ уже у тебя.</b></p>"
     if have < ARK_PLUS_PRICE:
         out += f"<p>{dn._ce(dn.EM_LACK)} Не хватает: <b>{dn._fmt(ARK_PLUS_PRICE - have)}</b> {dn._ce(dn.EM_CRYSTAL)}</p>"
     return out
