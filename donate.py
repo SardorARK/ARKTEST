@@ -687,7 +687,7 @@ def home_kb(closable: bool = False) -> InlineKeyboardMarkup:
         [_btn("Временные бусты", "donate:boosts", ButtonStyle.SUCCESS, "5438571934210082705"),
          _btn("🎒 Инвентарь", "donate:inv", ButtonStyle.SUCCESS)],
         [_btn("Лавка", "donate:lavka", ButtonStyle.PRIMARY, EM_LAVKA[0]),
-         _btn("Скины ника", "set:skin", ButtonStyle.PRIMARY, EM_SKIN[0])],
+         _btn("Скины ника", "set:skind", ButtonStyle.PRIMARY, EM_SKIN[0])],
         [_btn("Титулы", "donate:titles", ButtonStyle.SUCCESS, EM_TITLE[0]),
          _btn("ARK+", "donate:arkplus", ButtonStyle.SUCCESS, EM_ARKPLUS[0])],
         _close_row() if closable else _back_btn("menu:back"),
