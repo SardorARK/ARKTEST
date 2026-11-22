@@ -902,12 +902,25 @@ def levels_kb(user: dict) -> InlineKeyboardMarkup:
 
 # ---------- Обработчики ----------
 
+# Два режима одного раздела. Кнопка «ARK Pass» в донате ведёт на «ark:…»: внутри «Назад» (в донат).
+# Команда («пасс», «ап», «аркпасс») ведёт на «arkc:…»: внутри «Закрыть», и все кнопки экрана тоже «arkc:…»,
+# так что режим не теряется при переходах (задания, уровни, покупка).
 def _closable(callback: CallbackQuery) -> bool:
-    return dn._closing(callback.message)
+    return (callback.data or "").startswith("arkc:")
+
+
+def _mode_kb(kb: InlineKeyboardMarkup, closable: bool) -> InlineKeyboardMarkup:
+    if not closable:
+        return kb
+    rows = []
+    for row in kb.inline_keyboard:
+        rows.append([b.model_copy(update={"callback_data": "arkc:" + b.callback_data[4:]})
+                     if b.callback_data and b.callback_data.startswith("ark:") else b for b in row])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 async def _show(callback: CallbackQuery, html_fn, kb) -> None:
-    await dn._cfg["show_rich_card"](callback, dn.IMG_KEY, html_fn, kb)
+    await dn._cfg["show_rich_card"](callback, dn.IMG_KEY, html_fn, _mode_kb(kb, _closable(callback)))
 
 
 def _save() -> None:
@@ -924,18 +937,18 @@ async def _open(callback: CallbackQuery, view: int) -> None:
     await _show(callback, lambda wi: home_html(user, view, wi, gained), home_kb(user, _closable(callback), view))
 
 
-@dn.router.callback_query(F.data == "ark:home")
+@dn.router.callback_query(F.data.in_({"ark:home", "arkc:home"}))
 async def on_home(callback: CallbackQuery):
     await _open(callback, -1)
 
 
-@dn.router.callback_query(F.data.regexp(r"^ark:v:-?\d+$"))
+@dn.router.callback_query(F.data.regexp(r"^arkc?:v:-?\d+$"))
 async def on_view(callback: CallbackQuery):
     """Листание уровней стрелками; «-1» (центральная кнопка) возвращает к ближайшей награде."""
     await _open(callback, int(callback.data.rsplit(":", 1)[-1]))
 
 
-@dn.router.callback_query(F.data == "ark:q")
+@dn.router.callback_query(F.data.in_({"ark:q", "arkc:q"}))
 async def on_quests(callback: CallbackQuery):
     user = await dn._require_user(callback)
     if user is None:
@@ -947,7 +960,7 @@ async def on_quests(callback: CallbackQuery):
                 InlineKeyboardMarkup(inline_keyboard=[dn._back_btn("ark:home")]))
 
 
-@dn.router.callback_query(F.data == "ark:cl")
+@dn.router.callback_query(F.data.in_({"ark:cl", "arkc:cl"}))
 async def on_claim(callback: CallbackQuery):
     """Забрать все доступные награды. Без await между проверкой и выдачей; при ошибке всё откатывается."""
     user = await dn._require_user(callback)
@@ -982,7 +995,7 @@ async def on_claim(callback: CallbackQuery):
                     dn._back_btn("ark:home")]))
 
 
-@dn.router.callback_query(F.data == "ark:plus")
+@dn.router.callback_query(F.data.in_({"ark:plus", "arkc:plus"}))
 async def on_plus(callback: CallbackQuery):
     user = await dn._require_user(callback)
     if user is None:
@@ -991,7 +1004,7 @@ async def on_plus(callback: CallbackQuery):
     await _show(callback, lambda wi: plus_html(user, wi), plus_kb(user))
 
 
-@dn.router.callback_query(F.data == "ark:plusgo")
+@dn.router.callback_query(F.data.in_({"ark:plusgo", "arkc:plusgo"}))
 async def on_plus_buy(callback: CallbackQuery):
     user = await dn._require_user(callback)
     if user is None:
@@ -1032,7 +1045,7 @@ async def on_plus_buy(callback: CallbackQuery):
                 claim_back_kb(user))
 
 
-@dn.router.callback_query(F.data == "ark:lv")
+@dn.router.callback_query(F.data.in_({"ark:lv", "arkc:lv"}))
 async def on_levels(callback: CallbackQuery):
     user = await dn._require_user(callback)
     if user is None:
@@ -1041,7 +1054,7 @@ async def on_levels(callback: CallbackQuery):
     await _show(callback, lambda wi: levels_html(user, wi), levels_kb(user))
 
 
-@dn.router.callback_query(F.data.regexp(r"^ark:lvgo:\d+$"))
+@dn.router.callback_query(F.data.regexp(r"^arkc?:lvgo:\d+$"))
 async def on_levels_buy(callback: CallbackQuery):
     user = await dn._require_user(callback)
     if user is None:
