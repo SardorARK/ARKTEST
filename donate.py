@@ -10,7 +10,7 @@
 логика та же, что в «Сокровищнице» (cases.py); за дубликат компенсация кристаллами (CASE_DUPLICATE).
 
 Временные бусты (эликсиры за кристаллы, BOOSTS): урон по боссам, перезарядка, характеристики,
-удача в кейсах, награда исследователей, защита от босса и одноразовая долгая автодобыча в шахте.
+удача в кейсах, награда исследователей, защита от босса и одноразовая долгая работа банка.
 Покупка эликсира кладёт его в ИНВЕНТАРЬ (кнопка «Инвентарь» в разделе): до INV_LIMIT штук каждого
 вида, включается эликсир отдельной кнопкой. Админ видит донаты, платежи, кристаллы и эликсиры в /admin → Донат.
 Действие бонусов читают функции total_perk / boss_stats / luck_weights / damage_taken_factor /
@@ -198,18 +198,18 @@ DONATE_CASES = [
 CASE_DUPLICATE = {"Эпический": 35, "Мифический": 55, "Легендарный": 139}
 
 # ---------- Временные бусты ----------
-# Эликсиры за кристаллы. Каждый вид: несколько уровней силы и (кроме автодобычи) 4 срока действия.
-# prices[уровень][срок] в кристаллах, не больше MAX_BOOST_PRICE. Автодобыча одноразовая: prices[уровень].
+# Эликсиры за кристаллы. Каждый вид: несколько уровней силы и (кроме эликсира банкира) 4 срока действия.
+# prices[уровень][срок] в кристаллах, не больше MAX_BOOST_PRICE. Эликсир банкира одноразовый: prices[уровень].
 # emoji: пара (id кастомного эмодзи, запасной значок). Эликсиры показываются по BOOSTS_PER_PAGE на странице.
 BOOSTS_FIELD = "boosts"      # в профиле: {ключ эликсира: {"lvl": номер уровня, "until": время окончания}}
-MINE_FIELD = "boost_mine"    # в профиле: часы одноразового эликсира автодобычи (0, если нет)
+MINE_FIELD = "boost_mine"    # в профиле: часы одноразового эликсира банкира (0, если нет; имя поля прежнее ради старых сохранений)
 BOOST_HOURS = (2, 4, 8, 24)  # сроки действия в часах
 BOOSTS_PER_PAGE = 4          # эликсиров на одной странице списка
 INV_FIELD = "boost_inv"      # в профиле: инвентарь {ключ эликсира: {"уровень:срок": штук}}
 INV_LIMIT = 10               # сколько эликсиров ОДНОГО ВИДА можно хранить в инвентаре (все уровни и сроки вместе)
 STATS_FIELD = "donate_stats" # в профиле: счётчики донатов для админки (платежи, траты, кейсы, эликсиры)
 MAX_BOOST_PRICE = 100
-MINE_BASE_HOURS = 8          # обычная длительность автодобычи в шахте, часов
+MINE_BASE_HOURS = 8          # обычная длительность работы банка, часов
 STAT_KEYS = ("hp", "atk", "def", "spd", "luck")   # характеристики, которые усиливает «Эликсир мощи»
 RARITY_ORDER = ("Обычный", "Редкий", "Эпический", "Мифический", "Легендарный")
 
@@ -263,11 +263,11 @@ BOOSTS: dict[str, dict] = {
         "prices": ((10, 15, 25, 45), (15, 25, 40, 70), (20, 35, 55, 90)),
     },
     "mine": {
-        "name": "Эликсир шахтёра", "emoji": ("5256169350368353876", "🧪"), "perk": None, "charge": True,
-        "levels": (12, 18, 24, 48),     # часы автодобычи вместо обычных 8
-        "effect": "Автодобыча до {p} ч (вместо 8)",
-        "short": "автодобыча до {lo}–{hi} ч вместо 8",
-        "desc": "Автодобыча идёт дольше 8 часов. Одноразовый.",
+        "name": "Эликсир банкира", "emoji": ("5256169350368353876", "🧪"), "perk": None, "charge": True,
+        "levels": (12, 18, 24, 48),     # часы работы банка вместо обычных 8
+        "effect": "Работа банка до {p} ч (вместо 8)",
+        "short": "работа банка до {lo}–{hi} ч вместо 8",
+        "desc": "Банк работает дольше 8 часов. Одноразовый.",
         "prices": (20, 35, 50, 90),
     },
 }
@@ -433,7 +433,7 @@ def damage_taken_factor(user: dict | None) -> float:
 
 
 def mine_hours(user: dict | None) -> int:
-    """Сколько часов продлится ближайшая автодобыча (8 или больше, если есть эликсир шахтёра)."""
+    """Сколько часов проработает банк при ближайшем запуске (8 или больше, если применён эликсир банкира)."""
     try:
         return max(MINE_BASE_HOURS, int((user or {}).get(MINE_FIELD, 0) or 0))
     except (TypeError, ValueError):
@@ -441,8 +441,8 @@ def mine_hours(user: dict | None) -> int:
 
 
 def take_mine_boost(user: dict) -> int:
-    """Вызывается при запуске автодобычи: возвращает её длительность в часах и расходует
-    эликсир шахтёра (он одноразовый). После вызова нужно сохранить игрока (save_users)."""
+    """Вызывается при запуске банка: возвращает длительность его работы в часах и расходует
+    эликсир банкира (он одноразовый). После вызова нужно сохранить игрока (save_users)."""
     hours = mine_hours(user)
     if user.get(MINE_FIELD):
         user[MINE_FIELD] = 0
@@ -529,7 +529,7 @@ def inv_take(user: dict, key: str, lvl: int, dur: int) -> bool:
 
 
 def reset_boosts(user: dict, inventory: bool = True, active: bool = True) -> None:
-    """Для админки: очистить инвентарь и/или действующие эликсиры (включая автодобычу)."""
+    """Для админки: очистить инвентарь и/или действующие эликсиры (включая эликсир банкира)."""
     if inventory:
         user.pop(INV_FIELD, None)
     if active:
@@ -539,7 +539,7 @@ def reset_boosts(user: dict, inventory: bool = True, active: bool = True) -> Non
 
 def activate_boost(user: dict, key: str, lvl: int, dur: int, now: float | None = None) -> int | None:
     """Включает эликсир (проверки и списание из инвентаря делает вызывающий). Возвращает время
-    окончания; для одноразового эликсира шахтёра включается запас автодобычи и возвращается None."""
+    окончания; для одноразового эликсира банкира включается запас часов работы банка и возвращается None."""
     b = BOOSTS[key]
     now = time.time() if now is None else now
     if b.get("charge"):
@@ -680,7 +680,6 @@ def _back_btn(data: str) -> list[InlineKeyboardButton]:
 def home_kb(closable: bool = False) -> InlineKeyboardMarkup:
     """closable=True: раздел открыт командой в чате, вместо «Назад» в меню кнопка «Закрыть»."""
     return InlineKeyboardMarkup(inline_keyboard=[
-        [_btn("ARK Pass", "ark:home", ButtonStyle.SUCCESS, EM_STAR[0])],
         [_btn("Магазин кристаллов", "donate:shop", ButtonStyle.SUCCESS, EM_CRYSTAL[0])],
         [_btn("Привилегии", "donate:priv", ButtonStyle.PRIMARY, EM_PRIV[0]), _btn("Кейсы", "donate:cases", ButtonStyle.PRIMARY, "5285009510300150278")],
         [_btn("Временные бусты", "donate:boosts", ButtonStyle.SUCCESS, "5438571934210082705"),
@@ -748,8 +747,7 @@ def home_html(user_id: int, with_image: bool = False) -> str:
         f"{_balance_line(user, rate=True)}"
         + _tree(
             f"{_ce(EM_STAR)} Разделы",
-            ["🏆 <b>ARK Pass</b>: <i>сезон на 30 дней, 60 уровней наград</i>",
-             "<b>Магазин кристаллов</b>: <i>Stars, крипта, карта</i>",
+            ["<b>Магазин кристаллов</b>: <i>Stars, крипта, карта</i>",
              f"{_ce(EM_PRIV)} <b>Привилегии</b>: {_tier_ce('vip')} <i>VIP,</i> {_tier_ce('premium')} <i>Premium</i>",
              "<b>Кейсы</b>: <i>редкие артефакты</i>",
              "<b>Бусты</b>: <i>эликсиры на время</i>",
@@ -1748,14 +1746,18 @@ def cases_html(user_id: int, with_image: bool = False) -> str:
         "<blockquote><i>Кейсы за кристаллы. Чем дороже, тем выше шанс на редкое.</i></blockquote>"
         + _tree("", [_bal("Баланс", get_balance(user))])
         + _GAP
-        + _tree("Что внутри", [
-            "Артефакты питомца, шахты и исследователей",
-            "Редкости: <b>Эпический, Мифический, Легендарный</b>",
+        + _tree("Кейсы", [
+            f"{_ce(c['emoji'])} <b>{c['name']}</b>: <b>{_fmt(c['price'])}</b> {crystal}" for c in DONATE_CASES
         ])
         + _GAP
+        + _tree("Что внутри", [
+            "<i>Артефакты питомца, шахты и исследователей</i>",
+            "<i>Редкости: Эпический, Мифический, Легендарный</i>",
+        ], quote=True)
+        + _GAP
         + _tree("Если артефакт уже есть (компенсация)", [
-            f"{tier}: {crystal} <b>+{_fmt(coins)}</b>" for tier, coins in CASE_DUPLICATE.items()
-        ])
+            f"<i>{tier}:</i> {crystal} <i>+{_fmt(coins)}</i>" for tier, coins in CASE_DUPLICATE.items()
+        ], quote=True)
     )
 
 
@@ -1816,15 +1818,12 @@ def case_result_html(user_id: int, n: int, art: dict, is_new: bool, refund: int,
 
 
 def cases_kb(user_id: int) -> InlineKeyboardMarkup:
-    """Кейсы по одному в ряд. Зелёная кнопка: хватает кристаллов, красная: не хватает."""
+    """Кейсы кнопками только с эмодзи, все в один ряд (как эликсиры). Зелёная: хватает кристаллов, красная: нет."""
     have = get_balance(_cfg["get_user"](user_id))
-    rows = [
-        [_btn(f"{c['name']}  ·  {_fmt(c['price'])}", f"donate:case:{i}",
-              ButtonStyle.SUCCESS if have >= c["price"] else ButtonStyle.DANGER, c["emoji"][0])]
-        for i, c in enumerate(DONATE_CASES)
-    ]
-    rows.append(_back_btn("donate:home"))
-    return InlineKeyboardMarkup(inline_keyboard=rows)
+    row = [_btn("\u2800", f"donate:case:{i}",
+                ButtonStyle.SUCCESS if have >= c["price"] else ButtonStyle.DANGER, c["emoji"][0])
+           for i, c in enumerate(DONATE_CASES)]
+    return InlineKeyboardMarkup(inline_keyboard=[row, _back_btn("donate:home")])
 
 
 def case_kb(user_id: int, n: int) -> InlineKeyboardMarkup:
@@ -2005,7 +2004,7 @@ def _use_error(user: dict, key: str, lvl: int) -> str | None:
     if b.get("charge"):
         have = int(user.get(MINE_FIELD, 0) or 0)
         if have > 0:
-            return f"Эликсир шахтёра уже применён (до {have} ч). Сначала запусти автодобычу."
+            return f"Эликсир банкира уже применён (до {have} ч). Сначала запусти банк."
         return None
     cur = boost_active(user, key)
     if cur and cur[0] != lvl:
@@ -2018,7 +2017,7 @@ def _boost_status(user: dict | None, key: str) -> str:
     b = BOOSTS[key]
     if b.get("charge"):
         have = int((user or {}).get(MINE_FIELD, 0) or 0)
-        return f"<i>ждёт запуска автодобычи, до</i> <b>{have} ч</b>" if have > 0 else "<i>не применён</i>"
+        return f"<i>ждёт запуска банка, до</i> <b>{have} ч</b>" if have > 0 else "<i>не применён</i>"
     cur = boost_active(user, key)
     return f"<b>{_effect(b, cur[0])}</b> <i>· ещё {_left(cur[1])}</i>" if cur else "<i>не активен</i>"
 
@@ -2029,7 +2028,7 @@ def _active_lines(user: dict | None) -> list[str]:
         if b.get("charge"):
             h = int((user or {}).get(MINE_FIELD, 0) or 0)
             if h > 0:
-                active.append(f"{_bicon(b)}<b>{b['name']}</b>: <b>до {h} ч</b> <i>· ждёт запуска автодобычи</i>")
+                active.append(f"{_bicon(b)}<b>{b['name']}</b>: <b>до {h} ч</b> <i>· ждёт запуска банка</i>")
         else:
             cur = boost_active(user, key)
             if cur:
@@ -2076,7 +2075,7 @@ def boost_html(user_id: int, key: str, with_image: bool = False) -> str:
     if b.get("charge"):
         levels = [f"<i>{_effect(b, i)}:</i> <b>{_boost_price(b, i)}</b> {crystal}"
                   for i in range(len(b["levels"]))]
-        terms = ["<i>Одноразовый: тратится при запуске автодобычи</i>",
+        terms = ["<i>Одноразовый: тратится при запуске банка</i>",
                  "<i>Включается из инвентаря</i>"]
     else:
         levels = []
@@ -2143,7 +2142,7 @@ def boost_confirm_html(user_id: int, key: str, lvl: int, dur: int, with_image: b
     crystal = _ce(EM_CRYSTAL)
     price = _boost_price(b, lvl, dur)
     have = get_balance(user)
-    term = ("до запуска автодобычи" if b.get("charge") else _hours(BOOST_HOURS[dur]))
+    term = ("до запуска банка" if b.get("charge") else _hours(BOOST_HOURS[dur]))
     rows = [f"<i>Эликсир:</i> <b>{_bicon(b)}{b['name']}</b>",
             f"<i>Эффект:</i> <b>{_effect(b, lvl)}</b>",
             f"{_ce(EM_LEFT)} <i>Срок:</i> <b>{term}</b>",
@@ -2174,7 +2173,7 @@ def boost_confirm_html(user_id: int, key: str, lvl: int, dur: int, with_image: b
 def boost_done_html(user_id: int, key: str, lvl: int, dur: int) -> str:
     user = _cfg["get_user"](user_id)
     b = BOOSTS[key]
-    term = "до запуска автодобычи" if b.get("charge") else _hours(BOOST_HOURS[dur])
+    term = "до запуска банка" if b.get("charge") else _hours(BOOST_HOURS[dur])
     rows = [f"<i>Эликсир:</i> <b>{_bicon(b)}{b['name']}</b>", f"<i>Эффект:</i> <b>{_effect(b, lvl)}</b>",
             f"{_ce(EM_LEFT)} <i>Срок после применения:</i> <b>{term}</b>",
             f"🎒 <i>В инвентаре:</i> <b>{inv_count(user, key)}/{INV_LIMIT}</b>",
@@ -2352,7 +2351,7 @@ async def on_boost_buy(callback: CallbackQuery):
 # ---------- Инвентарь эликсиров: экраны ----------
 
 def _variant_text(b: dict, lvl: int, dur: int) -> str:
-    """«Урон по боссам +15% · 4 часа» или «Автодобыча до 12 ч (вместо 8)»."""
+    """«Урон по боссам +15% · 4 часа» или «Работа банка до 12 ч (вместо 8)»."""
     if b.get("charge"):
         return _effect(b, lvl)
     return f"{_effect(b, lvl)} · {_hours(BOOST_HOURS[dur])}"
@@ -2422,7 +2421,7 @@ def inv_use_html(user_id: int, key: str, lvl: int, dur: int, with_image: bool = 
     user = _cfg["get_user"](user_id)
     b = BOOSTS[key]
     cnt = next((c for l, d, c in inv_variants(user, key) if (l, d) == (lvl, dur)), 0)
-    term = ("до запуска автодобычи" if b.get("charge")
+    term = ("до запуска банка" if b.get("charge")
             else _hours(BOOST_HOURS[dur]))
     rows = [f"Эликсир: <b>{_bicon(b)}{b['name']}</b>", f"Эффект: <b>{_effect(b, lvl)}</b>",
             f"{_ce(EM_LEFT)} Срок: <b>{term}</b>"]
@@ -2457,11 +2456,11 @@ def inv_done_html(user_id: int, key: str, lvl: int, dur: int, until: int | None)
     b = BOOSTS[key]
     rows = [f"Эликсир: <b>{_bicon(b)}{b['name']}</b>", f"Эффект: <b>{_effect(b, lvl)}</b>"]
     rows.append(f"{_ce(EM_LEFT)} Действует до: <b>{_datetime(until)}</b>" if until
-                else "Сработает при ближайшем запуске автодобычи")
+                else "Сработает при ближайшем запуске банка")
     rows.append(f"🎒 Осталось в инвентаре: <b>{inv_count(user, key)}/{INV_LIMIT}</b>")
     return (
         f"<p><b>{_ce(_cfg['DONATE_EMOJI'])} ЭЛИКСИР ПРИМЕНЁН</b></p>"
-        f"<blockquote><i>{'Эликсир ждёт запуска автодобычи.' if until is None else 'Эликсир уже работает.'}</i></blockquote>"
+        f"<blockquote><i>{'Эликсир ждёт запуска банка.' if until is None else 'Эликсир уже работает.'}</i></blockquote>"
         + _tree("Итог", rows)
     )
 
