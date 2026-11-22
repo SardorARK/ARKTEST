@@ -2807,6 +2807,7 @@ async def _upgrade_player_level(callback: CallbackQuery) -> bool:
     user["plevel"] = level + 1
     save_users()
     await callback.answer(f"Уровень игрока повышен до {level + 1}!", show_alert=True)
+    await underground.notify_new_mines(callback.bot, callback.from_user.id, level, level + 1)   # «Открыта новая шахта»
     return True
 
 
@@ -2881,6 +2882,7 @@ async def on_player_upgrade(callback: CallbackQuery):
     user["plevel"] = level + 1
     save_users()
     await callback.answer(f"Уровень игрока повышен до {level + 1}!", show_alert=True)
+    await underground.notify_new_mines(callback.bot, callback.from_user.id, level, level + 1)   # «Открыта новая шахта»
     await show_rich_card(
         callback,
         "player",
