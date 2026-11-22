@@ -14,6 +14,8 @@
     на месте, вместо «Назад» кнопка «Закрыть» (кнопки «Перейти» нет).
   * Профиль («я»), «Уровень» («ур») и «Шахта» в группах открываются как в личке: ответом на сообщение игрока,
     дальше экран обновляется правкой на месте (кнопки «Перейти» у них нет).
+  * «проф» / «профиль» в группе ответом на сообщение другого игрока показывает его профиль без кнопок
+    (титул, привилегия и остальное, как в обычном профиле).
   * Боссы («босс», «боссы», «охота») в группах открываются как в личке: ответом на сообщение игрока, дальше
     все экраны раздела обновляются правкой этого же сообщения, вместо «Назад» в меню кнопка «Закрыть».
   * Меню и арена в группах не открываются: вместо них бот отвечает текстом и кнопкой «Перейти»,
@@ -144,6 +146,12 @@ _START_RE = re.compile(r"^/start(?:@(\w+))?\s+(menu|boss|arena|pet|ug|cases|dona
 # Функцию ставит main.py: quick_cmds.pet_group_card = ...; она возвращает False, если карточку
 # показать нельзя (игрок без питомца): тогда бот отвечает обычным текстом с кнопкой «Перейти».
 pet_group_card: Callable[..., Awaitable[bool]] | None = None
+
+# Профиль другого игрока: «проф» / «профиль» ответом на его сообщение в группе показывает его профиль без кнопок.
+# Функцию ставит main.py: quick_cmds.profile_view = send_profile_view(bot, msg, id_игрока); она сама отвечает,
+# если у игрока нет профиля, и возвращает True, когда ответ отправлен.
+profile_view: Callable[..., Awaitable[bool]] | None = None
+PROFILE_VIEW_WORDS = ("проф", "профиль")   # «я» так не работает: это всегда свой профиль
 PET_REDIRECT_TEXT = ("<b>Мой питомец</b>\n\n"
                      "<i>В чате питомец не открывается. Нажми кнопку, и он откроется в личных сообщениях с ботом.</i>")
 
@@ -314,6 +322,22 @@ class QuickCommands(BaseMiddleware):
         if found is None:
             return None
         kind, target = found
+
+        if (found == ("cb", "me:open") and msg.chat.type != "private" and profile_view is not None
+                and normalize(msg.text) in PROFILE_VIEW_WORDS):
+            parent = msg.reply_to_message
+            who = getattr(parent, "from_user", None)
+            if who is not None and not who.is_bot and who.id != msg.from_user.id:   # чужое сообщение
+                now = time.monotonic()
+                key = (msg.chat.id, msg.from_user.id, f"profile:{who.id}")
+                if now - _redirect_last.get(key, 0.0) < REDIRECT_COOLDOWN:
+                    return _HANDLED
+                _redirect_last[key] = now
+                try:
+                    await profile_view(bot, msg, who.id)
+                except Exception:
+                    log.exception("quick_cmds: не удалось показать профиль игрока %s", who.id)
+                return _HANDLED
 
         if msg.chat.type != "private" and found in group_cards and found not in NO_GROUP_CARD:
             param, card = group_cards[found]
