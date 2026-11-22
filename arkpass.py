@@ -736,8 +736,8 @@ def plus_html(user: dict, with_image: bool = False) -> str:
             f"<b>ОП за задания ×{PLUS_XP_BONUS:g}</b>",
         ])
         + dn._GAP
-        + f"<p>{dn._ce(dn.EM_PRICE)} Цена: <b>{dn._fmt(ARK_PLUS_PRICE)}</b> {dn._ce(dn.EM_CRYSTAL)}<br>"
-          f"{dn._ce(dn.EM_LEFT)} Действует: <b>{_dur(end - time.time())}</b></p>"
+        + f"<p><b>{dn._ce(dn.EM_PRICE)} Цена: {dn._fmt(ARK_PLUS_PRICE)}</b> {dn._ce(dn.EM_CRYSTAL)}<br>"
+          f"<b>{dn._ce(dn.EM_LEFT)} Действует: {_dur(end - time.time())}</b></p>"
         + f"<p>{dn._bal('Баланс', have)}</p>"
     )
     if st["plus"]:
@@ -752,8 +752,6 @@ def plus_kb(user: dict) -> InlineKeyboardMarkup:
         ok = dn.get_balance(user) >= ARK_PLUS_PRICE
         rows.append([dn._btn(f"Купить за {dn._fmt(ARK_PLUS_PRICE)}", "ark:plusgo",
                              ButtonStyle.SUCCESS if ok else ButtonStyle.DANGER, dn.EM_BUY[0])])
-        if not ok:
-            rows.append([dn._btn("Пополнить кристаллы", "donate:shop", ButtonStyle.PRIMARY, dn.EM_CRYSTAL[0])])
     rows.append(dn._back_btn("ark:home"))
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -780,9 +778,9 @@ def levels_html(user: dict, with_image: bool = False) -> str:
         f"<p><b>{EM_XP} ПОКУПКА УРОВНЕЙ</b></p>"
         "<blockquote><i>Быстрый способ добрать нужный уровень. Награды открываются сразу.</i></blockquote>"
         + dn._GAP
-        + dn._tree("Сейчас", [f"Уровень: <b>{lvl}/{MAX_LEVEL}</b>",
-                              f"{dn._ce(dn.EM_PRICE)} Один уровень: <b>{dn._fmt(LEVEL_PRICE)}</b> {dn._ce(dn.EM_CRYSTAL)}",
-                              f"Осталось уровней: <b>{left}</b>"])
+        + dn._tree("Сейчас", [f"<b>Уровень: {lvl}/{MAX_LEVEL}</b>",
+                              f"<b>{dn._ce(dn.EM_PRICE)} Один уровень: {dn._fmt(LEVEL_PRICE)}</b> {dn._ce(dn.EM_CRYSTAL)}",
+                              f"<b>Осталось уровней: {left}</b>"], quote=True)
         + dn._GAP + f"<p>{dn._bal('Баланс', have)}</p>"
     )
 
