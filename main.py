@@ -1483,6 +1483,26 @@ async def send_profile_view(bot: Bot, msg: Message, target_id: int) -> bool:
 quick_cmds.profile_view = send_profile_view   # «проф» ответом на сообщение игрока (quick_cmds.py)
 
 
+async def send_title_view(bot: Bot, msg: Message, target_id: int) -> bool:
+    """«т» / «титул»: титул игрока (ответом на его сообщение) или свой, одной строкой в цитате."""
+    user = get_user(target_id)
+    if user is None:
+        await bot.send_message(
+            msg.chat.id, "<i>У этого игрока пока нет профиля.</i>",
+            message_thread_id=msg.message_thread_id if msg.is_topic_message else None,
+            reply_parameters=ReplyParameters(message_id=msg.message_id, allow_sending_without_reply=True),
+        )
+        return True
+    await send_rich_card(
+        bot, msg.chat.id, "title_line", lambda with_image: titles.profile_line(user),
+        None, reply_to=msg.message_id,
+    )
+    return True
+
+
+quick_cmds.title_view = send_title_view   # «т», «титул» (quick_cmds.py)
+
+
 # «я», «проф», «профиль» в группе открываются так же, как в личке: ответом на команду игрока,
 # дальше экран обновляется правкой на месте (см. quick_cmds.py, без кнопки «Перейти»).
 # «донат» и «кейс» в группе: текст раздела и кнопка «Перейти» (quick_cmds.py)
