@@ -95,7 +95,7 @@ BAR_IDS = (
     "5818696361180146573", "5818938026104986343", "5816775999697722671", "5819068438491963439", "5816938409591054266",  # середина
     "5819075482238328464", "5818709546729742458", "5816796052900028202", "5819105263541559058", "5816960644636745988",  # право
 )
-BAR_PIECES = 10          # сколько эмодзи в шкале: левый край + (BAR_PIECES - 2) середины + правый край
+BAR_PIECES = 6           # сколько эмодзи в шкале: левый край + (BAR_PIECES - 2) середины + правый край (минимум 2)
 BAR_BALL_STATES = 3      # сколько положений шарика внутри одного эмодзи (состояния 1..3)
 
 
@@ -129,6 +129,14 @@ def op_bar(frac: float) -> str:
         cur, ball = divmod(k - 1, BAR_BALL_STATES)
         states = [4 if i < cur else ball + 1 if i == cur else 0 for i in range(BAR_PIECES)]
     return "".join(_bar_piece(i, st) for i, st in enumerate(states))
+
+
+def op_bar_line(into: int, need: int) -> str:
+    """Шкала + процент после неё. Процент округляется вниз и не доходит до 100, пока уровень не взят."""
+    frac = into / need if need > 0 else 0.0
+    frac = min(1.0, max(0.0, frac))
+    pct = min(99, int(frac * 100)) if frac < 1.0 else 100
+    return f"{op_bar(frac)} <b>{pct}%</b>"
 
 
 def _ok() -> str:
@@ -714,13 +722,13 @@ def _progress_block(st: dict) -> str:
     lvl = pass_level(st)
     if lvl >= MAX_LEVEL:
         return dn._tree(f"{_bonus_e()} Прогресс", [f"Уровень: <b>{MAX_LEVEL}/{MAX_LEVEL}</b>",
-                                              "<b>Пасс пройден до конца</b>"])
+                                              "<i>Пасс пройден до конца</i>"])
     into = st["xp"] - CUM[lvl]
     need = level_cost(lvl + 1)
     return dn._tree(f"{_bonus_e()} Прогресс", [
         f"Уровень: <b>{lvl}/{MAX_LEVEL}</b>",
-        op_bar(into / need),
-        f"ОП: <b>{dn._fmt(into)}/{dn._fmt(need)}</b> до уровня {lvl + 1}",
+        f"ОП до уровня {lvl + 1}: <b>{dn._fmt(into)}/{dn._fmt(need)}</b>",
+        op_bar_line(into, need),
     ])
 
 
@@ -757,19 +765,19 @@ def home_html(user: dict, view: int = -1, with_image: bool = False, gained: int 
     view = default_view(user) if view < 1 else min(MAX_LEVEL, view)
     n, _s, end = season_info()
     if lvl >= MAX_LEVEL:
-        xp_line = f"{_e_op()} <b>Пасс пройден до конца</b>"
-        bar = op_bar(1.0)
+        xp_line = f"{_e_op()} <i>Пасс пройден до конца</i>"
+        bar_html = ""   # на максимальном уровне шкалы нет
     else:
         into, need = st["xp"] - CUM[lvl], level_cost(lvl + 1)
-        xp_line = f"{_e_op()} ОП: <b>{dn._fmt(into)}/{dn._fmt(need)}</b>"
-        bar = op_bar(into / need)
+        xp_line = f"{_e_op()} ОП до уровня {lvl + 1}: <b>{dn._fmt(into)}/{dn._fmt(need)}</b>"
+        bar_html = f"<br>{op_bar_line(into, need)}"
     gain = f"<p>{_e_op()} За задания: <b>+{dn._fmt(gained)} ОП</b></p>" if gained else ""
     reached = view <= lvl
     return (
         f"{dn._image(with_image)}"
         f"<p><b>{_e_head()} ARK Pass {lvl}/{MAX_LEVEL}</b>"
         + (f" {_e_plus()}" if st["plus"] else "")
-        + f"<br>{xp_line}<br>{bar}</p>"
+        + f"<br>{xp_line}{bar_html}</p>"
         + gain
         + _row(_e_free(), "Free", _items(False, view, st["s"]), view in st["fr"], reached, False)
         + _row(_e_plus(), "ARK+", _items(True, view, st["s"]), view in st["pr"], reached, not st["plus"])
