@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import copy
 import logging
+import re
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -46,6 +47,7 @@ PLUS_XP_BONUS = 1.2               # ARK+: ОП за задания ×1,2
 PLUS_BONUS_LEVELS = 3             # ARK+: столько уровней сразу после покупки
 LEVEL_PRICE = 25                  # кристаллов за один уровень
 DAY_TZ_HOURS = 3                  # «сутки» для заданий и сезона считаются по этому часовому поясу (МСК)
+QUOTE_LINE_CHARS = 34             # примерно столько знаков влезает в строку: от 3 строк цитата сворачивается
 STATE_FILE = Path(__file__).with_name("arkpass_state.json")
 
 SEASON_NAMES = ("Пробуждение", "Пепел и лёд", "Тёмный лес", "Глубины", "Небесный шторм",
@@ -58,8 +60,13 @@ EM_NEW = "🎁"
 EM_LOCK = "🔒"
 EM_PLUS = "👑"                                   # запасной значок, если кастомные эмодзи недоступны
 EMO_PASS = ("5917752342979024268", "🔥")         # заголовок пасса и ОП (вместо кубка)
+EMO_HEAD = ("5226893221191237996", "👾")         # заголовок «ARK Pass 12/60»
 EMO_FREE = ("5411307602074163455", "🎫")         # обычный трек (Free)
 EMO_PLUS = ("5314784791986453963", "🎫")         # ARK+ (текст и кнопка)
+
+
+def _e_head() -> str:
+    return dn._ce(EMO_HEAD)
 
 
 def _e_pass() -> str:
@@ -375,9 +382,10 @@ def note(user_id: int, kind: str, n: int = 1) -> None:
 # ---------- Выдача наград ----------
 
 def _em(name: str, default: str) -> str:
+    """Эмодзи валюты из настроек проекта. Монеты в боте: обычный 🏵 (в main.py COIN_EMOJI = (None, "🏵"))."""
     val = dn._cfg.get(name)
     if isinstance(val, (tuple, list)) and len(val) == 2:
-        return dn._ce(tuple(val))
+        return dn._ce(tuple(val)) if val[0] else str(val[1])
     return val if isinstance(val, str) and val else default
 
 
@@ -388,7 +396,7 @@ def _sets():
 def _item_text(it: Item) -> str:
     kind = it[0]
     if kind == "coins":
-        return f"{_em('COIN_EMOJI', '🪙')} Монеты: <b>{dn._fmt(it[1])}</b>"
+        return f"{_em('COIN_EMOJI', '🏵')} Монеты: <b>{dn._fmt(it[1])}</b>"
     if kind == "meat":
         return f"{_em('MEAT_EMOJI', '🥩')} Мясо: <b>{dn._fmt(it[1])}</b>"
     if kind == "fruit":
@@ -408,8 +416,41 @@ def _item_text(it: Item) -> str:
     return f"{_e_plus()} Значок <b>ARK+</b> сезона"
 
 
-def _short(items: list[Item]) -> str:
-    return " · ".join(_item_text(i) for i in items)
+def _k(n: int) -> str:
+    """10000 -> 10k, 1250 -> 1.25k, 1500000 -> 1.5M."""
+    n = int(n)
+    for div, suf in ((1_000_000, "M"), (1_000, "k")):
+        if n >= div:
+            return f"{n / div:.2f}".rstrip("0").rstrip(".") + suf
+    return str(n)
+
+
+def _item_short(it: Item) -> str:
+    """Награда без слов: «10k🏵», «5k🏜», «×2🎁». Число стоит перед эмодзи."""
+    kind = it[0]
+    if kind == "coins":
+        return f"{_k(it[1])}{_em('COIN_EMOJI', '🏵')}"
+    if kind == "meat":
+        return f"{_k(it[1])}{_em('MEAT_EMOJI', '🥩')}"
+    if kind == "fruit":
+        return f"{_k(it[1])}{_em('FRUIT_EMOJI', '🥭')}"
+    if kind == "minerals":
+        return f"{_k(it[1])}{_em('MINERAL_EMOJI', '🏜')}"
+    if kind == "crystals":
+        return f"{_k(it[1])}{dn._ce(dn.EM_CRYSTAL)}"
+    if kind == "set":
+        sets = getattr(_sets(), "SETS", None) or {}
+        emoji = sets.get(it[1], {}).get("emoji", "📦")
+        return f"{it[2]}{emoji}"
+    if kind == "elixir":
+        b = dn.BOOSTS[it[1]]
+        power = b["levels"][it[2]]
+        sign = b.get("sign", "+")
+        body = f"{power}ч" if b.get("charge") else f"{sign}{power}%·{dn.BOOST_HOURS[it[3]]}ч"
+        return f"{body}{dn._bicon(b).strip()}" + (f"×{it[4]}" if it[4] > 1 else "")
+    if kind == "priv":
+        return f"{it[2]}д{dn._ce(dn.PRIVILEGES[it[1]]['emoji'])}"
+    return _e_plus()
 
 
 def _apply(user: dict, it: Item, total: dict) -> None:
@@ -554,8 +595,11 @@ def _row(title_emoji: str, title: str, items: list[Item], claimed: bool, reached
         tag = f" · {EM_NEW} можно забрать"
     else:
         tag = ""
-    body = "<br>".join(_item_text(i) for i in items)
-    return f"<p><b>{title_emoji} {title}</b>{tag}</p><blockquote expandable>{body}</blockquote>"
+    body = " / ".join(_item_short(i) for i in items)
+    # сворачиваемая цитата только если награда не влезает в 2 строки, иначе обычная
+    visible = re.sub(r"<[^>]+>", "", re.sub(r"<tg-emoji[^>]*>.*?</tg-emoji>", "xx", body))   # кастомный эмодзи шире знака
+    long_quote = -(-len(visible) // QUOTE_LINE_CHARS) > 2
+    return f"<p><b>{title_emoji} {title}</b>{tag}</p><blockquote{' expandable' if long_quote else ''}>{body}</blockquote>"
 
 
 def home_html(user: dict, view: int = -1, with_image: bool = False, gained: int = 0) -> str:
@@ -575,7 +619,7 @@ def home_html(user: dict, view: int = -1, with_image: bool = False, gained: int 
     reached = view <= lvl
     return (
         f"{dn._image(with_image)}"
-        f"<p><b>{_e_pass()} ARK Pass {lvl}/{MAX_LEVEL}</b>"
+        f"<p><b>{_e_head()} ARK Pass {lvl}/{MAX_LEVEL}</b>"
         + (f" {_e_plus()}" if st["plus"] else "")
         + f"<br>{xp_line}<br>{bar}</p>"
         + gain
