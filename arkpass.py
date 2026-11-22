@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import copy
 import logging
+import random
 import re
 import time
 from datetime import datetime, timedelta, timezone
@@ -63,7 +64,7 @@ EMO_OK = ("5390846416530716134", "✅")           # галочка (задани
 EMO_CLAIM = ("5913600088856334619", "🎁")        # «можно забрать», кнопки «Забрать», заголовки «Что внутри» и «Получено»
 EMO_BONUS = ("5411590687663608498", "⚡")        # «Бонусы сразу»
 EMO_TASKS = "5310273663281417659"                # иконка кнопки «Задания»
-EMO_LEVELS = "5247160991472446906"               # иконка кнопки «Уровни»
+EMO_LEVELS = "5247160991472446906"               # иконка кнопки «Уровни»; она же у строки «Уровень» в блоке «Итог»
 EMO_OP = ("5325547803936572038", "✨")           # очки пасса (ОП)
 EMO_FREE = ("5411307602074163455", "🎫")         # обычный трек (Free)
 EMO_PLUS = ("5314784791986453963", "🎫")         # ARK+ (текст и кнопка)
@@ -227,6 +228,52 @@ def _build() -> None:
 
 
 _build()
+
+
+# Скины ника (settings.SKINS): в каждом сезоне в треке ARK+ лежат два: русский на уровне 15-30 и
+# английский на уровне 30-45. Выбор случайный, но стабильный: зависит только от номера сезона. Скины идут
+# по кругу без повторов, пока не кончится список, и берутся только дешевле SKIN_MAX_PRICE кристаллов,
+# чтобы не раздавать самые дорогие. Если скин у игрока уже есть, он получает кристаллами половину его цены.
+SKIN_MAX_PRICE = 150
+SKIN_RANGES = {"ru": (15, 30), "en": (30, 45)}
+_SKIN_CACHE: dict[int, dict[int, str]] = {}
+
+
+def _skin_pool(lang: str) -> list[str]:
+    st = dn._skins_mod()
+    keys = [k for k, v in st.SKINS.items()
+            if k != st.DEFAULT_SKIN and v.get("shop") and st.skin_lang(k) == lang
+            and int(v["shop"].get("price", 0)) <= SKIN_MAX_PRICE]
+    random.Random(f"ark-skins-{lang}").shuffle(keys)
+    return keys
+
+
+def season_skins(season: int) -> dict[int, str]:
+    """{уровень: ключ скина} награды ARK+ этого сезона."""
+    if season in _SKIN_CACHE:
+        return _SKIN_CACHE[season]
+    out: dict[int, str] = {}
+    try:
+        for lang, (lo, hi) in SKIN_RANGES.items():
+            pool = _skin_pool(lang)
+            if not pool:
+                continue
+            lvl = random.Random(f"ark-{season}-{lang}-lvl").randint(lo, hi)
+            while lvl in out:
+                lvl += 1
+            out[lvl] = pool[(season - 1) % len(pool)]
+    except Exception:
+        log.exception("arkpass: не удалось выбрать скины сезона %s", season)
+    _SKIN_CACHE[season] = out
+    return out
+
+
+def _items(plus: bool, lv: int, season: int) -> list[Item]:
+    """Награды уровня с учётом сезонного скина (он только у ARK+)."""
+    items = list(_track(plus)[lv])
+    if plus and lv in season_skins(season):
+        items.append(("skin", season_skins(season)[lv]))
+    return items
 
 
 def _track(plus: bool) -> dict[int, list[Item]]:
@@ -441,7 +488,20 @@ def _item_text(it: Item) -> str:
     if kind == "priv":
         info = dn.PRIVILEGES[it[1]]
         return f"{dn._ce(info['emoji'])} {info['name']}: <b>{it[2]} дн.</b>"
+    if kind == "skin":
+        return f"Скин ника: {_skin_preview(it[1])}"
     return f"{_frag()} Фрагменты: <b>{dn._fmt(it[1])}</b>"
+
+
+def _skin_preview(key: str) -> str:
+    """Пример скина: слово ARK (для русского АРК) буквами этого скина."""
+    st = dn._skins_mod()
+    word = "АРК" if st.skin_lang(key) == "ru" else "ARK"
+    try:
+        return st.apply_skin(word, key)
+    except Exception:   # например, settings ещё не получил custom_emoji
+        log.exception("arkpass: превью скина %s не собралось", key)
+        return word
 
 
 def _k(n: int) -> str:
@@ -478,6 +538,8 @@ def _item_short(it: Item) -> str:
         return f"{body}{dn._bicon(b).strip()}" + (f"×{it[4]}" if it[4] > 1 else "")
     if kind == "priv":
         return f"{it[2]}д{dn._ce(dn.PRIVILEGES[it[1]]['emoji'])}"
+    if kind == "skin":
+        return _skin_preview(it[1])
     return f"{_k(it[1])}{_frag()}"
 
 
@@ -499,10 +561,25 @@ def _apply(user: dict, it: Item, total: dict) -> None:
         dn.grant_privilege(user, it[1], int(it[2]))
     elif kind == "frag":
         user["fragments"] = int(user.get("fragments", 0) or 0) + int(it[1])
+    elif kind == "skin":
+        st_mod = dn._skins_mod()
+        info = st_mod.SKINS.get(it[1])
+        own = user.get(st_mod.SKINS_FIELD)
+        if not isinstance(own, list):
+            own = user[st_mod.SKINS_FIELD] = []
+        if info is not None and it[1] not in own:
+            own.append(it[1])
+        else:   # скин уже куплен (или убран из списка): половина цены кристаллами
+            refund = max(5, int((info or {}).get("shop", {}).get("price", 20)) // 2)
+            user[dn.BALANCE_FIELD] = dn.get_balance(user) + refund
+            total[("skin_dup",)] = total.get(("skin_dup",), 0) + refund
+            return
     if kind == "elixir":
         key, cnt = (kind, it[1], it[2], it[3]), int(it[4])
     elif kind in ("set", "priv"):
         key, cnt = (kind, it[1]), int(it[2])
+    elif kind == "skin":
+        key, cnt = (kind, it[1]), 1
     else:
         key, cnt = (kind,), int(it[1])
     total[key] = total.get(key, 0) + cnt
@@ -534,7 +611,7 @@ def claim_all(user: dict) -> tuple[dict, int, int]:
     given = skipped = 0
     pending: dict = {}
     for plus, lv in _available(user, st):
-        items = _track(plus)[lv]
+        items = _items(plus, lv, st["s"])
         if _inv_blocked(user, items, pending):
             skipped += 1
             continue
@@ -548,7 +625,7 @@ def claim_all(user: dict) -> tuple[dict, int, int]:
 
 
 def _total_lines(total: dict) -> list[str]:
-    order = ("coins", "meat", "fruit", "minerals", "crystals", "set", "elixir", "priv", "frag")
+    order = ("coins", "meat", "fruit", "minerals", "crystals", "set", "elixir", "priv", "frag", "skin", "skin_dup")
     lines = []
     for kind in order:
         for key in sorted((k for k in total if k[0] == kind), key=str):
@@ -559,6 +636,10 @@ def _total_lines(total: dict) -> list[str]:
                 lines.append(_item_text(("elixir", key[1], key[2], key[3], n)))
             elif kind == "priv":
                 lines.append(_item_text(("priv", key[1], n)))
+            elif kind == "skin":
+                lines.append(_item_text(("skin", key[1])))
+            elif kind == "skin_dup":
+                lines.append(f"{dn._ce(dn.EM_CRYSTAL)} Скин уже был у тебя, взамен кристаллы: <b>{dn._fmt(n)}</b>")
             else:
                 lines.append(_item_text((kind, n)))
     return lines
@@ -587,11 +668,11 @@ def _head(user: dict, st: dict, with_image: bool) -> str:
 def _progress_block(st: dict) -> str:
     lvl = pass_level(st)
     if lvl >= MAX_LEVEL:
-        return dn._tree(f"{EM_XP} Прогресс", [f"Уровень: <b>{MAX_LEVEL}/{MAX_LEVEL}</b>",
+        return dn._tree(f"{_bonus_e()} Прогресс", [f"Уровень: <b>{MAX_LEVEL}/{MAX_LEVEL}</b>",
                                               "<b>Пасс пройден до конца</b>"])
     into = st["xp"] - CUM[lvl]
     need = level_cost(lvl + 1)
-    return dn._tree(f"{EM_XP} Прогресс", [
+    return dn._tree(f"{_bonus_e()} Прогресс", [
         f"Уровень: <b>{lvl}/{MAX_LEVEL}</b>",
         f"<code>{dn._bar(into / need)}</code>",
         f"ОП: <b>{dn._fmt(into)}/{dn._fmt(need)}</b> до уровня {lvl + 1}",
@@ -645,8 +726,8 @@ def home_html(user: dict, view: int = -1, with_image: bool = False, gained: int 
         + (f" {_e_plus()}" if st["plus"] else "")
         + f"<br>{xp_line}<br>{bar}</p>"
         + gain
-        + _row(_e_free(), "Free", FREE[view], view in st["fr"], reached, False)
-        + _row(_e_plus(), "ARK+", PLUS[view], view in st["pr"], reached, not st["plus"])
+        + _row(_e_free(), "Free", _items(False, view, st["s"]), view in st["fr"], reached, False)
+        + _row(_e_plus(), "ARK+", _items(True, view, st["s"]), view in st["pr"], reached, not st["plus"])
         + f"<p><i>Сезон {n} «{season_name(n)}» · {dn._ce(dn.EM_LEFT)} {_dur(end - time.time())}</i></p>"
     )
 
@@ -729,6 +810,7 @@ def plus_html(user: dict, with_image: bool = False) -> str:
             f"Эликсиры: <b>×{elixirs}</b>",
             "Монеты, мясо, фрукты и минералы в 2,5 раза больше",
             f"{_frag()} Фрагменты сундуков: <b>{dn._fmt(frags)}</b>",
+            "Скины ника: <b>RU и EN</b>, новые в каждом сезоне",
         ], quote=True)
         + dn._GAP
         + dn._tree(f"{_bonus_e()} Бонусы сразу", [
@@ -756,6 +838,16 @@ def plus_kb(user: dict) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
+def claim_back_kb(user: dict) -> InlineKeyboardMarkup:
+    """После покупки: та же кнопка «Забрать всё (N)», что и в меню ARK Pass (если есть что забирать), и «Назад»."""
+    rows = []
+    avail = _available(user, _state(user))
+    if avail:
+        rows.append([dn._btn(f"Забрать всё ({len(avail)})", "ark:cl", ButtonStyle.SUCCESS, EMO_CLAIM[0])])
+    rows.append(dn._back_btn("ark:home"))
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
 def done_html(title: str, lines: list[str], user: dict, note_text: str = "") -> str:
     st = _state(user)
     return (
@@ -763,7 +855,7 @@ def done_html(title: str, lines: list[str], user: dict, note_text: str = "") -> 
         + (f"<blockquote><i>{note_text}</i></blockquote>" if note_text else "")
         + dn._GAP + dn._tree(f"{_claim_e()} Получено", lines, quote=len(lines) > 4)
         + dn._GAP
-        + dn._tree("Итог", [f"Уровень: <b>{pass_level(st)}/{MAX_LEVEL}</b>",
+        + dn._tree("Итог", [f"{dn._ce((EMO_LEVELS, '⚡'))} Уровень: <b>{pass_level(st)}/{MAX_LEVEL}</b>",
                             dn._bal("Баланс", dn.get_balance(user))])
     )
 
@@ -775,7 +867,7 @@ def levels_html(user: dict, with_image: bool = False) -> str:
     left = MAX_LEVEL - lvl
     return (
         f"{dn._image(with_image)}"
-        f"<p><b>{EM_XP} ПОКУПКА УРОВНЕЙ</b></p>"
+        f"<p><b>{_bonus_e()} ПОКУПКА УРОВНЕЙ</b></p>"
         "<blockquote><i>Быстрый способ добрать нужный уровень. Награды открываются сразу.</i></blockquote>"
         + dn._GAP
         + dn._tree("Сейчас", [f"<b>Уровень: {lvl}/{MAX_LEVEL}</b>",
@@ -932,13 +1024,12 @@ async def on_plus_buy(callback: CallbackQuery):
     await callback.answer()
     n, _s, end = season_info()
     lines = [f"{_e_plus()} <b>ARK+</b> сезона {n}: до конца сезона ({_dur(end - time.time())})",
-             f"{EM_XP} Бонус: <b>+{PLUS_BONUS_LEVELS}</b> уровня",
-             f"{EM_XP} ОП за задания: <b>×{PLUS_XP_BONUS:g}</b>"]
+             f"{_bonus_e()} Бонус: <b>+{PLUS_BONUS_LEVELS}</b> уровня",
+             f"{_bonus_e()} ОП за задания: <b>×{PLUS_XP_BONUS:g}</b>"]
     await _show(callback,
                 lambda wi: done_html(f"{_e_plus()} ARK+ АКТИВИРОВАН", lines, user,
                                      "Премиум-награды пройденных уровней уже ждут. Забирай."),
-                InlineKeyboardMarkup(inline_keyboard=[
-                    [dn._btn("Забрать награды", "ark:cl", ButtonStyle.SUCCESS, EMO_CLAIM[0])], dn._back_btn("ark:home")]))
+                claim_back_kb(user))
 
 
 @dn.router.callback_query(F.data == "ark:lv")
@@ -982,9 +1073,7 @@ async def on_levels_buy(callback: CallbackQuery):
     _save()
     ledger("ark_levels", user=uid, season=st["s"], levels=n, price=price, balance=user[dn.BALANCE_FIELD])
     await callback.answer()
-    lines = [f"{EM_XP} Уровни: <b>+{n}</b> (теперь {pass_level(st)})"]
+    lines = [f"{_bonus_e()} Уровни: <b>+{n}</b> (теперь {pass_level(st)})"]
     await _show(callback,
-                lambda wi: done_html(f"{EM_XP} УРОВНИ КУПЛЕНЫ", lines, user, "Награды новых уровней можно забрать."),
-                InlineKeyboardMarkup(inline_keyboard=[
-                    [dn._btn("Забрать награды", "ark:cl", ButtonStyle.SUCCESS, EMO_CLAIM[0])] if _available(user, st) else
-                    dn._back_btn("ark:home")]))
+                lambda wi: done_html(f"{_bonus_e()} УРОВНИ КУПЛЕНЫ", lines, user, "Награды новых уровней можно забрать."),
+                claim_back_kb(user))
