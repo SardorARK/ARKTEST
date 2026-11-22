@@ -86,6 +86,31 @@ def _bonus_e() -> str:
     return dn._ce(EMO_BONUS)
 
 
+# Шкала ОП из 15 кастомных эмодзи (по скрину): три группы по 5 штук, в каждой состояния 0, 1/4, 1/2, 3/4, полный.
+#   левый край (скруглён слева), середина (прямая), правый край (скруглён справа).
+# Шарик стоит на конце заливки; у полного левого края и полной середины шарика нет (шкала идёт дальше),
+# у полного правого края он на конце.
+BAR_LEFT = ("5818698899505815881", "5818733327963660082", "5819030608420020721",
+            "5816682678648315820", "5818910168947106288")
+BAR_MID = ("5818696361180146573", "5818938026104986343", "5816775999697722671",
+           "5819068438491963439", "5816938409591054266")
+BAR_RIGHT = ("5819075482238328464", "5818709546729742458", "5816796052900028202",
+             "5819105263541559058", "5816960644636745988")
+BAR_PIECES = 10   # сколько эмодзи в шкале: край + (BAR_PIECES - 2) середины + край, всего BAR_PIECES * 4 шагов
+
+
+def op_bar(frac: float) -> str:
+    """Шкала ОП кастомными эмодзи; frac от 0 до 1."""
+    frac = min(1.0, max(0.0, frac))
+    steps = round(frac * BAR_PIECES * 4)
+    out = []
+    for i in range(BAR_PIECES):
+        group = BAR_LEFT if i == 0 else BAR_RIGHT if i == BAR_PIECES - 1 else BAR_MID
+        state = min(4, max(0, steps - 4 * i))
+        out.append(dn._ce((group[state], "▪️")))
+    return "".join(out)
+
+
 def _ok() -> str:
     return dn._ce(EMO_OK)
 
@@ -674,7 +699,7 @@ def _progress_block(st: dict) -> str:
     need = level_cost(lvl + 1)
     return dn._tree(f"{_bonus_e()} Прогресс", [
         f"Уровень: <b>{lvl}/{MAX_LEVEL}</b>",
-        f"<code>{dn._bar(into / need)}</code>",
+        op_bar(into / need),
         f"ОП: <b>{dn._fmt(into)}/{dn._fmt(need)}</b> до уровня {lvl + 1}",
     ])
 
@@ -713,11 +738,11 @@ def home_html(user: dict, view: int = -1, with_image: bool = False, gained: int 
     n, _s, end = season_info()
     if lvl >= MAX_LEVEL:
         xp_line = f"{_e_op()} <b>Пасс пройден до конца</b>"
-        bar = f"<code>{dn._bar(1.0)}</code>"
+        bar = op_bar(1.0)
     else:
         into, need = st["xp"] - CUM[lvl], level_cost(lvl + 1)
         xp_line = f"{_e_op()} ОП: <b>{dn._fmt(into)}/{dn._fmt(need)}</b>"
-        bar = f"<code>{dn._bar(into / need)}</code>"
+        bar = op_bar(into / need)
     gain = f"<p>{_e_op()} За задания: <b>+{dn._fmt(gained)} ОП</b></p>" if gained else ""
     reached = view <= lvl
     return (
