@@ -60,6 +60,8 @@ EM_LOCK = "🔒"
 EM_PLUS = "👑"                                   # запасной значок, если кастомные эмодзи недоступны
 EMO_PASS = ("5775927158450950245", "⭐")         # ARK Pass: заголовки экранов
 EMO_OK = ("5390846416530716134", "✅")           # галочка (задание выполнено, награда получена)
+EMO_CLAIM = ("5913600088856334619", "🎁")        # «можно забрать», кнопки «Забрать», заголовки «Что внутри» и «Получено»
+EMO_BONUS = ("5411590687663608498", "⚡")        # «Бонусы сразу»
 EMO_TASKS = "5310273663281417659"                # иконка кнопки «Задания»
 EMO_LEVELS = "5247160991472446906"               # иконка кнопки «Уровни»
 EMO_OP = ("5325547803936572038", "✨")           # очки пасса (ОП)
@@ -73,6 +75,14 @@ def _e_head() -> str:
 
 def _e_pass() -> str:
     return dn._ce(EMO_PASS)
+
+
+def _claim_e() -> str:
+    return dn._ce(EMO_CLAIM)
+
+
+def _bonus_e() -> str:
+    return dn._ce(EMO_BONUS)
 
 
 def _ok() -> str:
@@ -600,11 +610,11 @@ def default_view(user: dict) -> int:
 def _row(title_emoji: str, title: str, items: list[Item], claimed: bool, reached: bool, locked: bool) -> str:
     """Один трек: заголовок с пометкой и награды в сворачиваемой цитате."""
     if claimed:
-        tag = f" · {_ok()} получено"
+        tag = f" · <i>{_ok()} получено</i>"
     elif locked:
         tag = " · <i>недоступно</i>"
     elif reached:
-        tag = f" · {EM_NEW} можно забрать"
+        tag = f" · <i>{_claim_e()} можно забрать</i>"
     else:
         tag = ""
     body = " / ".join(_item_short(i) for i in items)
@@ -650,7 +660,7 @@ def home_kb(user: dict, closable: bool, view: int = -1) -> InlineKeyboardMarkup:
              dn._btn("›", f"ark:v:{1 if view >= MAX_LEVEL else view + 1}", ButtonStyle.PRIMARY)]]
     avail = _available(user, st)
     if avail:
-        rows.append([dn._btn(f"Забрать всё ({len(avail)})", "ark:cl", ButtonStyle.SUCCESS)])
+        rows.append([dn._btn(f"Забрать всё ({len(avail)})", "ark:cl", ButtonStyle.SUCCESS, EMO_CLAIM[0])])
     second = [dn._btn("Задания", "ark:q", ButtonStyle.PRIMARY, EMO_TASKS)]
     if mine < MAX_LEVEL:
         second.append(dn._btn("Уровни", "ark:lv", ButtonStyle.PRIMARY, EMO_LEVELS))
@@ -712,7 +722,7 @@ def plus_html(user: dict, with_image: bool = False) -> str:
         "<blockquote><i>Второй трек наград на всех 60 уровнях. Покупается на сезон, пройденные уровни "
         "открываются сразу.</i></blockquote>"
         + dn._GAP
-        + dn._tree(f"{EM_NEW} Что внутри", [
+        + dn._tree(f"{_claim_e()} Что внутри", [
             f"{dn._ce(dn.EM_CRYSTAL)} Кристаллы: <b>{dn._fmt(crystals)}</b>",
             f"{dn._ce(dn.EM_VIP)} VIP: <b>{vip_days} дн.</b> · {dn._ce(dn.EM_PREMIUM)} Premium: <b>{prem_days} дн.</b>",
             f"Наборы мастерской: <b>×{sets_n}</b>",
@@ -721,19 +731,17 @@ def plus_html(user: dict, with_image: bool = False) -> str:
             f"{_frag()} Фрагменты сундуков: <b>{dn._fmt(frags)}</b>",
         ], quote=True)
         + dn._GAP
-        + dn._tree(f"{EM_XP} Бонусы сразу", [
-            f"+<b>{PLUS_BONUS_LEVELS}</b> уровня при покупке",
-            f"ОП за задания <b>×{PLUS_XP_BONUS:g}</b>",
+        + dn._tree(f"{_bonus_e()} Бонусы сразу", [
+            f"<b>+{PLUS_BONUS_LEVELS} уровня при покупке</b>",
+            f"<b>ОП за задания ×{PLUS_XP_BONUS:g}</b>",
         ])
         + dn._GAP
         + f"<p>{dn._ce(dn.EM_PRICE)} Цена: <b>{dn._fmt(ARK_PLUS_PRICE)}</b> {dn._ce(dn.EM_CRYSTAL)}<br>"
-          f"{dn._ce(dn.EM_LEFT)} Действует до конца сезона: <b>{_dur(end - time.time())}</b></p>"
+          f"{dn._ce(dn.EM_LEFT)} Действует: <b>{_dur(end - time.time())}</b></p>"
         + f"<p>{dn._bal('Баланс', have)}</p>"
     )
     if st["plus"]:
         return out + f"<p><b>{_ok()} ARK+ уже у тебя.</b></p>"
-    if have < ARK_PLUS_PRICE:
-        out += f"<p>{dn._ce(dn.EM_LACK)} Не хватает: <b>{dn._fmt(ARK_PLUS_PRICE - have)}</b> {dn._ce(dn.EM_CRYSTAL)}</p>"
     return out
 
 
@@ -755,7 +763,7 @@ def done_html(title: str, lines: list[str], user: dict, note_text: str = "") -> 
     return (
         f"<p><b>{title}</b></p>"
         + (f"<blockquote><i>{note_text}</i></blockquote>" if note_text else "")
-        + dn._GAP + dn._tree(f"{EM_NEW} Получено", lines, quote=len(lines) > 4)
+        + dn._GAP + dn._tree(f"{_claim_e()} Получено", lines, quote=len(lines) > 4)
         + dn._GAP
         + dn._tree("Итог", [f"Уровень: <b>{pass_level(st)}/{MAX_LEVEL}</b>",
                             dn._bal("Баланс", dn.get_balance(user))])
@@ -790,13 +798,14 @@ def _lv_options(st: dict) -> list[int]:
 def levels_kb(user: dict) -> InlineKeyboardMarkup:
     st = _state(user)
     have = dn.get_balance(user)
-    rows = []
+    buttons = []
     for n in _lv_options(st):
         price = n * LEVEL_PRICE
         full = n == MAX_LEVEL - pass_level(st) and n > 10
         label = f"До {MAX_LEVEL} (+{n}) · {dn._fmt(price)}" if full else f"+{n} · {dn._fmt(price)}"
-        rows.append([dn._btn(label, f"ark:lvgo:{n}",
-                             ButtonStyle.SUCCESS if have >= price else ButtonStyle.DANGER, dn.EM_BUY[0])])
+        buttons.append(dn._btn(label, f"ark:lvgo:{n}",
+                               ButtonStyle.SUCCESS if have >= price else ButtonStyle.DANGER, dn.EM_BUY[0]))
+    rows = [buttons[i:i + 2] for i in range(0, len(buttons), 2)]   # по две кнопки в ряд
     rows.append(dn._back_btn("ark:home"))
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -878,7 +887,7 @@ async def on_claim(callback: CallbackQuery):
     text = ("Часть наград осталась: в инвентаре нет места под эликсиры. Освободи его и забери остальное."
             if skipped else "Всё лежит у тебя в профиле. Эликсиры в инвентаре, наборы в «Наборах».")
     await callback.answer()
-    await _show(callback, lambda wi: done_html(f"{EM_NEW} НАГРАДЫ ПОЛУЧЕНЫ", _total_lines(total), user, text),
+    await _show(callback, lambda wi: done_html(f"{_claim_e()} НАГРАДЫ ПОЛУЧЕНЫ", _total_lines(total), user, text),
                 InlineKeyboardMarkup(inline_keyboard=[
                     dn._back_btn("ark:home")]))
 
@@ -931,7 +940,7 @@ async def on_plus_buy(callback: CallbackQuery):
                 lambda wi: done_html(f"{_e_plus()} ARK+ АКТИВИРОВАН", lines, user,
                                      "Премиум-награды пройденных уровней уже ждут. Забирай."),
                 InlineKeyboardMarkup(inline_keyboard=[
-                    [dn._btn("Забрать награды", "ark:cl", ButtonStyle.SUCCESS)], dn._back_btn("ark:home")]))
+                    [dn._btn("Забрать награды", "ark:cl", ButtonStyle.SUCCESS, EMO_CLAIM[0])], dn._back_btn("ark:home")]))
 
 
 @dn.router.callback_query(F.data == "ark:lv")
@@ -979,5 +988,5 @@ async def on_levels_buy(callback: CallbackQuery):
     await _show(callback,
                 lambda wi: done_html(f"{EM_XP} УРОВНИ КУПЛЕНЫ", lines, user, "Награды новых уровней можно забрать."),
                 InlineKeyboardMarkup(inline_keyboard=[
-                    [dn._btn("Забрать награды", "ark:cl", ButtonStyle.SUCCESS)] if _available(user, st) else
+                    [dn._btn("Забрать награды", "ark:cl", ButtonStyle.SUCCESS, EMO_CLAIM[0])] if _available(user, st) else
                     dn._back_btn("ark:home")]))
