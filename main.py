@@ -1172,6 +1172,7 @@ def player_level_html(user_id: int, with_image: bool = False, mode: str = "") ->
 TREASURY_EMOJI = ("6192975148681793540", "💰")  # кнопка «Сокровищница»
 EARN_EMOJI = ("5260270009048906733", "💸")      # кнопка «Заработать» (нижнее меню)
 EARN_MINE_EMOJI = ("5465589000783812364", "🪨")  # кнопка «Шахта» в разделе «Заработать»
+EARN_ARKPASS_EMOJI = ("5775927158450950245", "⭐")  # кнопка «ARK Pass» в разделе «Заработать»
 STOCK_BTN_EMOJI = ("5854908544712707500", "📦")  # кнопка «Запасы»
 
 
@@ -1355,28 +1356,37 @@ def menu_html(user_id: int | None = None, with_image: bool = False) -> str:
 
 
 def earn_html(user_id: int | None = None, with_image: bool = False) -> str:
-    """Раздел «Заработать»: отсюда открываются «Шахта» и «Банк»."""
+    """Раздел «Заработать»: отсюда открываются «Шахта», «Банк» и «ARK Pass»."""
     image = '<img src="tg://photo?id=pet"/>' if with_image else ""
     return (
         f"{image}"
         f"<p><b>{custom_emoji(EARN_EMOJI)} ЗАРАБОТАТЬ</b></p>"
         "<blockquote><i>Копай руду и минералы в шахте или запускай банк: "
-        "сотрудники приносят монеты, даже пока тебя нет рядом.</i></blockquote>"
+        "сотрудники приносят монеты, даже пока тебя нет рядом. "
+        "А в ARK Pass бери задания и забирай награды сезона.</i></blockquote>"
     )
 
 
 def earn_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
-        inline_keyboard=[[
-            InlineKeyboardButton(
-                text="Шахта", callback_data="ug:open", style=ButtonStyle.SUCCESS,
-                icon_custom_emoji_id=EARN_MINE_EMOJI[0],
-            ),
-            InlineKeyboardButton(
-                text="Банк", callback_data="menu:mine", style=ButtonStyle.SUCCESS,
-                icon_custom_emoji_id=mine.MINE_EMOJI[0],
-            ),
-        ]]
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="Шахта", callback_data="ug:open", style=ButtonStyle.SUCCESS,
+                    icon_custom_emoji_id=EARN_MINE_EMOJI[0],
+                ),
+                InlineKeyboardButton(
+                    text="Банк", callback_data="menu:mine", style=ButtonStyle.SUCCESS,
+                    icon_custom_emoji_id=mine.MINE_EMOJI[0],
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    text="ARK Pass", callback_data="ark:home", style=ButtonStyle.PRIMARY,
+                    icon_custom_emoji_id=EARN_ARKPASS_EMOJI[0],
+                ),
+            ],
+        ]
     )
 
 
