@@ -1464,6 +1464,25 @@ async def send_pet_short(bot: Bot, chat_id: int, user_id: int, url: str) -> bool
 quick_cmds.pet_group_card = send_pet_short   # «пет», «питомец», «я» в группе (quick_cmds.py)
 
 
+async def send_profile_view(bot: Bot, msg: Message, target_id: int) -> bool:
+    """«проф» / «профиль» ответом на сообщение игрока: его профиль (титул, привилегия, запасы) без кнопок."""
+    if get_user(target_id) is None:
+        await bot.send_message(
+            msg.chat.id, "<i>У этого игрока пока нет профиля.</i>",
+            message_thread_id=msg.message_thread_id if msg.is_topic_message else None,
+            reply_parameters=ReplyParameters(message_id=msg.message_id, allow_sending_without_reply=True),
+        )
+        return True
+    await send_rich_card(
+        bot, msg.chat.id, "player", lambda with_image: player_profile_html(target_id, with_image),
+        None, reply_to=msg.message_id,
+    )
+    return True
+
+
+quick_cmds.profile_view = send_profile_view   # «проф» ответом на сообщение игрока (quick_cmds.py)
+
+
 # «я», «проф», «профиль» в группе открываются так же, как в личке: ответом на команду игрока,
 # дальше экран обновляется правкой на месте (см. quick_cmds.py, без кнопки «Перейти»).
 # «донат» и «кейс» в группе: текст раздела и кнопка «Перейти» (quick_cmds.py)
