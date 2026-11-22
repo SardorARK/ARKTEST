@@ -891,8 +891,8 @@ async def notify_due(bot) -> None:
         name = _mine_name(nt)
         texts = []
         for key, setting, text in (
-            ("done", "notify_mine_done", f"{_ug()} Шахта <b>{name}</b> завершила копание."),
-            ("rest", "notify_mine_rest", f"{_ug()} Шахта <b>{name}</b> отдохнула и готова к запуску."),
+            ("done", "notify_mine_done", f"<b>{_ug()} Шахта {name} завершила копание.</b>"),
+            ("rest", "notify_mine_rest", f"<b>{_ug()} Шахта {name} отдохнула и готова к запуску.</b>"),
         ):
             ts = nt.get(key) or 0
             if ts and ts <= now:
@@ -923,7 +923,7 @@ async def notify_new_mines(bot, uid: int, old_level: int, new_level: int) -> Non
         return
     head = "Открыта новая шахта" if len(names) == 1 else "Открыты новые шахты"
     try:
-        await bot.send_message(uid, f"{_ug()} {head}: <b>{', '.join(names)}</b>.")
+        await bot.send_message(uid, f"<b>{D.custom_emoji(LOCK_EMOJI)} {head}: {', '.join(names)}.</b>")
     except TelegramAPIError as e:
         log.warning("Шахта: не удалось сообщить игроку %s об открытой шахте: %s", uid, e)
 
