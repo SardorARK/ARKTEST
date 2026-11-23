@@ -84,6 +84,7 @@ import underground       # «Шахта» (underground.py): открываетс
 import period_stats      # статистика по периодам: команда «стата» (period_stats.py)
 import quick_cmds
 import friends
+import clan                # кланы (clan.py): кнопка «Клан» в меню, команда «клан»
 import tops              # раздел «Топ» (tops.py): команда «топ»
 import gift              # передача ресурсов игроку: «дать @ник» (gift.py)
 import transfer          # переводы: «перевести» (монеты) и «перечислить» (кристаллы), transfer.py
@@ -1181,7 +1182,7 @@ STOCK_BTN_EMOJI = ("5854908544712707500", "📦")  # кнопка «Запасы
 def menu_kb() -> InlineKeyboardMarkup:
     def btn(text: str, data: str, style: ButtonStyle, emoji_id: str) -> InlineKeyboardButton:
         return InlineKeyboardButton(
-            text=text, callback_data=data, style=style, icon_custom_emoji_id=emoji_id
+            text=text, callback_data=data, style=style, icon_custom_emoji_id=emoji_id or None
         )
 
     return InlineKeyboardMarkup(
@@ -1201,6 +1202,8 @@ def menu_kb() -> InlineKeyboardMarkup:
             ],
             # Достижения: 60 заданий в шести разделах, награды монетами, мясом и фруктами
             [btn("Достижения", "menu:ach", ButtonStyle.SUCCESS, ACH_EMOJI[0])],
+            # Кланы (clan.py): откроется экран создания или вступления, либо свой клан
+            [btn("Клан", "cl:home", ButtonStyle.PRIMARY, clan.EM_CLAN[0])],
             # Донат и Бонус (+10% к урону за юзернейм бота в описании): внизу меню в одном ряду
             [
                 btn("Донат", "menu:donate", ButtonStyle.PRIMARY, DONATE_EMOJI[0]),
@@ -1846,6 +1849,7 @@ IMG_TARGETS: dict[str, str] = {
     **arena.IMG_TARGETS,
     **achives.IMG_TARGETS,
     **friends.IMG_TARGETS,
+    **clan.IMG_TARGETS,
     **{key: pet["name"] for key, pet in PETS.items()},
 }
 
@@ -2257,6 +2261,24 @@ friends.setup(
     data_path=Path(__file__).with_name("friends.json"),
 )
 dp.include_router(friends.router)
+
+# Раздел «Клан» (clan.py): создание, заявки, казна, уровни, топ. Данные в clans.json рядом с ботом.
+# Роутер стоит до gift, чтобы ввод названия клана (FSM) обрабатывался раньше общих обработчиков.
+clan.setup(
+    get_user=get_user,
+    save_users=save_users,
+    show_rich_card=show_rich_card,
+    send_rich_card=send_rich_card,
+    custom_emoji=custom_emoji,
+    BACK_EMOJI_ID=BACK_EMOJI_ID,
+    player_level=player_level,
+    PLAYER_MAX_LEVEL=PLAYER_MAX_LEVEL,
+    fmt=lambda n: _fmt(n),
+    name_html_of=lambda uid: settings.public_name_html_by_id(uid),
+    name_plain_of=lambda uid: settings.public_name_plain_by_id(uid),
+    data_path=Path(__file__).with_name("clans.json"),
+)
+dp.include_router(clan.router)
 
 # Передача ресурсов другому игроку (gift.py): «дать» ответом на сообщение или «дать @ник».
 # Роутер стоит последним, чтобы ввод ника и другие состояния разделов обрабатывались раньше.
