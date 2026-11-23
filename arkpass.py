@@ -5,7 +5,7 @@
     (дата хранится в arkpass_state.json). Новый сезон = новые уровни с нуля, ARK+ покупается заново.
     Не забранные награды прошлого сезона сгорают, поэтому в тексте всегда видно, сколько осталось дней.
   * Прогресс: очки пасса (ОП). Источники: ежедневные и недельные задания (считаются сами: бои на арене,
-    победы, прокачка питомца, заход в пасс) и покупка уровней за кристаллы. У ARK+ все ОП на 20% больше.
+    победы, повышение уровня игрока, заход в пасс) и покупка уровней за кристаллы. У ARK+ все ОП на 20% больше.
   * Два трека наград на каждом из 60 уровней: бесплатный и ARK+ (цена ARK_PLUS_PRICE кристаллов, на сезон).
     Награды можно забрать позже: пока идёт сезон, купленный ARK+ открывает и уже пройденные уровни.
   * Всё работает и в личке, и в чате: команды «пасс», «аркпасс», «сезон» (см. quick_cmds.py), в чате раздел
@@ -194,14 +194,14 @@ DAILY = [
     {"id": "d_visit", "kind": "visit", "need": 1, "xp": 50, "name": "Загляни в ARK Pass"},
     {"id": "d_fight", "kind": "arena_fight", "need": 5, "xp": 70, "name": "Проведи 5 боёв на арене"},
     {"id": "d_win", "kind": "arena_win", "need": 3, "xp": 100, "name": "Выиграй 3 боя на арене"},
-    {"id": "d_up", "kind": "upgrade", "need": 1, "xp": 110, "name": "Прокачай питомца"},
+    {"id": "d_up", "kind": "upgrade", "need": 1, "xp": 110, "name": "Повысь уровень игрока"},
     {"id": "d_boss", "kind": "boss", "need": 1, "xp": 90, "name": "Ударь босса"},
     {"id": "d_mine", "kind": "mine", "need": 1, "xp": 60, "name": "Сходи в шахту"},
 ]
 WEEKLY = [
     {"id": "w_win", "kind": "arena_win", "need": 20, "xp": 400, "name": "Выиграй 20 боёв на арене"},
     {"id": "w_fight", "kind": "arena_fight", "need": 40, "xp": 300, "name": "Проведи 40 боёв на арене"},
-    {"id": "w_up", "kind": "upgrade", "need": 5, "xp": 500, "name": "Прокачай питомца 5 раз"},
+    {"id": "w_up", "kind": "upgrade", "need": 5, "xp": 500, "name": "Повысь уровень игрока 5 раз"},
     {"id": "w_boss", "kind": "boss", "need": 5, "xp": 500, "name": "Ударь боссов 5 раз"},
     {"id": "w_exp", "kind": "explore", "need": 3, "xp": 400, "name": "Отправь 3 экспедиции"},
 ]
@@ -469,22 +469,22 @@ def _progress(user: dict, st: dict, kind: str, n: int) -> int:
 
 
 def sync(user: dict, now: float | None = None) -> int:
-    """Подтягивает прогресс заданий из профиля (бои, победы, уровень питомца). Возвращает полученные ОП."""
+    """Подтягивает прогресс заданий из профиля (бои, победы, уровень игрока). Возвращает полученные ОП."""
     now = time.time() if now is None else now
     st = _state(user, now)
     _roll_quests(st, now)
     seen = st.setdefault("seen", {})
     cur = {}
-    for key, field in (("wins", "wins"), ("losses", "losses"), ("level", "level")):
+    for key, field in (("wins", "wins"), ("losses", "losses"), ("plevel", "plevel")):   # plevel: уровень игрока (не питомца)
         try:
-            cur[key] = int(user.get(field, 0) or 0)
+            cur[key] = int(user.get(field, 1 if field == "plevel" else 0) or 0)   # нет plevel = 1-й уровень
         except (TypeError, ValueError):
-            cur[key] = 0
+            cur[key] = 1 if field == "plevel" else 0
     gained = 0
     if all(k in seen for k in cur):
         dw = max(0, cur["wins"] - int(seen["wins"]))
         dl = max(0, cur["losses"] - int(seen["losses"]))
-        du = max(0, cur["level"] - int(seen["level"]))
+        du = max(0, cur["plevel"] - int(seen["plevel"]))
         gained += _progress(user, st, "arena_win", dw)
         gained += _progress(user, st, "arena_fight", dw + dl)
         gained += _progress(user, st, "upgrade", du)
