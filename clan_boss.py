@@ -12,10 +12,9 @@
     следующих боссов.
   * Бьют все участники клана: навыки питомца, «Ударить» и боезапас работают так же, как в «Босс».
     Откаты навыков и слоты боезапаса общие с обычными боссами (это те же данные игрока).
-  * Когда босс падает, награда делится двумя частями:
-      клану: монеты в казну, медали (нужны для улучшения клана) и очки рейтинга (clan.add_loot);
-      бойцам: монеты, мясо и фрукты по доле урона, плюс бонус тому, кто добил.
-    Награду получают только те, кто всё ещё в клане.
+  * Когда босс падает, ВСЯ награда уходит клану (clan.add_loot): монеты, мясо и фрукты в казну, медали и
+    очки рейтинга. Казна, мясо, фрукты и медали тратятся на улучшение клана. Бойцам лично награды нет,
+    за последний удар тоже. Бойцы получают сообщение о победе.
   * Клановые задания двигаются сами: boss_dmg, boss_kills, boss_hard (убит сложный босс), fighters.
   * Раз в минуту живой босс бьёт питомцев тех, кто бил именно его последнюю минуту (как у обычных боссов).
     Через respawn_min минут убитый босс возрождается.
@@ -74,45 +73,34 @@ IMG_TARGETS: dict[str, str] = {
 #   lvl         с какого уровня КЛАНА вид открыт (максимум у клана MAX_CLAN_LEVEL = 8)
 #   hp, def     здоровье и защита (обычный урон делится на 1 + защита/100, «пробивающее» её игнорирует)
 #   respawn_min через сколько минут после смерти босс возрождается
-#   clan        награда КЛАНУ: coins в казну, medals, points (очки рейтинга)
-#   reward      награда бойцам, делится по доле урона
-#   last        бонус тому, кто нанёс последний удар
+#   clan        вся награда за босса идёт КЛАНУ: coins, meat, fruit в казну, medals, points (очки рейтинга).
+#               Бойцам лично ничего не выдаётся, награды за последний удар нет
 # Цифры подобраны с запасом: меняй как нужно. Медали нужны для улучшения клана (clan.UPGRADE_MEDALS).
 CLAN_BOSS_TYPES: dict[str, dict] = {
     "normal": {
         "name": "Страж Ворот", "lvl": 1, "hp": 300_000, "def": 10, "respawn_min": 120,
         "story": "Сторожит подступы к вашей крепости. Для начала клана самое то: бейте всем отрядом.",
-        "clan": {"coins": 100_000, "medals": 15, "points": 50},
-        "reward": {"coins": 60_000, "meat": 300, "fruit": 300},
-        "last": {"coins": 6_000, "meat": 30, "fruit": 30},
+        "clan": {"coins": 160_000, "meat": 300, "fruit": 300, "medals": 15, "points": 50},
     },
     "hard": {
         "name": "Железный Тиран", "lvl": 2, "hp": 3_000_000, "def": 20, "respawn_min": 240,
         "story": "Закован в броню толщиной с ладонь. Одиночке он не по зубам, клану вполне.",
-        "clan": {"coins": 400_000, "medals": 40, "points": 150},
-        "reward": {"coins": 400_000, "meat": 2_000, "fruit": 2_000},
-        "last": {"coins": 40_000, "meat": 200, "fruit": 200},
+        "clan": {"coins": 800_000, "meat": 2_000, "fruit": 2_000, "medals": 40, "points": 150},
     },
     "insane": {
         "name": "Пожиратель Тронов", "lvl": 4, "hp": 30_000_000, "def": 35, "respawn_min": 480,
         "story": "Разрушил не одну крепость и вернулся за вашей. Нужен слаженный клан с прокачанными питомцами.",
-        "clan": {"coins": 2_000_000, "medals": 120, "points": 400},
-        "reward": {"coins": 3_000_000, "meat": 12_000, "fruit": 12_000},
-        "last": {"coins": 300_000, "meat": 1_200, "fruit": 1_200},
+        "clan": {"coins": 5_000_000, "meat": 12_000, "fruit": 12_000, "medals": 120, "points": 400},
     },
     "furious": {
         "name": "Владыка Осады", "lvl": 6, "hp": 300_000_000, "def": 50, "respawn_min": 720,
         "story": "Его армия давно пала, а ярость осталась. Он идёт сквозь стены, а не вокруг.",
-        "clan": {"coins": 10_000_000, "medals": 350, "points": 1_200},
-        "reward": {"coins": 30_000_000, "meat": 100_000, "fruit": 100_000},
-        "last": {"coins": 3_000_000, "meat": 10_000, "fruit": 10_000},
+        "clan": {"coins": 40_000_000, "meat": 100_000, "fruit": 100_000, "medals": 350, "points": 1200},
     },
     "impossible": {
         "name": "Падший Титан", "lvl": 8, "hp": 1_500_000_000, "def": 70, "respawn_min": 1440,
         "story": "Легенда клановых войн. Победить его может только сильнейший клан, и только вместе.",
-        "clan": {"coins": 50_000_000, "medals": 1_000, "points": 4_000},
-        "reward": {"coins": 150_000_000, "meat": 500_000, "fruit": 500_000},
-        "last": {"coins": 15_000_000, "meat": 50_000, "fruit": 50_000},
+        "clan": {"coins": 200_000_000, "meat": 500_000, "fruit": 500_000, "medals": 1000, "points": 4000},
     },
 }
 TYPE_ORDER = list(CLAN_BOSS_TYPES)
@@ -275,31 +263,13 @@ def strike_damage(user: dict, t: str, raw: float, pierce: float = 0.0, crit_chan
 
 # ---------- Награда ----------
 
-def _finish(c: dict, t: str, killer_name: str) -> dict[str, dict[str, int]]:
-    """Клановый босс убит: награда клану и бойцам, время возрождения.
-    Возвращает {user_id: {"coins", "meat", "fruit", "last"}} для тех, кто ещё в клане."""
+def _finish(c: dict, t: str, killer_name: str) -> list[str]:
+    """Клановый босс убит: вся награда в казну клана, время возрождения.
+    Возвращает id бойцов, которые ещё в клане (им придёт сообщение о победе)."""
     cid, cf, st = c["id"], CFG[t], _get(c["id"], t)
-    eligible = {u: d for u, d in st["dmg"].items() if u in c["members"]}
-    total = sum(eligible.values()) or 1
-    rewards: dict[str, dict[str, int]] = {}
+    fighters = [u for u in st["dmg"] if u in c["members"]]
 
-    for uid, dmg in eligible.items():
-        user = boss.D.get_user(int(uid))
-        if user is None:
-            continue
-        share = dmg / total
-        r = {k: max(1, round(cf["reward"][k] * share)) for k in ("coins", "meat", "fruit")}
-        r["last"] = 0
-        if uid == st.get("last_uid"):
-            for k in ("coins", "meat", "fruit"):
-                r[k] += cf["last"][k]
-            r["last"] = 1
-        user["coins"] += r["coins"]
-        user["meat"] += r["meat"]
-        user["fruit"] += r["fruit"]
-        rewards[uid] = r
-
-    clan.add_loot(c, **cf["clan"])                 # казна, медали, очки рейтинга
+    clan.add_loot(c, **cf["clan"])                 # монеты, мясо, фрукты в казну; медали; очки рейтинга
     clan.task_add(c, "boss_kills", 1)
     if t == "hard":
         clan.task_add(c, "boss_hard", 1)
@@ -312,7 +282,7 @@ def _finish(c: dict, t: str, killer_name: str) -> dict[str, dict[str, int]]:
     clan.save()
     boss.D.save_users()
     save_cboss()
-    return rewards
+    return fighters
 
 
 # ---------- Оформление ----------
@@ -343,29 +313,15 @@ def _tier_icon(t: str) -> str:
 
 
 def _clan_reward_trees(t: str) -> str:
-    cf = CFG[t]
-    clan_part = [
-        (f"{boss._coin()} Монеты в казну", boss.fmt(cf["clan"]["coins"])),
-        (f"{_medal()} Медали", str(cf["clan"]["medals"])),
-        (f"{_points()} Очки рейтинга", str(cf["clan"]["points"])),
+    cf = CFG[t]["clan"]
+    rows = [
+        (f"{boss._coin()} Монеты", boss.fmt(cf["coins"])),
+        ("🥩 Мясо", boss.fmt(cf["meat"])),
+        ("🥭 Фрукты", boss.fmt(cf["fruit"])),
+        (f"{_medal()} Медали", str(cf["medals"])),
+        (f"{_points()} Очки рейтинга", str(cf["points"])),
     ]
-    reward = [
-        (f"{boss._coin()} Монеты", boss.fmt(cf["reward"]["coins"])),
-        ("🥩 Мясо", boss.fmt(cf["reward"]["meat"])),
-        ("🥭 Фрукты", boss.fmt(cf["reward"]["fruit"])),
-    ]
-    last = [
-        (f"{boss._coin()} Монеты", f"+{boss.fmt(cf['last']['coins'])}"),
-        ("🥩 Мясо", f"+{boss.fmt(cf['last']['meat'])}"),
-        ("🥭 Фрукты", f"+{boss.fmt(cf['last']['fruit'])}"),
-    ]
-    return (
-        boss._tree(clan_part, f"{_em(boss.REWARD_EMOJI)} Награда клану")
-        + boss._dots()
-        + boss._tree(reward, f"{_em(boss.REWARD_EMOJI)} Награда бойцам (по доле урона)")
-        + boss._dots()
-        + boss._tree(last, f"{_em(boss.LAST_HIT_EMOJI)} Награда за последний удар")
-    )
+    return boss._tree(rows, f"{_em(boss.REWARD_EMOJI)} Награда клану (всё в казну)")
 
 
 def list_html(uid: int, wi: bool, c: dict) -> str:
@@ -880,23 +836,21 @@ async def _can_fight(cb: CallbackQuery, user: dict, st: dict) -> bool:
     return True
 
 
-async def _notify_rewards(bot, c: dict, t: str, rewards: dict[str, dict[str, int]], killer: str) -> None:
+async def _notify_rewards(bot, c: dict, t: str, fighters: list[str], killer: str) -> None:
     cf = CFG[t]
-    for uid, r in rewards.items():
-        text = (
-            f"<b>{boss._boss_icon()} Клан-босс «{escape(cf['name'])}» повержен!</b>\n\n"
-            f"<i>Клан «{escape(c['name'])}» справился. Последний удар нанёс {killer}.</i>\n"
-            f"<b>Твоя награда:</b> {boss._coin()} {boss.fmt(r['coins'])}  "
-            f"🥩 {boss.fmt(r['meat'])}  🥭 {boss.fmt(r['fruit'])}"
-        )
-        if r["last"]:
-            text += "\n<i>В том числе бонус за последний удар.</i>"
-        text += (f"\n<i>Клану: {boss.fmt(cf['clan']['coins'])} монет в казну, "
-                 f"{cf['clan']['medals']} медалей, {cf['clan']['points']} очков.</i>")
+    cl = cf["clan"]
+    text = (
+        f"<b>{boss._boss_icon()} Клан-босс «{escape(cf['name'])}» повержен!</b>\n\n"
+        f"<i>Клан «{escape(c['name'])}» справился. Последний удар нанёс {killer}.</i>\n"
+        f"<b>В казну клана:</b> {boss._coin()} {boss.fmt(cl['coins'])}  "
+        f"🥩 {boss.fmt(cl['meat'])}  🥭 {boss.fmt(cl['fruit'])}\n"
+        f"<i>Клану также: {cl['medals']} медалей, {cl['points']} очков рейтинга.</i>"
+    )
+    for uid in fighters:
         try:
             await bot.send_message(int(uid), text)
         except Exception as e:                        # игрок мог заблокировать бота
-            log.warning("Не удалось отправить награду %s: %s", uid, e)
+            log.warning("Не удалось отправить сообщение о победе %s: %s", uid, e)
         await asyncio.sleep(0.05)
 
 
@@ -932,9 +886,9 @@ async def _deal(cb: CallbackQuery, user: dict, c: dict, t: str, total: int, labe
     if st["hp"] <= 0:
         st["hp"] = 0
         feed_push(cid, t, "kill", uid, name)
-        rewards = _finish(c, t, name)
-        await cb.answer(text + ". Босс повержен!", show_alert=True)
-        asyncio.create_task(_notify_rewards(cb.bot, c, t, rewards, boss.who_html(uid, name)))
+        fighters = _finish(c, t, name)
+        await cb.answer(text + ". Босс повержен! Награда ушла в казну клана.", show_alert=True)
+        asyncio.create_task(_notify_rewards(cb.bot, c, t, fighters, boss.who_html(uid, name)))
     else:
         _save_soon()
         await cb.answer(text)
