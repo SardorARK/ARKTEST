@@ -87,9 +87,14 @@ MAX_CLAN_LEVEL = 8
 MEMBER_CAP = {lv: 5 + 5 * lv for lv in range(1, MAX_CLAN_LEVEL + 1)}      # 10, 15, ... 45
 UPGRADE_COST = {1: 100_000, 2: 300_000, 3: 700_000, 4: 1_500_000,
                 5: 3_000_000, 6: 6_000_000, 7: 12_000_000}                 # цена перехода с уровня N на N+1
-# Для перехода с уровня N на N+1 нужно всё сразу: монеты в казне, медали клана и минимум участников.
-# Монеты и медали при улучшении тратятся. Цифры выше 2 уровня подобраны с запасом, меняй как нужно.
-UPGRADE_MEDALS = {1: 150, 2: 400, 3: 800, 4: 1_400, 5: 2_200, 6: 3_200, 7: 4_500}
+# Для перехода с уровня N на N+1 нужно всё сразу: монеты, минералы, мясо и фрукты в казне, медали клана
+# (они не тратятся) и минимум участников. Цифры выше 2 уровня подобраны с запасом, меняй как нужно.
+# Медали при улучшении НЕ тратятся: нужно просто иметь столько (переход 1→2: 500, 7→8: 25 000).
+UPGRADE_MEDALS = {1: 500, 2: 1_000, 3: 2_000, 4: 3_500, 5: 7_000, 6: 13_000, 7: 25_000}
+# Минералы вносят игроки в казну клана (кнопки «Минералы» в казне), при улучшении они тратятся.
+UPGRADE_MINERALS = {1: 500_000, 2: 1_500_000, 3: 5_000_000, 4: 15_000_000,
+                    5: 35_000_000, 6: 85_000_000, 7: 150_000_000}
+MINERAL_DONATE_STEPS = (10_000, 100_000, 1_000_000, 10_000_000)
 # Мясо и фрукты тоже падают в казну с клановых боссов и тратятся на улучшение (поставь 0, чтобы не требовать).
 UPGRADE_MEAT = {1: 1_000, 2: 3_000, 3: 8_000, 4: 20_000, 5: 50_000, 6: 120_000, 7: 300_000}
 UPGRADE_FRUIT = {1: 1_000, 2: 3_000, 3: 8_000, 4: 20_000, 5: 50_000, 6: 120_000, 7: 300_000}
@@ -117,7 +122,7 @@ EM_LEADER = ("", "👑")
 EM_DEPUTY = ("", "🛡")
 EM_MEMBER = ("", "👤")
 EM_COINS = ("", "🪙")
-EM_POINTS = ("", "🏆")
+EM_POINTS = ("", "⚜️")
 EM_OK = ("", "✅")
 EM_MEDAL = ("", "🎖")
 EM_TASK = ("", "📜")
@@ -130,6 +135,7 @@ ROLE_EMOJI = {"leader": EM_LEADER, "deputy": EM_DEPUTY, "member": EM_MEMBER}
 _get_user = _save_users = _show_rich_card = _send_rich_card = _custom_emoji = None
 _player_level = _fmt_fn = _name_html_of = _name_plain_of = None
 _BACK_ID: str | None = None
+_MIN_FIELD, _MIN_EMOJI = "minerals", "🏜"
 _PLAYER_MAX = 500
 _PATH: Path | None = None
 _DATA: dict = {"next": 1, "clans": {}}
@@ -137,7 +143,9 @@ _DATA: dict = {"next": 1, "clans": {}}
 
 def setup(*, get_user, save_users, show_rich_card, send_rich_card, custom_emoji, BACK_EMOJI_ID,
           player_level, PLAYER_MAX_LEVEL=500, fmt=None, name_html_of=None, name_plain_of=None,
-          data_path=None, **_ignored) -> None:
+          data_path=None, MINERALS_FIELD="minerals", MINERAL_EMOJI="🏜", **_ignored) -> None:
+    global _MIN_FIELD, _MIN_EMOJI
+    _MIN_FIELD, _MIN_EMOJI = MINERALS_FIELD, MINERAL_EMOJI
     global _get_user, _save_users, _show_rich_card, _send_rich_card, _custom_emoji, _BACK_ID
     global _player_level, _fmt_fn, _name_html_of, _name_plain_of, _PLAYER_MAX, _PATH
     _get_user, _save_users = get_user, save_users
@@ -317,7 +325,7 @@ def create_clan(uid: int, name: str) -> tuple[bool, str]:
     _DATA["next"] += 1
     clan = {"id": cid, "name": name, "desc": "", "leader": str(uid), "deputy": None,
             "members": {str(uid): time.time()}, "requests": {}, "join": "request", "min_level": 1,
-            "level": 1, "treasury": 0, "meat": 0, "fruit": 0, "medals": 0, "points": 0, "created": time.time(), "contrib": {}, "tasks": {},
+            "level": 1, "treasury": 0, "minerals": 0, "contrib_min": {}, "meat": 0, "fruit": 0, "medals": 0, "points": 0, "created": time.time(), "contrib": {}, "tasks": {},
             "log": [], "ann_at": 0}
     _DATA["clans"][cid] = clan
     user["clan"] = cid
@@ -510,6 +518,25 @@ def donate(uid: int, amount: int) -> tuple[bool, str]:
     return True, f"В казну внесено {_n(amount)}."
 
 
+def donate_minerals(uid: int, amount: int) -> tuple[bool, str]:
+    user, c = _my(uid)
+    if c is None:
+        return False, "Ты не в клане."
+    amount = int(amount)
+    have = int(user.get(_MIN_FIELD, 0) or 0)
+    if amount <= 0 or have < amount:
+        return False, f"Не хватает минералов: нужно {_n(amount)}, у тебя {_n(have)}."
+    user[_MIN_FIELD] = have - amount
+    c["minerals"] = int(c.get("minerals", 0)) + amount
+    cm = c.setdefault("contrib_min", {})
+    cm[str(uid)] = int(cm.get(str(uid), 0)) + amount
+    _log(c, f"{_pname(uid)} внёс {_n(amount)} минералов")
+    _save()
+    _save_users()
+    _led("clan_donate_minerals", user=uid, clan=c["id"], amount=amount)
+    return True, f"В казну внесено минералов: {_n(amount)}."
+
+
 def upgrade(actor: int) -> tuple[bool, str]:
     _u, c = _my(actor)
     if c is None or c["leader"] != str(actor):
@@ -519,12 +546,15 @@ def upgrade(actor: int) -> tuple[bool, str]:
         return False, "У клана максимальный уровень."
     cost, need_medals, need_members = UPGRADE_COST[lvl], UPGRADE_MEDALS[lvl], UPGRADE_MEMBERS[lvl]
     need_meat, need_fruit = UPGRADE_MEAT.get(lvl, 0), UPGRADE_FRUIT.get(lvl, 0)
+    need_min = UPGRADE_MINERALS.get(lvl, 0)
     if len(c["members"]) < need_members:
         return False, f"Мало участников: нужно {need_members}, в клане {len(c['members'])}."
     if int(c.get("medals", 0)) < need_medals:
         return False, f"Не хватает медалей: нужно {_n(need_medals)}, у клана {_n(c.get('medals', 0))}."
     if c["treasury"] < cost:
         return False, f"В казне не хватает монет: нужно {_n(cost)}, там {_n(c['treasury'])}."
+    if int(c.get("minerals", 0)) < need_min:
+        return False, f"В казне не хватает минералов: нужно {_n(need_min)}, там {_n(c.get('minerals', 0))}."
     if int(c.get("meat", 0)) < need_meat:
         return False, f"В казне не хватает мяса: нужно {_n(need_meat)}, там {_n(c.get('meat', 0))}."
     if int(c.get("fruit", 0)) < need_fruit:
@@ -532,11 +562,11 @@ def upgrade(actor: int) -> tuple[bool, str]:
     c["treasury"] -= cost
     c["meat"] = int(c.get("meat", 0)) - need_meat
     c["fruit"] = int(c.get("fruit", 0)) - need_fruit
-    c["medals"] = int(c.get("medals", 0)) - need_medals
+    c["minerals"] = int(c.get("minerals", 0)) - need_min      # медали не тратятся
     c["level"] = lvl + 1
     _log(c, f"Клан достиг {lvl + 1} уровня")
     _save()
-    _led("clan_upgrade", user=actor, clan=c["id"], level=lvl + 1, cost=cost, medals=need_medals,
+    _led("clan_upgrade", user=actor, clan=c["id"], level=lvl + 1, cost=cost, minerals=need_min,
          meat=need_meat, fruit=need_fruit)
     return True, f"Клан теперь {lvl + 1} уровня. Мест: {_cap(c)}."
 
@@ -704,6 +734,7 @@ def clan_html(c: dict, uid: int, wi: bool = False, note: str = "") -> str:
         f"Уровень клана: <b>{c['level']}/{MAX_CLAN_LEVEL}</b>",
         f"{_e(EM_COINS)} Казна: <b>{_n(c['treasury'])}</b>"
         + (f" · до улучшения {_n(max(0, cost - c['treasury']))}" if cost else ""),
+        f"{_MIN_EMOJI} Минералы: <b>{_n(c.get('minerals', 0))}</b>",
         f"🥩 Мясо: <b>{_n(c.get('meat', 0))}</b> · 🥭 Фрукты: <b>{_n(c.get('fruit', 0))}</b>",
         f"{_e(EM_POINTS)} Очки: <b>{_n(c['points'])}</b> · место <b>{_rank_of(c)}</b>",
         f"{_e(EM_MEDAL)} Медали: <b>{_n(c.get('medals', 0))}</b>",
@@ -839,14 +870,23 @@ def requests_screen(c: dict):
 
 
 def donate_screen(c: dict, user: dict):
-    html = card(f"{_e(EM_COINS)} КАЗНА КЛАНА", f"За каждые {_n(COINS_PER_POINT)} монет клан получает очко рейтинга.",
+    me = str(_uid_of(user))
+    have_min = int(user.get(_MIN_FIELD, 0) or 0)
+    html = card(f"{_e(EM_COINS)} КАЗНА КЛАНА",
+                f"За каждые {_n(COINS_PER_POINT)} монет клан получает очко рейтинга. "
+                "Минералы нужны для улучшения клана.",
                 _tree("Сейчас", [f"В казне: <b>{_n(c['treasury'])}</b> {_e(EM_COINS)}",
+                                 f"{_MIN_EMOJI} Минералы: <b>{_n(c.get('minerals', 0))}</b>",
                                  f"🥩 Мясо: <b>{_n(c.get('meat', 0))}</b> · 🥭 Фрукты: <b>{_n(c.get('fruit', 0))}</b>",
-                                 f"Твой вклад: <b>{_n(c['contrib'].get(str(_uid_of(user)), 0))}</b>",
-                                 f"У тебя: <b>{_n(user['coins'])}</b> {_e(EM_COINS)}"]))
+                                 f"Твой вклад монетами: <b>{_n(c['contrib'].get(me, 0))}</b>",
+                                 f"Твой вклад минералами: <b>{_n(c.get('contrib_min', {}).get(me, 0))}</b>",
+                                 f"У тебя: <b>{_n(user['coins'])}</b> {_e(EM_COINS)} · "
+                                 f"<b>{_n(have_min)}</b> {_MIN_EMOJI}"]))
     btns = [_btn(f"+{_n(a)}", f"cl:dg:{a}", ButtonStyle.SUCCESS if user["coins"] >= a else ButtonStyle.DANGER)
             for a in DONATE_STEPS]
-    return html, _kb(btns[:2], btns[2:], [_back()])
+    mbtns = [_btn(f"{_MIN_EMOJI} +{_n(a)}", f"cl:dm:{a}",
+                  ButtonStyle.SUCCESS if have_min >= a else ButtonStyle.DANGER) for a in MINERAL_DONATE_STEPS]
+    return html, _kb(btns[:2], btns[2:], mbtns[:2], mbtns[2:], [_back()])
 
 
 def _uid_of(user: dict) -> str:
@@ -861,19 +901,22 @@ def upgrade_screen(c: dict):
         return card(f"{_e(EM_CLAN)} УЛУЧШЕНИЕ", "У клана максимальный уровень."), _kb([_back()])
     cost, need_medals, need_members = UPGRADE_COST[lvl], UPGRADE_MEDALS[lvl], UPGRADE_MEMBERS[lvl]
     need_meat, need_fruit = UPGRADE_MEAT.get(lvl, 0), UPGRADE_FRUIT.get(lvl, 0)
+    need_min, have_min = UPGRADE_MINERALS.get(lvl, 0), int(c.get("minerals", 0))
     have_medals, members = int(c.get("medals", 0)), len(c["members"])
     have_meat, have_fruit = int(c.get("meat", 0)), int(c.get("fruit", 0))
     checks = [c["treasury"] >= cost, have_medals >= need_medals, members >= need_members,
-              have_meat >= need_meat, have_fruit >= need_fruit]
+              have_meat >= need_meat, have_fruit >= need_fruit, have_min >= need_min]
 
     def mark(ok: bool) -> str:
         return "✅" if ok else "❌"
 
     html = card(f"{_e(EM_CLAN)} УЛУЧШЕНИЕ КЛАНА",
-                "Нужно всё сразу. Монеты, мясо, фрукты и медали при улучшении тратятся. Всё это дают клановые боссы и задания.",
+                "Нужно всё сразу. Монеты, минералы, мясо и фрукты при улучшении тратятся, медали не тратятся: "
+                "нужно просто иметь столько. Минералы вносят участники, остальное дают клановые боссы и задания.",
                 _tree(f"Уровень {lvl} → {lvl + 1}", [
                     f"{mark(checks[0])} Монеты в казне: <b>{_n(c['treasury'])}/{_n(cost)}</b> {_e(EM_COINS)}",
-                    f"{mark(checks[1])} Медали: <b>{_n(have_medals)}/{_n(need_medals)}</b> {_e(EM_MEDAL)}",
+                    f"{mark(checks[5])} Минералы в казне: <b>{_n(have_min)}/{_n(need_min)}</b> {_MIN_EMOJI}",
+                    f"{mark(checks[1])} Медали (не тратятся): <b>{_n(have_medals)}/{_n(need_medals)}</b> {_e(EM_MEDAL)}",
                     f"{mark(checks[3])} Мясо в казне: <b>{_n(have_meat)}/{_n(need_meat)}</b> 🥩",
                     f"{mark(checks[4])} Фрукты в казне: <b>{_n(have_fruit)}/{_n(need_fruit)}</b> 🥭",
                     f"{mark(checks[2])} Участники: <b>{members}/{need_members}</b>",
@@ -1113,6 +1156,21 @@ async def on_cb(cb: CallbackQuery, state: FSMContext):
         if await need_clan():
             return
         ok, msg = donate(uid, int(arg))
+        if not ok:
+            await alert(msg)
+            return
+        await cb.answer(msg)
+        user["_uid"] = str(uid)
+        try:
+            screen = donate_screen(c, user)
+        finally:
+            user.pop("_uid", None)
+        await _show(cb, screen)
+        return
+    if act == "dm":
+        if await need_clan():
+            return
+        ok, msg = donate_minerals(uid, int(arg))
         if not ok:
             await alert(msg)
             return
