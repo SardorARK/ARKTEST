@@ -2278,6 +2278,8 @@ clan.setup(
     fmt=lambda n: _fmt(n),
     name_html_of=lambda uid: settings.public_name_html_by_id(uid),
     name_plain_of=lambda uid: settings.public_name_plain_by_id(uid),
+    MINERALS_FIELD=MINERALS_FIELD,
+    MINERAL_EMOJI=MINERAL_EMOJI,
     data_path=Path(__file__).with_name("clans.json"),
 )
 dp.include_router(clan.router)
