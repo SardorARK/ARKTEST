@@ -35,14 +35,17 @@
     # и в словарь IMG_TARGETS: **clan.IMG_TARGETS
 
 Для других разделов: clan.add_points(user_id, n) даёт клану очки (например, за победу на арене),
-clan.clan_name_html(user) возвращает название клана игрока или "" (для профиля), clan.disband_clan(id) для админа.
+clan.clan_name_html(user) возвращает название клана игрока или "" (для профиля), clan.disband_clan(id) для админа,
+clan.add_loot(клан, монеты, медали, очки) и clan.task_add(клан, вид, n, uid) для клановых боссов (clan_boss.py).
 Игрок открывает раздел сообщением «клан» (или /clan) либо кнопкой с callback_data="cl:home".
 """
 
 from __future__ import annotations
 
 import asyncio
+import datetime
 import logging
+import random
 import re
 import time
 from html import escape
@@ -84,6 +87,22 @@ MAX_CLAN_LEVEL = 8
 MEMBER_CAP = {lv: 5 + 5 * lv for lv in range(1, MAX_CLAN_LEVEL + 1)}      # 10, 15, ... 45
 UPGRADE_COST = {1: 100_000, 2: 300_000, 3: 700_000, 4: 1_500_000,
                 5: 3_000_000, 6: 6_000_000, 7: 12_000_000}                 # цена перехода с уровня N на N+1
+# Для перехода с уровня N на N+1 нужно всё сразу: монеты в казне, медали клана и минимум участников.
+# Монеты и медали при улучшении тратятся. Цифры выше 2 уровня подобраны с запасом, меняй как нужно.
+UPGRADE_MEDALS = {1: 150, 2: 400, 3: 800, 4: 1_400, 5: 2_200, 6: 3_200, 7: 4_500}
+UPGRADE_MEMBERS = {1: 5, 2: 8, 3: 11, 4: 15, 5: 20, 6: 26, 7: 32}     # не больше мест на текущем уровне
+
+# Клановые задания: каждый день у клана 3 задания из пула. Прогресс общий на весь клан.
+# Награда (медали, очки клана, монеты) идёт клану: монеты в казну. unique: считаются разные участники.
+TASK_PER_DAY = 3
+TASK_POOL: dict[str, dict] = {
+    "donate": {"title": "Внести в казну монет: {n}", "target": 50_000, "medals": 5, "points": 20, "coins": 10_000},
+    "boss_kills": {"title": "Победить клановых боссов: {n}", "target": 3, "medals": 10, "points": 30, "coins": 25_000},
+    "boss_hard": {"title": "Победить сложного клан-босса: {n}", "target": 1, "medals": 12, "points": 40, "coins": 50_000},
+    "boss_dmg": {"title": "Нанести клановым боссам урона: {n}", "target": 500_000, "medals": 8, "points": 25, "coins": 20_000},
+    "fighters": {"title": "Разных бойцов у клановых боссов: {n}", "target": 3, "medals": 6, "points": 20,
+                 "coins": 10_000, "unique": True},
+}
 JOIN_MODES = ("open", "request", "closed")
 JOIN_TITLES = {"open": "открытый", "request": "по заявкам", "closed": "закрытый"}
 RESERVED_BUTTONS = ("Меню", "Арена", "Рынок", "Настройки", "Заработать", "Мастерская", "Друзья")
@@ -97,6 +116,8 @@ EM_MEMBER = ("", "👤")
 EM_COINS = ("", "🪙")
 EM_POINTS = ("", "🏆")
 EM_OK = ("", "✅")
+EM_MEDAL = ("", "🎖")
+EM_TASK = ("", "📜")
 
 ROLE_TITLES = {"leader": "Лидер", "deputy": "Заместитель", "member": "Участник"}
 ROLE_EMOJI = {"leader": EM_LEADER, "deputy": EM_DEPUTY, "member": EM_MEMBER}
@@ -293,7 +314,7 @@ def create_clan(uid: int, name: str) -> tuple[bool, str]:
     _DATA["next"] += 1
     clan = {"id": cid, "name": name, "desc": "", "leader": str(uid), "deputy": None,
             "members": {str(uid): time.time()}, "requests": {}, "join": "request", "min_level": 1,
-            "level": 1, "treasury": 0, "points": 0, "created": time.time(), "contrib": {},
+            "level": 1, "treasury": 0, "medals": 0, "points": 0, "created": time.time(), "contrib": {}, "tasks": {},
             "log": [], "ann_at": 0}
     _DATA["clans"][cid] = clan
     user["clan"] = cid
@@ -478,6 +499,7 @@ def donate(uid: int, amount: int) -> tuple[bool, str]:
     c["treasury"] += amount
     c["contrib"][str(uid)] = int(c["contrib"].get(str(uid), 0)) + amount
     c["points"] += amount // COINS_PER_POINT
+    task_add(c, "donate", amount, uid)
     _log(c, f"{_pname(uid)} внёс {_n(amount)} монет")
     _save()
     _save_users()
@@ -492,14 +514,19 @@ def upgrade(actor: int) -> tuple[bool, str]:
     lvl = int(c["level"])
     if lvl >= MAX_CLAN_LEVEL:
         return False, "У клана максимальный уровень."
-    cost = UPGRADE_COST[lvl]
+    cost, need_medals, need_members = UPGRADE_COST[lvl], UPGRADE_MEDALS[lvl], UPGRADE_MEMBERS[lvl]
+    if len(c["members"]) < need_members:
+        return False, f"Мало участников: нужно {need_members}, в клане {len(c['members'])}."
+    if int(c.get("medals", 0)) < need_medals:
+        return False, f"Не хватает медалей: нужно {_n(need_medals)}, у клана {_n(c.get('medals', 0))}."
     if c["treasury"] < cost:
         return False, f"В казне не хватает монет: нужно {_n(cost)}, там {_n(c['treasury'])}."
     c["treasury"] -= cost
+    c["medals"] = int(c.get("medals", 0)) - need_medals
     c["level"] = lvl + 1
     _log(c, f"Клан достиг {lvl + 1} уровня")
     _save()
-    _led("clan_upgrade", user=actor, clan=c["id"], level=lvl + 1, cost=cost)
+    _led("clan_upgrade", user=actor, clan=c["id"], level=lvl + 1, cost=cost, medals=need_medals)
     return True, f"Клан теперь {lvl + 1} уровня. Мест: {_cap(c)}."
 
 
@@ -509,6 +536,95 @@ def add_points(user_id: int, n: int) -> None:
     if c is not None and n > 0:
         c["points"] += int(n)
         _save()
+
+
+def add_loot(c: dict, coins: int = 0, medals: int = 0, points: int = 0) -> None:
+    """Награда клану: монеты в казну, медали, очки рейтинга. Сохранение остаётся за вызывающим."""
+    c["treasury"] = int(c.get("treasury", 0)) + max(0, int(coins))
+    c["medals"] = int(c.get("medals", 0)) + max(0, int(medals))
+    c["points"] = int(c.get("points", 0)) + max(0, int(points))
+
+
+# ---------- Клановые задания ----------
+
+def _tasks(c: dict) -> dict:
+    """Задания клана на сегодня. На новый день набор меняется (по дате сервера)."""
+    day = datetime.date.today().isoformat()
+    t = c.get("tasks")
+    if not isinstance(t, dict) or t.get("day") != day or not t.get("items"):
+        kinds = random.sample(list(TASK_POOL), TASK_PER_DAY)
+        t = {"day": day, "items": [{"k": k, "n": 0, "done": False, "who": []} for k in kinds]}
+        c["tasks"] = t
+    return t
+
+
+def task_add(c: dict, kind: str, n: int = 1, uid=None) -> list[str]:
+    """Двигает прогресс задания клана. kind: donate, boss_kills, boss_hard, boss_dmg, fighters (uid обязателен).
+    Награду за выполненное задание выдаёт сама. Возвращает названия заданий, выполненных сейчас.
+    Сохранение остаётся за вызывающим."""
+    spec = TASK_POOL.get(kind)
+    if spec is None or int(n) <= 0 and not spec.get("unique"):
+        return []
+    done_now: list[str] = []
+    for it in _tasks(c)["items"]:
+        if it["k"] != kind or it["done"]:
+            continue
+        if spec.get("unique"):
+            if uid is None or str(uid) in it["who"]:
+                continue
+            it["who"].append(str(uid))
+            it["n"] = len(it["who"])
+        else:
+            it["n"] = min(spec["target"], int(it["n"]) + int(n))
+        if it["n"] >= spec["target"]:
+            it["done"] = True
+            add_loot(c, spec["coins"], spec["medals"], spec["points"])
+            title = spec["title"].format(n=_n(spec["target"]))
+            _log(c, f"Задание выполнено: {title}")
+            done_now.append(title)
+    return done_now
+
+
+def tasks_screen(c: dict):
+    t = _tasks(c)
+    body = ""
+    for it in t["items"]:
+        spec = TASK_POOL[it["k"]]
+        mark = "✅" if it["done"] else "▫️"
+        title = spec["title"].format(n=_n(spec["target"]))
+        body += _tree(f"{mark} {title}", [
+            f"Прогресс: <b>{_n(it['n'])}/{_n(spec['target'])}</b>",
+            f"Награда: {_e(EM_MEDAL)} <b>{spec['medals']}</b> · {_e(EM_POINTS)} <b>{spec['points']}</b> · "
+            f"{_e(EM_COINS)} <b>{_n(spec['coins'])}</b> в казну"])
+    html = card(f"{_e(EM_TASK)} ЗАДАНИЯ КЛАНА", "Выполняет весь клан вместе. Новые задания каждый день.", body)
+    return html, _kb([_back()])
+
+
+# ---------- Для других модулей (clan_boss.py) ----------
+
+def of_user(uid) -> tuple[dict | None, dict | None]:
+    """(игрок, его клан) или (None/игрок, None)."""
+    return _my(int(uid))
+
+
+def save() -> None:
+    _save()
+
+
+def log_event(c: dict, text: str) -> None:
+    _log(c, text)
+
+
+def all_clans() -> list[dict]:
+    return list(_DATA["clans"].values())
+
+
+def player_name(uid) -> str:
+    return _pname(uid)
+
+
+async def show_card(cb: CallbackQuery, key: str, html_fn, kb) -> None:
+    await _show_rich_card(cb, key, html_fn, kb)
 
 
 # ---------- Оформление ----------
@@ -576,6 +692,7 @@ def clan_html(c: dict, uid: int, wi: bool = False, note: str = "") -> str:
         f"{_e(EM_COINS)} Казна: <b>{_n(c['treasury'])}</b>"
         + (f" · до улучшения {_n(max(0, cost - c['treasury']))}" if cost else ""),
         f"{_e(EM_POINTS)} Очки: <b>{_n(c['points'])}</b> · место <b>{_rank_of(c)}</b>",
+        f"{_e(EM_MEDAL)} Медали: <b>{_n(c.get('medals', 0))}</b>",
     ]
     return (
         f"{_img(wi)}<p><b>{_e(EM_CLAN)} {escape(c['name'])}</b> · ты: <i>{ROLE_TITLES[role].lower()}</i></p>"
@@ -596,6 +713,7 @@ def clan_kb(c: dict, uid: int) -> InlineKeyboardMarkup:
                      _btn("Объявление", "cl:ann")])
     if role == "leader":
         rows.append([_btn("Улучшить клан", "cl:up", ButtonStyle.SUCCESS), _btn("Настройки", "cl:set")])
+    rows.append([_btn("Боссы", "cb:open", ButtonStyle.SUCCESS), _btn("Задания", "cl:tsk")])
     rows.append([_btn("Топ кланов", "cl:top:0"), _btn("События", "cl:log")])
     rows.append([_btn("Распустить клан", "cl:ds", ButtonStyle.DANGER) if role == "leader"
                  else _btn("Покинуть клан", "cl:lv", ButtonStyle.DANGER)])
@@ -726,13 +844,22 @@ def upgrade_screen(c: dict):
     lvl = int(c["level"])
     if lvl >= MAX_CLAN_LEVEL:
         return card(f"{_e(EM_CLAN)} УЛУЧШЕНИЕ", "У клана максимальный уровень."), _kb([_back()])
-    cost = UPGRADE_COST[lvl]
-    ok = c["treasury"] >= cost
-    html = card(f"{_e(EM_CLAN)} УЛУЧШЕНИЕ КЛАНА", "Улучшение тратит монеты из казны и добавляет места.",
-                _tree(f"Уровень {lvl} → {lvl + 1}", [f"Цена: <b>{_n(cost)}</b> {_e(EM_COINS)}",
-                                                    f"В казне: <b>{_n(c['treasury'])}</b>",
-                                                    f"Мест будет: <b>{MEMBER_CAP[lvl + 1]}</b> (сейчас {_cap(c)})"]))
-    return html, _kb([_btn("Улучшить", "cl:upgo", ButtonStyle.SUCCESS if ok else ButtonStyle.DANGER)], [_back()])
+    cost, need_medals, need_members = UPGRADE_COST[lvl], UPGRADE_MEDALS[lvl], UPGRADE_MEMBERS[lvl]
+    have_medals, members = int(c.get("medals", 0)), len(c["members"])
+    checks = [c["treasury"] >= cost, have_medals >= need_medals, members >= need_members]
+
+    def mark(ok: bool) -> str:
+        return "✅" if ok else "❌"
+
+    html = card(f"{_e(EM_CLAN)} УЛУЧШЕНИЕ КЛАНА",
+                "Нужно всё сразу. Монеты и медали при улучшении тратятся. Медали дают клановые боссы и задания.",
+                _tree(f"Уровень {lvl} → {lvl + 1}", [
+                    f"{mark(checks[0])} Монеты в казне: <b>{_n(c['treasury'])}/{_n(cost)}</b> {_e(EM_COINS)}",
+                    f"{mark(checks[1])} Медали: <b>{_n(have_medals)}/{_n(need_medals)}</b> {_e(EM_MEDAL)}",
+                    f"{mark(checks[2])} Участники: <b>{members}/{need_members}</b>",
+                    f"Мест будет: <b>{MEMBER_CAP[lvl + 1]}</b> (сейчас {_cap(c)})"]))
+    return html, _kb([_btn("Улучшить", "cl:upgo", ButtonStyle.SUCCESS if all(checks) else ButtonStyle.DANGER)],
+                     [_back()])
 
 
 def settings_screen(c: dict):
@@ -1105,6 +1232,13 @@ async def on_cb(cb: CallbackQuery, state: FSMContext):
         await cb.answer(msg, show_alert=True)
         if ok:
             await _show(cb, upgrade_screen(c))
+        return
+    if act == "tsk":
+        if await need_clan():
+            return
+        await cb.answer()
+        await _show(cb, tasks_screen(c))
+        _save()      # набор заданий на новый день создаётся при открытии: сохраняем
         return
     if act == "set":
         await cb.answer()
