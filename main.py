@@ -85,6 +85,7 @@ import period_stats      # статистика по периодам: кома�
 import quick_cmds
 import friends
 import clan                # кланы (clan.py): кнопка «Клан» в меню, команда «клан»
+import clan_boss           # клановые боссы (clan_boss.py): кнопка «Боссы» в меню клана
 import tops              # раздел «Топ» (tops.py): команда «топ»
 import gift              # передача ресурсов игроку: «дать @ник» (gift.py)
 import transfer          # переводы: «перевести» (монеты) и «перечислить» (кристаллы), transfer.py
@@ -1850,6 +1851,7 @@ IMG_TARGETS: dict[str, str] = {
     **achives.IMG_TARGETS,
     **friends.IMG_TARGETS,
     **clan.IMG_TARGETS,
+    **clan_boss.IMG_TARGETS,
     **{key: pet["name"] for key, pet in PETS.items()},
 }
 
@@ -2279,6 +2281,7 @@ clan.setup(
     data_path=Path(__file__).with_name("clans.json"),
 )
 dp.include_router(clan.router)
+dp.include_router(clan_boss.router)   # клановые боссы: сразу после роутера клана
 
 # Передача ресурсов другому игроку (gift.py): «дать» ответом на сообщение или «дать @ник».
 # Роутер стоит последним, чтобы ввод ника и другие состояния разделов обрабатывались раньше.
