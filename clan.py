@@ -36,7 +36,7 @@
 
 Для других разделов: clan.add_points(user_id, n) даёт клану очки (например, за победу на арене),
 clan.clan_name_html(user) возвращает название клана игрока или "" (для профиля), clan.disband_clan(id) для админа,
-clan.add_loot(клан, монеты, медали, очки) и clan.task_add(клан, вид, n, uid) для клановых боссов (clan_boss.py).
+clan.add_loot(клан, монеты, медали, очки, мясо, фрукты) и clan.task_add(клан, вид, n, uid) для клановых боссов (clan_boss.py).
 Игрок открывает раздел сообщением «клан» (или /clan) либо кнопкой с callback_data="cl:home".
 """
 
@@ -90,6 +90,9 @@ UPGRADE_COST = {1: 100_000, 2: 300_000, 3: 700_000, 4: 1_500_000,
 # Для перехода с уровня N на N+1 нужно всё сразу: монеты в казне, медали клана и минимум участников.
 # Монеты и медали при улучшении тратятся. Цифры выше 2 уровня подобраны с запасом, меняй как нужно.
 UPGRADE_MEDALS = {1: 150, 2: 400, 3: 800, 4: 1_400, 5: 2_200, 6: 3_200, 7: 4_500}
+# Мясо и фрукты тоже падают в казну с клановых боссов и тратятся на улучшение (поставь 0, чтобы не требовать).
+UPGRADE_MEAT = {1: 1_000, 2: 3_000, 3: 8_000, 4: 20_000, 5: 50_000, 6: 120_000, 7: 300_000}
+UPGRADE_FRUIT = {1: 1_000, 2: 3_000, 3: 8_000, 4: 20_000, 5: 50_000, 6: 120_000, 7: 300_000}
 UPGRADE_MEMBERS = {1: 5, 2: 8, 3: 11, 4: 15, 5: 20, 6: 26, 7: 32}     # не больше мест на текущем уровне
 
 # Клановые задания: каждый день у клана 3 задания из пула. Прогресс общий на весь клан.
@@ -314,7 +317,7 @@ def create_clan(uid: int, name: str) -> tuple[bool, str]:
     _DATA["next"] += 1
     clan = {"id": cid, "name": name, "desc": "", "leader": str(uid), "deputy": None,
             "members": {str(uid): time.time()}, "requests": {}, "join": "request", "min_level": 1,
-            "level": 1, "treasury": 0, "medals": 0, "points": 0, "created": time.time(), "contrib": {}, "tasks": {},
+            "level": 1, "treasury": 0, "meat": 0, "fruit": 0, "medals": 0, "points": 0, "created": time.time(), "contrib": {}, "tasks": {},
             "log": [], "ann_at": 0}
     _DATA["clans"][cid] = clan
     user["clan"] = cid
@@ -515,18 +518,26 @@ def upgrade(actor: int) -> tuple[bool, str]:
     if lvl >= MAX_CLAN_LEVEL:
         return False, "У клана максимальный уровень."
     cost, need_medals, need_members = UPGRADE_COST[lvl], UPGRADE_MEDALS[lvl], UPGRADE_MEMBERS[lvl]
+    need_meat, need_fruit = UPGRADE_MEAT.get(lvl, 0), UPGRADE_FRUIT.get(lvl, 0)
     if len(c["members"]) < need_members:
         return False, f"Мало участников: нужно {need_members}, в клане {len(c['members'])}."
     if int(c.get("medals", 0)) < need_medals:
         return False, f"Не хватает медалей: нужно {_n(need_medals)}, у клана {_n(c.get('medals', 0))}."
     if c["treasury"] < cost:
         return False, f"В казне не хватает монет: нужно {_n(cost)}, там {_n(c['treasury'])}."
+    if int(c.get("meat", 0)) < need_meat:
+        return False, f"В казне не хватает мяса: нужно {_n(need_meat)}, там {_n(c.get('meat', 0))}."
+    if int(c.get("fruit", 0)) < need_fruit:
+        return False, f"В казне не хватает фруктов: нужно {_n(need_fruit)}, там {_n(c.get('fruit', 0))}."
     c["treasury"] -= cost
+    c["meat"] = int(c.get("meat", 0)) - need_meat
+    c["fruit"] = int(c.get("fruit", 0)) - need_fruit
     c["medals"] = int(c.get("medals", 0)) - need_medals
     c["level"] = lvl + 1
     _log(c, f"Клан достиг {lvl + 1} уровня")
     _save()
-    _led("clan_upgrade", user=actor, clan=c["id"], level=lvl + 1, cost=cost, medals=need_medals)
+    _led("clan_upgrade", user=actor, clan=c["id"], level=lvl + 1, cost=cost, medals=need_medals,
+         meat=need_meat, fruit=need_fruit)
     return True, f"Клан теперь {lvl + 1} уровня. Мест: {_cap(c)}."
 
 
@@ -538,9 +549,11 @@ def add_points(user_id: int, n: int) -> None:
         _save()
 
 
-def add_loot(c: dict, coins: int = 0, medals: int = 0, points: int = 0) -> None:
-    """Награда клану: монеты в казну, медали, очки рейтинга. Сохранение остаётся за вызывающим."""
+def add_loot(c: dict, coins: int = 0, medals: int = 0, points: int = 0, meat: int = 0, fruit: int = 0) -> None:
+    """Награда клану: монеты, мясо и фрукты в казну, медали, очки рейтинга. Сохранение остаётся за вызывающим."""
     c["treasury"] = int(c.get("treasury", 0)) + max(0, int(coins))
+    c["meat"] = int(c.get("meat", 0)) + max(0, int(meat))
+    c["fruit"] = int(c.get("fruit", 0)) + max(0, int(fruit))
     c["medals"] = int(c.get("medals", 0)) + max(0, int(medals))
     c["points"] = int(c.get("points", 0)) + max(0, int(points))
 
@@ -691,6 +704,7 @@ def clan_html(c: dict, uid: int, wi: bool = False, note: str = "") -> str:
         f"Уровень клана: <b>{c['level']}/{MAX_CLAN_LEVEL}</b>",
         f"{_e(EM_COINS)} Казна: <b>{_n(c['treasury'])}</b>"
         + (f" · до улучшения {_n(max(0, cost - c['treasury']))}" if cost else ""),
+        f"🥩 Мясо: <b>{_n(c.get('meat', 0))}</b> · 🥭 Фрукты: <b>{_n(c.get('fruit', 0))}</b>",
         f"{_e(EM_POINTS)} Очки: <b>{_n(c['points'])}</b> · место <b>{_rank_of(c)}</b>",
         f"{_e(EM_MEDAL)} Медали: <b>{_n(c.get('medals', 0))}</b>",
     ]
@@ -827,6 +841,7 @@ def requests_screen(c: dict):
 def donate_screen(c: dict, user: dict):
     html = card(f"{_e(EM_COINS)} КАЗНА КЛАНА", f"За каждые {_n(COINS_PER_POINT)} монет клан получает очко рейтинга.",
                 _tree("Сейчас", [f"В казне: <b>{_n(c['treasury'])}</b> {_e(EM_COINS)}",
+                                 f"🥩 Мясо: <b>{_n(c.get('meat', 0))}</b> · 🥭 Фрукты: <b>{_n(c.get('fruit', 0))}</b>",
                                  f"Твой вклад: <b>{_n(c['contrib'].get(str(_uid_of(user)), 0))}</b>",
                                  f"У тебя: <b>{_n(user['coins'])}</b> {_e(EM_COINS)}"]))
     btns = [_btn(f"+{_n(a)}", f"cl:dg:{a}", ButtonStyle.SUCCESS if user["coins"] >= a else ButtonStyle.DANGER)
@@ -845,17 +860,22 @@ def upgrade_screen(c: dict):
     if lvl >= MAX_CLAN_LEVEL:
         return card(f"{_e(EM_CLAN)} УЛУЧШЕНИЕ", "У клана максимальный уровень."), _kb([_back()])
     cost, need_medals, need_members = UPGRADE_COST[lvl], UPGRADE_MEDALS[lvl], UPGRADE_MEMBERS[lvl]
+    need_meat, need_fruit = UPGRADE_MEAT.get(lvl, 0), UPGRADE_FRUIT.get(lvl, 0)
     have_medals, members = int(c.get("medals", 0)), len(c["members"])
-    checks = [c["treasury"] >= cost, have_medals >= need_medals, members >= need_members]
+    have_meat, have_fruit = int(c.get("meat", 0)), int(c.get("fruit", 0))
+    checks = [c["treasury"] >= cost, have_medals >= need_medals, members >= need_members,
+              have_meat >= need_meat, have_fruit >= need_fruit]
 
     def mark(ok: bool) -> str:
         return "✅" if ok else "❌"
 
     html = card(f"{_e(EM_CLAN)} УЛУЧШЕНИЕ КЛАНА",
-                "Нужно всё сразу. Монеты и медали при улучшении тратятся. Медали дают клановые боссы и задания.",
+                "Нужно всё сразу. Монеты, мясо, фрукты и медали при улучшении тратятся. Всё это дают клановые боссы и задания.",
                 _tree(f"Уровень {lvl} → {lvl + 1}", [
                     f"{mark(checks[0])} Монеты в казне: <b>{_n(c['treasury'])}/{_n(cost)}</b> {_e(EM_COINS)}",
                     f"{mark(checks[1])} Медали: <b>{_n(have_medals)}/{_n(need_medals)}</b> {_e(EM_MEDAL)}",
+                    f"{mark(checks[3])} Мясо в казне: <b>{_n(have_meat)}/{_n(need_meat)}</b> 🥩",
+                    f"{mark(checks[4])} Фрукты в казне: <b>{_n(have_fruit)}/{_n(need_fruit)}</b> 🥭",
                     f"{mark(checks[2])} Участники: <b>{members}/{need_members}</b>",
                     f"Мест будет: <b>{MEMBER_CAP[lvl + 1]}</b> (сейчас {_cap(c)})"]))
     return html, _kb([_btn("Улучшить", "cl:upgo", ButtonStyle.SUCCESS if all(checks) else ButtonStyle.DANGER)],
