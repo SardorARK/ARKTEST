@@ -760,16 +760,16 @@ def clan_html(c: dict, uid: int, wi: bool = False, note: str = "") -> str:
     dep = _who(c, c["deputy"]) if c.get("deputy") else "<i>не назначен</i>"
     cost = UPGRADE_COST.get(int(c["level"]))
     lines_main = [
-        f"{_e(EM_LEADER)} Лидер: {_hname(c['leader'])}",
-        f"{_e(EM_DEPUTY)} Заместитель: {dep}",
-        f"Участники: <b>{len(c['members'])}/{_cap(c)}</b>",
-        f"Вход: <b>{JOIN_TITLES[c['join']]}</b>" + (f" · от {c['min_level']} ур." if c["min_level"] > 1 else ""),
+        f"<b>{_e(EM_LEADER)} Лидер:</b> {_hname(c['leader'])}",
+        f"<b>{_e(EM_DEPUTY)} Заместитель:</b> {dep}",
+        f"<b>Участники: {len(c['members'])}/{_cap(c)}</b>",
+        f"<b>Вход: {JOIN_TITLES[c['join']]}</b>" + (f"<b> · от {c['min_level']} ур.</b>" if c["min_level"] > 1 else ""),
     ]
     lines_stat = [
-        f"Уровень клана: <b>{c['level']}/{MAX_CLAN_LEVEL}</b>",
-        f"<b>{_e(EM_TREASURY)} Казна:</b> {_clan_stock(c)}",
-        f"{_e(EM_POINTS)} Очки: <b>{_n(c['points'])}</b> · место <b>{_rank_of(c)}</b>",
-        f"{_e(EM_MEDAL)} Медали: <b>{_n(c.get('medals', 0))}</b>",
+        f"<b>Уровень клана: {c['level']}/{MAX_CLAN_LEVEL}</b>",
+        f"<b>{_e(EM_TREASURY)} Казна: {_clan_stock(c)}</b>",
+        f"<b>{_e(EM_POINTS)} Очки: {_n(c['points'])} · место {_rank_of(c)}</b>",
+        f"<b>{_e(EM_MEDAL)} Медали: {_n(c.get('medals', 0))}</b>",
     ]
     return (
         f"{_img(wi)}<p><b>{_e(EM_CLAN)} {escape(c['name'])}</b> · ты: <i>{ROLE_TITLES[role].lower()}</i></p>"
