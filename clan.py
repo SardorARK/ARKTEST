@@ -116,13 +116,14 @@ INPUT_TTL = 300                   # сколько ждём сообщение �
 
 # Эмодзи: (id кастомного, обычный запасной). Пустой id = показывается обычный.
 EM_CLAN = ("", "🏰")
-EM_LEADER = ("", "👑")
-EM_DEPUTY = ("", "🛡")
+EM_LEADER = ("5217822164362739968", "👑")
+EM_DEPUTY = ("5231256405452793159", "👸")
 EM_MEMBER = ("", "👤")
 EM_COINS = ("", "🪙")
 EM_TREASURY = ("6192975148681793540", "💰")   # значок «Казна»
 EM_POINTS = ("", "⚜️")
-EM_OK = ("", "✅")
+EM_OK = ("5390846416530716134", "✅")      # галочка
+EM_NO = ("5328093774650293878", "🌟")      # не хватает
 EM_MEDAL = ("", "🎖")
 EM_TASK = ("", "📜")
 
@@ -720,8 +721,16 @@ def _gap() -> str:
     return "<p>\u2800</p>"
 
 
-def _btn(text: str, data: str, style: ButtonStyle = ButtonStyle.PRIMARY) -> InlineKeyboardButton:
-    return InlineKeyboardButton(text=text, callback_data=data, style=style)
+def _btn(text: str, data: str, style: ButtonStyle = ButtonStyle.PRIMARY, emoji=None) -> InlineKeyboardButton:
+    """emoji: пара (id, запасной) или просто строка. С id эмодзи ставится значком кнопки, иначе перед текстом."""
+    icon = None
+    if emoji:
+        eid, fb = emoji if isinstance(emoji, tuple) else ("", emoji)
+        if eid:
+            icon = eid
+        else:
+            text = f"{fb} {text}"
+    return InlineKeyboardButton(text=text, callback_data=data, style=style, icon_custom_emoji_id=icon)
 
 
 def _back(data: str = "cl:home", text: str = "Назад") -> InlineKeyboardButton:
@@ -782,18 +791,19 @@ def clan_html(c: dict, uid: int, wi: bool = False, note: str = "") -> str:
 def clan_kb(c: dict, uid: int) -> InlineKeyboardMarkup:
     role = _role(c, uid)
     _prune(c)
-    rows = [[_btn("Участники", "cl:mem:0"), _btn("Казна", "cl:don")]]
+    rows = [[_btn("Участники", "cl:mem:0", emoji="👥"), _btn("Казна", "cl:don", emoji=EM_TREASURY)]]
     if role != "member":
         n = len(c["requests"])
         rows.append([_btn(f"Заявки ({n})" if n else "Заявки", "cl:req",
-                          ButtonStyle.SUCCESS if n else ButtonStyle.PRIMARY),
-                     _btn("Объявление", "cl:ann")])
+                          ButtonStyle.SUCCESS if n else ButtonStyle.PRIMARY, emoji="📥"),
+                     _btn("Объявление", "cl:ann", emoji="📢")])
     if role == "leader":
-        rows.append([_btn("Улучшить клан", "cl:up", ButtonStyle.SUCCESS), _btn("Настройки", "cl:set")])
-    rows.append([_btn("Боссы", "cb:open", ButtonStyle.SUCCESS), _btn("Задания", "cl:tsk")])
-    rows.append([_btn("Топ кланов", "cl:top:0"), _btn("События", "cl:log")])
-    rows.append([_btn("Распустить клан", "cl:ds", ButtonStyle.DANGER) if role == "leader"
-                 else _btn("Покинуть клан", "cl:lv", ButtonStyle.DANGER)])
+        rows.append([_btn("Улучшить клан", "cl:up", ButtonStyle.SUCCESS, emoji="⬆️"),
+                     _btn("Настройки", "cl:set", emoji="⚙️")])
+    rows.append([_btn("Боссы", "cb:open", ButtonStyle.SUCCESS, emoji="👹"), _btn("Задания", "cl:tsk", emoji="📜")])
+    rows.append([_btn("Топ кланов", "cl:top:0", emoji="🏆"), _btn("События", "cl:log", emoji="🕓")])
+    rows.append([_btn("Распустить клан", "cl:ds", ButtonStyle.DANGER, emoji="🗑") if role == "leader"
+                 else _btn("Покинуть клан", "cl:lv", ButtonStyle.DANGER, emoji="🚪")])
     rows.append([_back("menu:back")])
     return _kb(*rows)
 
@@ -830,8 +840,9 @@ def home_screen(uid: int, note: str = ""):
     return (lambda wi: clan_html(c, uid, wi, note)), clan_kb(c, uid)
 
 
-def card(title: str, intro: str, body: str = "") -> "callable":
-    return lambda wi: f"{_img(wi)}<p><b>{title}</b></p><blockquote><i>{intro}</i></blockquote>{body}"
+def card(title: str, intro: str, body: str = "", expandable: bool = False) -> "callable":
+    bq = "<blockquote expandable>" if expandable else "<blockquote>"
+    return lambda wi: f"{_img(wi)}<p><b>{title}</b></p>{bq}<i>{intro}</i></blockquote>{body}"
 
 
 def _confirm(title: str, text: str, ok: str, cancel: str):
@@ -913,8 +924,8 @@ def donate_screen(c: dict, user: dict, uid: int | str = ""):
         f"</blockquote>"
         f"<p><b>Твой вклад</b></p><blockquote>{_e(EM_COINS)} {_n(c['contrib'].get(me, 0))} · "
         f"{_MIN_EMOJI} {_n(c.get('contrib_min', {}).get(me, 0))}</blockquote>")
-    return html, _kb([_btn("Внести монеты", "cl:dgi", ButtonStyle.SUCCESS),
-                      _btn("Внести минералы", "cl:dmi", ButtonStyle.SUCCESS)], [_back()])
+    return html, _kb([_btn("Внести монеты", "cl:dgi", ButtonStyle.SUCCESS, emoji=EM_COINS),
+                      _btn("Внести минералы", "cl:dmi", ButtonStyle.SUCCESS, emoji=_MIN_EMOJI)], [_back()])
 
 
 def upgrade_screen(c: dict):
@@ -930,12 +941,12 @@ def upgrade_screen(c: dict):
               have_meat >= need_meat, have_fruit >= need_fruit, have_min >= need_min]
 
     def mark(ok: bool) -> str:
-        return "✅" if ok else "❌"
+        return f"{_e(EM_OK if ok else EM_NO)} |"
 
     html = card(f"{_e(EM_CLAN)} УЛУЧШЕНИЕ КЛАНА",
                 "Нужно всё сразу. Монеты, минералы, мясо и фрукты при улучшении тратятся, медали не тратятся: "
                 "нужно просто иметь столько. Минералы вносят участники, остальное дают клановые боссы и задания.",
-                _tree(f"Уровень {lvl} → {lvl + 1}", [
+                expandable=True, body=_tree(f"Уровень {lvl} → {lvl + 1}", [
                     f"{mark(checks[0])} Монеты в казне: <b>{_n(c['treasury'])}/{_n(cost)}</b> {_e(EM_COINS)}",
                     f"{mark(checks[5])} Минералы в казне: <b>{_n(have_min)}/{_n(need_min)}</b> {_MIN_EMOJI}",
                     f"{mark(checks[1])} Медали (не тратятся): <b>{_n(have_medals)}/{_n(need_medals)}</b> {_e(EM_MEDAL)}",
@@ -943,7 +954,7 @@ def upgrade_screen(c: dict):
                     f"{mark(checks[4])} Фрукты в казне: <b>{_n(have_fruit)}/{_n(need_fruit)}</b> 🥭",
                     f"{mark(checks[2])} Участники: <b>{members}/{need_members}</b>",
                     f"Мест будет: <b>{MEMBER_CAP[lvl + 1]}</b> (сейчас {_cap(c)})"]))
-    return html, _kb([_btn("Улучшить", "cl:upgo", ButtonStyle.SUCCESS if all(checks) else ButtonStyle.DANGER)],
+    return html, _kb([_btn("Улучшить", "cl:upgo", ButtonStyle.SUCCESS if all(checks) else ButtonStyle.DANGER, emoji="⬆️")],
                      [_back()])
 
 
@@ -1005,7 +1016,7 @@ def view_screen(c: dict, uid: int):
 
 
 def log_screen(c: dict):
-    rows = [f"<i>{time.strftime('%d.%m %H:%M', time.localtime(ts))}</i> {escape(t)}" for ts, t in reversed(c["log"][-15:])]
+    rows = [f"<i>{time.strftime('%d.%m %H:%M', time.localtime(ts))}</i> <i>{escape(t)}</i>" for ts, t in reversed(c["log"][-15:])]
     return card(f"{_e(EM_CLAN)} СОБЫТИЯ", "Последние события клана."), None, rows
 
 
