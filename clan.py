@@ -120,6 +120,7 @@ EM_LEADER = ("", "👑")
 EM_DEPUTY = ("", "🛡")
 EM_MEMBER = ("", "👤")
 EM_COINS = ("", "🪙")
+EM_TREASURY = ("6192975148681793540", "💰")   # значок «Казна»
 EM_POINTS = ("", "⚜️")
 EM_OK = ("", "✅")
 EM_MEDAL = ("", "🎖")
@@ -193,9 +194,11 @@ def _n(x) -> str:
 
 
 def _stock(coins=0, minerals=0, meat=0, fruit=0) -> str:
-    """Запасы в одну строку, только эмодзи и сумма: 🏵 621K · 🏜 0 · 15🥩/67🥭"""
-    return (f"{_e(EM_COINS)} {_n(coins)} · {_MIN_EMOJI} {_n(minerals)} · "
-            f"{_n(meat)}{_MEAT}/{_n(fruit)}{_FRUIT}")
+    """Запасы в одну строку, только эмодзи и сумма: 🏵 621K / 🏜 0 / 15🥩⁄67🥭
+    Между мясом и фруктами стоит не обычный «/», а символ «⁄» (U+2044): после обычного «/» цифра
+    превращается в команду бота (/0) и показывается как моно-ссылка."""
+    return (f"{_e(EM_COINS)} {_n(coins)} / {_MIN_EMOJI} {_n(minerals)} / "
+            f"{_n(meat)}{_MEAT}\u2044{_n(fruit)}{_FRUIT}")
 
 
 def _clan_stock(c: dict) -> str:
@@ -764,7 +767,7 @@ def clan_html(c: dict, uid: int, wi: bool = False, note: str = "") -> str:
     ]
     lines_stat = [
         f"Уровень клана: <b>{c['level']}/{MAX_CLAN_LEVEL}</b>",
-        f"Казна: <b>{_clan_stock(c)}</b>",
+        f"<b>{_e(EM_TREASURY)} Казна:</b> {_clan_stock(c)}",
         f"{_e(EM_POINTS)} Очки: <b>{_n(c['points'])}</b> · место <b>{_rank_of(c)}</b>",
         f"{_e(EM_MEDAL)} Медали: <b>{_n(c.get('medals', 0))}</b>",
     ]
@@ -901,10 +904,10 @@ def requests_screen(c: dict):
 def donate_screen(c: dict, user: dict, uid: int | str = ""):
     me = str(uid)
     html = lambda wi: (
-        f"{_img(wi)}<p><b>{_e(EM_COINS)} КАЗНА КЛАНА</b></p>"
+        f"{_img(wi)}<p><b>{_e(EM_TREASURY)} КАЗНА КЛАНА</b></p>"
         f"<blockquote><i>За каждые {_n(COINS_PER_POINT)} монет клан получает очко {_e(EM_POINTS)}. "
         f"Минералы идут на улучшение клана. Сумму вводишь вручную.</i></blockquote>"
-        f"<p><b>В казне</b></p><blockquote>{_clan_stock(c)}</blockquote>"
+        f"<p><b>{_e(EM_TREASURY)} В казне</b></p><blockquote>{_clan_stock(c)}</blockquote>"
         f"<p><b>У тебя</b></p><blockquote>"
         f"{_stock(user['coins'], user.get(_MIN_FIELD, 0) or 0, user.get('meat', 0), user.get('fruit', 0))}"
         f"</blockquote>"
