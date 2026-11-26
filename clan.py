@@ -81,7 +81,6 @@ REQUEST_TTL = 3 * 86400           # заявка живёт 3 дня
 MAX_REQUESTS = 30                 # заявок в клан одновременно
 LOG_KEEP = 30
 PAGE = 8
-DONATE_STEPS = (1_000, 10_000, 100_000, 1_000_000)
 COINS_PER_POINT = 1_000           # столько монет вклада = 1 очко клана
 MAX_CLAN_LEVEL = 8
 MEMBER_CAP = {lv: 5 + 5 * lv for lv in range(1, MAX_CLAN_LEVEL + 1)}      # 10, 15, ... 45
@@ -94,7 +93,6 @@ UPGRADE_MEDALS = {1: 500, 2: 1_000, 3: 2_000, 4: 3_500, 5: 7_000, 6: 13_000, 7: 
 # Минералы вносят игроки в казну клана (кнопки «Минералы» в казне), при улучшении они тратятся.
 UPGRADE_MINERALS = {1: 500_000, 2: 1_500_000, 3: 5_000_000, 4: 15_000_000,
                     5: 35_000_000, 6: 85_000_000, 7: 150_000_000}
-MINERAL_DONATE_STEPS = (10_000, 100_000, 1_000_000, 10_000_000)
 # Мясо и фрукты тоже падают в казну с клановых боссов и тратятся на улучшение (поставь 0, чтобы не требовать).
 UPGRADE_MEAT = {1: 1_000, 2: 3_000, 3: 8_000, 4: 20_000, 5: 50_000, 6: 120_000, 7: 300_000}
 UPGRADE_FRUIT = {1: 1_000, 2: 3_000, 3: 8_000, 4: 20_000, 5: 50_000, 6: 120_000, 7: 300_000}
@@ -136,6 +134,7 @@ _get_user = _save_users = _show_rich_card = _send_rich_card = _custom_emoji = No
 _player_level = _fmt_fn = _name_html_of = _name_plain_of = None
 _BACK_ID: str | None = None
 _MIN_FIELD, _MIN_EMOJI = "minerals", "🏜"
+_MEAT, _FRUIT = "🥩", "🥭"
 _PLAYER_MAX = 500
 _PATH: Path | None = None
 _DATA: dict = {"next": 1, "clans": {}}
@@ -143,9 +142,12 @@ _DATA: dict = {"next": 1, "clans": {}}
 
 def setup(*, get_user, save_users, show_rich_card, send_rich_card, custom_emoji, BACK_EMOJI_ID,
           player_level, PLAYER_MAX_LEVEL=500, fmt=None, name_html_of=None, name_plain_of=None,
-          data_path=None, MINERALS_FIELD="minerals", MINERAL_EMOJI="🏜", **_ignored) -> None:
-    global _MIN_FIELD, _MIN_EMOJI
-    _MIN_FIELD, _MIN_EMOJI = MINERALS_FIELD, MINERAL_EMOJI
+          data_path=None, MINERALS_FIELD="minerals", MINERAL_EMOJI="🏜",
+          COIN_EMOJI=None, MEAT_EMOJI="🥩", FRUIT_EMOJI="🥭", **_ignored) -> None:
+    global _MIN_FIELD, _MIN_EMOJI, _MEAT, _FRUIT, EM_COINS
+    _MIN_FIELD, _MIN_EMOJI, _MEAT, _FRUIT = MINERALS_FIELD, MINERAL_EMOJI, MEAT_EMOJI, FRUIT_EMOJI
+    if COIN_EMOJI:                       # эмодзи монет берём из main.py
+        EM_COINS = COIN_EMOJI
     global _get_user, _save_users, _show_rich_card, _send_rich_card, _custom_emoji, _BACK_ID
     global _player_level, _fmt_fn, _name_html_of, _name_plain_of, _PLAYER_MAX, _PATH
     _get_user, _save_users = get_user, save_users
@@ -188,6 +190,36 @@ def _e(pair) -> str:
 
 def _n(x) -> str:
     return _fmt_fn(x) if _fmt_fn else f"{int(x):,}".replace(",", " ")
+
+
+def _stock(coins=0, minerals=0, meat=0, fruit=0) -> str:
+    """Запасы в одну строку, только эмодзи и сумма: 🏵 621K · 🏜 0 · 15🥩/67🥭"""
+    return (f"{_e(EM_COINS)} {_n(coins)} · {_MIN_EMOJI} {_n(minerals)} · "
+            f"{_n(meat)}{_MEAT}/{_n(fruit)}{_FRUIT}")
+
+
+def _clan_stock(c: dict) -> str:
+    return _stock(c["treasury"], c.get("minerals", 0), c.get("meat", 0), c.get("fruit", 0))
+
+
+def parse_amount(text: str, have: int) -> int | None:
+    """Сумма, введённая вручную: 15000, 15 000, 15k, 1.5м, 2m, «все». None, если не поняли."""
+    t = text.strip().lower().replace(" ", "").replace("\u00a0", "").replace(",", ".")
+    if t in ("все", "всё", "all", "max", "макс"):
+        return int(have)
+    mult = 1
+    for suf, m in (("kk", 10**6), ("кк", 10**6), ("k", 10**3), ("к", 10**3), ("m", 10**6), ("м", 10**6),
+                   ("b", 10**9), ("б", 10**9)):
+        if t.endswith(suf):
+            t, mult = t[:-len(suf)], m
+            break
+    try:
+        v = float(t)
+    except ValueError:
+        return None
+    if v != v or v <= 0 or v > 10**15:
+        return None
+    return int(v * mult)
 
 
 def _hname(uid) -> str:
@@ -732,10 +764,7 @@ def clan_html(c: dict, uid: int, wi: bool = False, note: str = "") -> str:
     ]
     lines_stat = [
         f"Уровень клана: <b>{c['level']}/{MAX_CLAN_LEVEL}</b>",
-        f"{_e(EM_COINS)} Казна: <b>{_n(c['treasury'])}</b>"
-        + (f" · до улучшения {_n(max(0, cost - c['treasury']))}" if cost else ""),
-        f"{_MIN_EMOJI} Минералы: <b>{_n(c.get('minerals', 0))}</b>",
-        f"🥩 Мясо: <b>{_n(c.get('meat', 0))}</b> · 🥭 Фрукты: <b>{_n(c.get('fruit', 0))}</b>",
+        f"Казна: <b>{_clan_stock(c)}</b>",
         f"{_e(EM_POINTS)} Очки: <b>{_n(c['points'])}</b> · место <b>{_rank_of(c)}</b>",
         f"{_e(EM_MEDAL)} Медали: <b>{_n(c.get('medals', 0))}</b>",
     ]
@@ -869,30 +898,20 @@ def requests_screen(c: dict):
                  _tree("Игроки", lines)), _kb(*rows))
 
 
-def donate_screen(c: dict, user: dict):
-    me = str(_uid_of(user))
-    have_min = int(user.get(_MIN_FIELD, 0) or 0)
-    html = card(f"{_e(EM_COINS)} КАЗНА КЛАНА",
-                f"За каждые {_n(COINS_PER_POINT)} монет клан получает очко рейтинга. "
-                "Минералы нужны для улучшения клана.",
-                _tree("Сейчас", [f"В казне: <b>{_n(c['treasury'])}</b> {_e(EM_COINS)}",
-                                 f"{_MIN_EMOJI} Минералы: <b>{_n(c.get('minerals', 0))}</b>",
-                                 f"🥩 Мясо: <b>{_n(c.get('meat', 0))}</b> · 🥭 Фрукты: <b>{_n(c.get('fruit', 0))}</b>",
-                                 f"Твой вклад монетами: <b>{_n(c['contrib'].get(me, 0))}</b>",
-                                 f"Твой вклад минералами: <b>{_n(c.get('contrib_min', {}).get(me, 0))}</b>",
-                                 f"У тебя: <b>{_n(user['coins'])}</b> {_e(EM_COINS)} · "
-                                 f"<b>{_n(have_min)}</b> {_MIN_EMOJI}"]))
-    btns = [_btn(f"+{_n(a)}", f"cl:dg:{a}", ButtonStyle.SUCCESS if user["coins"] >= a else ButtonStyle.DANGER)
-            for a in DONATE_STEPS]
-    mbtns = [_btn(f"{_MIN_EMOJI} +{_n(a)}", f"cl:dm:{a}",
-                  ButtonStyle.SUCCESS if have_min >= a else ButtonStyle.DANGER) for a in MINERAL_DONATE_STEPS]
-    return html, _kb(btns[:2], btns[2:], mbtns[:2], mbtns[2:], [_back()])
-
-
-def _uid_of(user: dict) -> str:
-    for k, v in ():          # заглушка: id берём из вызова, см. on_cb (donate_screen получает uid через замену)
-        pass
-    return user.get("_uid", "")
+def donate_screen(c: dict, user: dict, uid: int | str = ""):
+    me = str(uid)
+    html = lambda wi: (
+        f"{_img(wi)}<p><b>{_e(EM_COINS)} КАЗНА КЛАНА</b></p>"
+        f"<blockquote><i>За каждые {_n(COINS_PER_POINT)} монет клан получает очко {_e(EM_POINTS)}. "
+        f"Минералы идут на улучшение клана. Сумму вводишь вручную.</i></blockquote>"
+        f"<p><b>В казне</b></p><blockquote>{_clan_stock(c)}</blockquote>"
+        f"<p><b>У тебя</b></p><blockquote>"
+        f"{_stock(user['coins'], user.get(_MIN_FIELD, 0) or 0, user.get('meat', 0), user.get('fruit', 0))}"
+        f"</blockquote>"
+        f"<p><b>Твой вклад</b></p><blockquote>{_e(EM_COINS)} {_n(c['contrib'].get(me, 0))} · "
+        f"{_MIN_EMOJI} {_n(c.get('contrib_min', {}).get(me, 0))}</blockquote>")
+    return html, _kb([_btn("Внести монеты", "cl:dgi", ButtonStyle.SUCCESS),
+                      _btn("Внести минералы", "cl:dmi", ButtonStyle.SUCCESS)], [_back()])
 
 
 def upgrade_screen(c: dict):
@@ -1145,42 +1164,19 @@ async def on_cb(cb: CallbackQuery, state: FSMContext):
         if await need_clan():
             return
         await cb.answer()
-        user["_uid"] = str(uid)
-        try:
-            screen = donate_screen(c, user)
-        finally:
-            user.pop("_uid", None)
-        await _show(cb, screen)
+        await _show(cb, donate_screen(c, user, uid))
         return
-    if act == "dg":
+    if act in ("dgi", "dmi"):
         if await need_clan():
             return
-        ok, msg = donate(uid, int(arg))
-        if not ok:
-            await alert(msg)
-            return
-        await cb.answer(msg)
-        user["_uid"] = str(uid)
-        try:
-            screen = donate_screen(c, user)
-        finally:
-            user.pop("_uid", None)
-        await _show(cb, screen)
-        return
-    if act == "dm":
-        if await need_clan():
-            return
-        ok, msg = donate_minerals(uid, int(arg))
-        if not ok:
-            await alert(msg)
-            return
-        await cb.answer(msg)
-        user["_uid"] = str(uid)
-        try:
-            screen = donate_screen(c, user)
-        finally:
-            user.pop("_uid", None)
-        await _show(cb, screen)
+        await cb.answer()
+        coins = act == "dgi"
+        have = user["coins"] if coins else int(user.get(_MIN_FIELD, 0) or 0)
+        what = f"{_e(EM_COINS)} монет" if coins else f"{_MIN_EMOJI} минералов"
+        await _prompt(cb, state, "dcoin" if coins else "dmin",
+                      f"{_e(EM_COINS)} ВЗНОС В КАЗНУ",
+                      f"Напиши сообщением, сколько {what} внести. У тебя: {_n(have)}. "
+                      "Можно писать 15000, 15k, 1.5m или «все».", "cl:don")
         return
     if act == "lv":
         if await need_clan():
@@ -1412,6 +1408,35 @@ async def on_input(message: Message, state: FSMContext):
         _log(c, f"{_pname(uid)} отправил объявление")
         _save()
         note = f"<b>{_e(EM_OK)} Объявление доставлено: {sent}.</b>"
+    elif kind in ("dcoin", "dmin"):
+        if c is None:
+            await state.clear()
+            return
+        coins = kind == "dcoin"
+        have = user["coins"] if coins else int(user.get(_MIN_FIELD, 0) or 0)
+        amount = parse_amount(text, have)
+        if amount is None:
+            await message.answer("<i>Не понял сумму. Пример: 15000, 15k, 1.5m или «все». "
+                                 "Или нажми «Отмена» на карточке.</i>")
+            return
+        ok, res = (donate if coins else donate_minerals)(uid, amount)
+        if not ok:
+            await message.answer(f"<i>{escape(res)} Пришли другую сумму или нажми «Отмена».</i>")
+            return
+        await state.clear()
+        try:
+            await message.delete()
+        except TelegramAPIError:
+            pass
+        if card_msg:
+            try:
+                await message.bot.delete_message(message.chat.id, card_msg)
+            except TelegramAPIError:
+                pass
+        user, c = _my(uid)
+        html_fn, kb = donate_screen(c, user, uid)
+        await _send_rich_card(message.bot, message.chat.id, "clan", html_fn, kb)
+        return
     else:
         await state.clear()
         return
