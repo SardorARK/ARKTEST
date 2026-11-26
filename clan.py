@@ -604,7 +604,7 @@ def upgrade(actor: int) -> tuple[bool, str]:
     _save()
     _led("clan_upgrade", user=actor, clan=c["id"], level=lvl + 1, cost=cost, minerals=need_min,
          meat=need_meat, fruit=need_fruit)
-    return True, f"Клан теперь {lvl + 1} уровня. Мест: {_cap(c)}."
+    return True, f"✨ Клан теперь {lvl + 1} уровня. Мест: {_cap(c)}."
 
 
 def add_points(user_id: int, n: int) -> None:
@@ -713,7 +713,7 @@ def _img(wi: bool) -> str:
 
 
 def _tree(title: str, lines: list[str]) -> str:
-    body = "<br>".join(f"{'└' if i == len(lines) - 1 else '├'} {ln}" for i, ln in enumerate(lines))
+    body = "<br>".join(lines)
     return f"<p><b>{title}</b><br>{body}</p>"
 
 
@@ -798,7 +798,7 @@ def clan_kb(c: dict, uid: int) -> InlineKeyboardMarkup:
                           ButtonStyle.SUCCESS if n else ButtonStyle.PRIMARY, emoji="📥"),
                      _btn("Объявление", "cl:ann", emoji="📢")])
     if role == "leader":
-        rows.append([_btn("Улучшить клан", "cl:up", ButtonStyle.SUCCESS, emoji="⬆️"),
+        rows.append([_btn("Улучшить клан", "cl:up", ButtonStyle.SUCCESS, emoji="✨"),
                      _btn("Настройки", "cl:set", emoji="⚙️")])
     rows.append([_btn("Боссы", "cb:open", ButtonStyle.SUCCESS, emoji="👹"), _btn("Задания", "cl:tsk", emoji="📜")])
     rows.append([_btn("Топ кланов", "cl:top:0", emoji="🏆"), _btn("События", "cl:log", emoji="🕓")])
@@ -931,7 +931,7 @@ def donate_screen(c: dict, user: dict, uid: int | str = ""):
 def upgrade_screen(c: dict):
     lvl = int(c["level"])
     if lvl >= MAX_CLAN_LEVEL:
-        return card(f"{_e(EM_CLAN)} УЛУЧШЕНИЕ", "У клана максимальный уровень."), _kb([_back()])
+        return card("✨ УЛУЧШЕНИЕ", "У клана максимальный уровень."), _kb([_back()])
     cost, need_medals, need_members = UPGRADE_COST[lvl], UPGRADE_MEDALS[lvl], UPGRADE_MEMBERS[lvl]
     need_meat, need_fruit = UPGRADE_MEAT.get(lvl, 0), UPGRADE_FRUIT.get(lvl, 0)
     need_min, have_min = UPGRADE_MINERALS.get(lvl, 0), int(c.get("minerals", 0))
@@ -941,12 +941,12 @@ def upgrade_screen(c: dict):
               have_meat >= need_meat, have_fruit >= need_fruit, have_min >= need_min]
 
     def mark(ok: bool) -> str:
-        return f"{_e(EM_OK if ok else EM_NO)} |"
+        return _e(EM_OK if ok else EM_NO)
 
-    html = card(f"{_e(EM_CLAN)} УЛУЧШЕНИЕ КЛАНА",
+    html = card("✨ УЛУЧШЕНИЕ КЛАНА",
                 "Нужно всё сразу. Монеты, минералы, мясо и фрукты при улучшении тратятся, медали не тратятся: "
                 "нужно просто иметь столько. Минералы вносят участники, остальное дают клановые боссы и задания.",
-                expandable=True, body=_tree(f"Уровень {lvl} → {lvl + 1}", [
+                expandable=True, body=_tree(f"✨ Уровень {lvl} → {lvl + 1}", [
                     f"{mark(checks[0])} Монеты в казне: <b>{_n(c['treasury'])}/{_n(cost)}</b> {_e(EM_COINS)}",
                     f"{mark(checks[5])} Минералы в казне: <b>{_n(have_min)}/{_n(need_min)}</b> {_MIN_EMOJI}",
                     f"{mark(checks[1])} Медали (не тратятся): <b>{_n(have_medals)}/{_n(need_medals)}</b> {_e(EM_MEDAL)}",
@@ -954,7 +954,7 @@ def upgrade_screen(c: dict):
                     f"{mark(checks[4])} Фрукты в казне: <b>{_n(have_fruit)}/{_n(need_fruit)}</b> 🥭",
                     f"{mark(checks[2])} Участники: <b>{members}/{need_members}</b>",
                     f"Мест будет: <b>{MEMBER_CAP[lvl + 1]}</b> (сейчас {_cap(c)})"]))
-    return html, _kb([_btn("Улучшить", "cl:upgo", ButtonStyle.SUCCESS if all(checks) else ButtonStyle.DANGER, emoji="⬆️")],
+    return html, _kb([_btn("Улучшить", "cl:upgo", ButtonStyle.SUCCESS if all(checks) else ButtonStyle.DANGER, emoji="✨")],
                      [_back()])
 
 
