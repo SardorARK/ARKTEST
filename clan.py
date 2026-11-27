@@ -13,7 +13,10 @@
   * Вход: «открытый» (сразу), «по заявкам» (решает лидер или заместитель), «закрытый». У клана есть минимальный
     уровень игрока для входа. После выхода или исключения вступать куда-либо нельзя JOIN_COOLDOWN секунд.
   * Казна: участники вносят монеты, за вклад клан получает очки (рейтинг). Лидер тратит казну на уровень клана:
-    выше уровень, больше мест (10 -> 45).
+    выше уровень, больше мест (10 -> 45). Вносить можно монеты, минералы, мясо и фрукты.
+    Вывести из казны можно только по заявке: решает лидер (сам лидер выводит сразу). Лидер также
+    может «Распределить» казну: всё или выбранное (монеты, минералы, мясо, фрукты) делится поровну
+    между всеми участниками, остаток, который не делится нацело, остаётся в казне.
   * Объявление: лидер или заместитель шлёт сообщение всем участникам в личку (пауза ANNOUNCE_COOLDOWN).
   * Журнал событий клана, список кланов с заявками, топ кланов.
 
@@ -79,6 +82,8 @@ ANNOUNCE_COOLDOWN = 600           # секунд между объявления
 JOIN_COOLDOWN = 3600              # пауза после выхода или исключения
 REQUEST_TTL = 3 * 86400           # заявка живёт 3 дня
 MAX_REQUESTS = 30                 # заявок в клан одновременно
+WD_TTL = 2 * 86400                # заявка на вывод из казны живёт 2 дня
+MAX_WD_REQUESTS = 30              # заявок на вывод одновременно
 LOG_KEEP = 30
 PAGE = 8
 COINS_PER_POINT = 1_000           # столько монет вклада = 1 очко клана
@@ -204,6 +209,36 @@ def _stock(coins=0, minerals=0, meat=0, fruit=0) -> str:
 
 def _clan_stock(c: dict) -> str:
     return _stock(c["treasury"], c.get("minerals", 0), c.get("meat", 0), c.get("fruit", 0))
+
+
+# Ресурсы казны: монеты, минералы, мясо, фрукты. В callback_data их код: c / m / e / f.
+RES_KEYS = ("coins", "minerals", "meat", "fruit")
+_RES_CODE = {"c": "coins", "m": "minerals", "e": "meat", "f": "fruit"}
+_RES_CLAN_KEY = {"coins": "treasury", "minerals": "minerals", "meat": "meat", "fruit": "fruit"}
+_RES_TITLE = {"coins": "Монеты", "minerals": "Минералы", "meat": "Мясо", "fruit": "Фрукты"}
+_RES_GEN = {"coins": "монет", "minerals": "минералов", "meat": "мяса", "fruit": "фруктов"}
+
+
+def _res_user_field(r: str) -> str:
+    return _MIN_FIELD if r == "minerals" else r
+
+
+def _res_emoji(r: str) -> str:
+    """Эмодзи ресурса для текста сообщения (HTML)."""
+    return {"coins": _e(EM_COINS), "minerals": _MIN_EMOJI, "meat": _MEAT, "fruit": _FRUIT}[r]
+
+
+def _res_icon(r: str):
+    """Эмодзи ресурса для кнопки (для _btn)."""
+    return {"coins": EM_COINS, "minerals": _MIN_EMOJI, "meat": _MEAT, "fruit": _FRUIT}[r]
+
+
+def _clan_amount(c: dict, r: str) -> int:
+    return int(c.get(_RES_CLAN_KEY[r], 0) or 0)
+
+
+def _user_amount(user: dict, r: str) -> int:
+    return int(user.get(_res_user_field(r), 0) or 0)
 
 
 def parse_amount(text: str, have: int) -> int | None:
@@ -361,7 +396,7 @@ def create_clan(uid: int, name: str) -> tuple[bool, str]:
     _DATA["next"] += 1
     clan = {"id": cid, "name": name, "desc": "", "leader": str(uid), "deputy": None,
             "members": {str(uid): time.time()}, "requests": {}, "join": "request", "min_level": 1,
-            "level": 1, "treasury": 0, "minerals": 0, "contrib_min": {}, "meat": 0, "fruit": 0, "medals": 0, "points": 0, "created": time.time(), "contrib": {}, "tasks": {},
+            "level": 1, "treasury": 0, "minerals": 0, "contrib_min": {}, "meat": 0, "fruit": 0, "medals": 0, "points": 0, "created": time.time(), "contrib": {}, "contrib_meat": {}, "contrib_fruit": {}, "wd": {}, "tasks": {},
             "log": [], "ann_at": 0}
     _DATA["clans"][cid] = clan
     user["clan"] = cid
@@ -384,6 +419,7 @@ def _add_member(c: dict, uid: int, user: dict) -> None:
 
 def _remove_member(c: dict, uid: str, why: str) -> None:
     c["members"].pop(uid, None)
+    c.setdefault("wd", {}).pop(uid, None)
     if c.get("deputy") == uid:
         c["deputy"] = None
     user = _get_user(int(uid))
@@ -571,6 +607,182 @@ def donate_minerals(uid: int, amount: int) -> tuple[bool, str]:
     _save_users()
     _led("clan_donate_minerals", user=uid, clan=c["id"], amount=amount)
     return True, f"В казну внесено минералов: {_n(amount)}."
+
+
+def donate_item(uid: int, r: str, amount: int) -> tuple[bool, str]:
+    """Взнос мяса или фруктов в казну."""
+    user, c = _my(uid)
+    if c is None:
+        return False, "Ты не в клане."
+    if r not in ("meat", "fruit"):
+        return False, "Это нельзя внести."
+    amount = int(amount)
+    have = _user_amount(user, r)
+    if amount <= 0 or have < amount:
+        return False, f"Не хватает: нужно {_n(amount)} {_RES_GEN[r]}, у тебя {_n(have)}."
+    user[r] = have - amount
+    c[r] = int(c.get(r, 0)) + amount
+    cm = c.setdefault(f"contrib_{r}", {})
+    cm[str(uid)] = int(cm.get(str(uid), 0)) + amount
+    _log(c, f"{_pname(uid)} внёс {_n(amount)} {_RES_GEN[r]}")
+    _save()
+    _save_users()
+    _led(f"clan_donate_{r}", user=uid, clan=c["id"], amount=amount)
+    return True, f"В казну внесено {_n(amount)} {_RES_GEN[r]}."
+
+
+def _deposit(uid: int, r: str, amount: int) -> tuple[bool, str]:
+    if r == "coins":
+        return donate(uid, amount)
+    if r == "minerals":
+        return donate_minerals(uid, amount)
+    return donate_item(uid, r, amount)
+
+
+def _prune_wd(c: dict) -> None:
+    """Убирает устаревшие заявки на вывод и заявки тех, кто уже не в клане."""
+    now = time.time()
+    wd = c.setdefault("wd", {})
+    for uid in [u for u, rq in wd.items()
+                if u not in c["members"] or now - float(rq.get("ts", 0)) > WD_TTL]:
+        wd.pop(uid, None)
+
+
+def _pay_out(c: dict, uid: str, r: str, amount: int) -> bool:
+    """Переносит ресурс из казны игроку. Проверки делает вызывающий."""
+    user = _get_user(int(uid))
+    if user is None:
+        return False
+    c[_RES_CLAN_KEY[r]] = _clan_amount(c, r) - amount
+    f = _res_user_field(r)
+    user[f] = int(user.get(f, 0) or 0) + amount
+    return True
+
+
+def request_withdraw(uid: int, r: str, amount: int) -> tuple[bool, str]:
+    """Вывод из казны. Лидер выводит сразу ((True, "paid")), остальные подают заявку ((True, "request"))."""
+    _u, c = _my(uid)
+    if c is None:
+        return False, "Ты не в клане."
+    if r not in RES_KEYS:
+        return False, "Выбери, что вывести."
+    amount = int(amount)
+    if amount <= 0:
+        return False, "Количество должно быть больше нуля."
+    have = _clan_amount(c, r)
+    if amount > have:
+        return False, f"В казне столько нет: там {_n(have)} {_RES_GEN[r]}."
+    if c["leader"] == str(uid):
+        if not _pay_out(c, str(uid), r, amount):
+            return False, "Не удалось выдать."
+        _log(c, f"{_pname(uid)} вывел из казны {_n(amount)} {_RES_GEN[r]}")
+        _save()
+        _save_users()
+        _led("clan_withdraw", user=uid, clan=c["id"], res=r, amount=amount, approved_by=uid)
+        return True, "paid"
+    _prune_wd(c)
+    if str(uid) in c["wd"]:
+        return False, "У тебя уже есть заявка на вывод. Дождись ответа лидера или отмени её."
+    if len(c["wd"]) >= MAX_WD_REQUESTS:
+        return False, "Заявок на вывод слишком много, попробуй позже."
+    c["wd"][str(uid)] = {"res": r, "amount": amount, "ts": time.time()}
+    _save()
+    return True, "request"
+
+
+def cancel_withdraw(uid: int) -> bool:
+    _u, c = _my(uid)
+    if c is None:
+        return False
+    if c.setdefault("wd", {}).pop(str(uid), None) is None:
+        return False
+    _save()
+    return True
+
+
+def answer_withdraw(actor: int, tid: str, accept: bool) -> tuple[bool, str]:
+    """Решение по заявке на вывод. Только лидер."""
+    _u, c = _my(actor)
+    if c is None or c["leader"] != str(actor):
+        return False, "Заявки на вывод решает только лидер."
+    _prune_wd(c)
+    rq = c["wd"].get(tid)
+    if rq is None:
+        return False, "Заявка уже обработана или устарела."
+    r, amount = rq.get("res"), int(rq.get("amount", 0))
+    if r not in RES_KEYS or amount <= 0:
+        c["wd"].pop(tid, None)
+        _save()
+        return False, "Заявка повреждена и удалена."
+    if not accept:
+        c["wd"].pop(tid, None)
+        _save()
+        return True, "Заявка отклонена."
+    have = _clan_amount(c, r)
+    if have < amount:
+        return False, f"В казне сейчас только {_n(have)} {_RES_GEN[r]}. Заявку можно отклонить."
+    c["wd"].pop(tid, None)
+    if not _pay_out(c, tid, r, amount):
+        _save()
+        return False, "Игрок не найден, заявка удалена."
+    _log(c, f"{_pname(tid)} вывел из казны {_n(amount)} {_RES_GEN[r]} (одобрил лидер)")
+    _save()
+    _save_users()
+    _led("clan_withdraw", user=tid, clan=c["id"], res=r, amount=amount, approved_by=actor)
+    return True, "Выдано."
+
+
+def _mask_of(arg: str) -> int:
+    try:
+        return int(arg or 15) & 15
+    except ValueError:
+        return 15
+
+
+def _mask_res(mask: int) -> list[str]:
+    return [r for i, r in enumerate(RES_KEYS) if (mask >> i) & 1]
+
+
+def _recipients(c: dict) -> list[str]:
+    return [u for u in c["members"] if _get_user(int(u)) is not None]
+
+
+def distribution_plan(c: dict, mask: int) -> list[tuple[str, int, int, int]]:
+    """[(ресурс, в казне, каждому, остаток)] для выбранных ресурсов; делим между всеми участниками."""
+    n = len(_recipients(c))
+    out = []
+    for r in _mask_res(mask):
+        total = _clan_amount(c, r)
+        share = total // n if n else 0
+        out.append((r, total, share, total - share * n))
+    return out
+
+
+def distribute(actor: int, mask: int) -> tuple[bool, str]:
+    """Лидер делит выбранное из казны поровну между всеми участниками (в том числе собой)."""
+    _u, c = _my(actor)
+    if c is None or c["leader"] != str(actor):
+        return False, "Казну распределяет только лидер."
+    mask = int(mask) & 15
+    if not _mask_res(mask):
+        return False, "Выбери, что распределять."
+    rec = _recipients(c)
+    plan = [p for p in distribution_plan(c, mask) if p[2] > 0]
+    if not rec or not plan:
+        return False, "Нечего делить: в казне меньше, чем участников."
+    for r, _total, share, _rest in plan:
+        c[_RES_CLAN_KEY[r]] = _clan_amount(c, r) - share * len(rec)
+        f = _res_user_field(r)
+        for uid in rec:
+            user = _get_user(int(uid))
+            user[f] = int(user.get(f, 0) or 0) + share
+    parts = ", ".join(f"{_n(share)} {_RES_GEN[r]}" for r, _t, share, _x in plan)
+    _log(c, f"{_pname(actor)} распределил казну: каждому по {parts}")
+    _save()
+    _save_users()
+    _led("clan_distribute", user=actor, clan=c["id"], members=len(rec),
+         **{f"share_{r}": share for r, _t, share, _x in plan})
+    return True, f"Казна распределена между {len(rec)} участниками."
 
 
 def upgrade(actor: int) -> tuple[bool, str]:
@@ -791,7 +1003,10 @@ def clan_html(c: dict, uid: int, wi: bool = False, note: str = "") -> str:
 def clan_kb(c: dict, uid: int) -> InlineKeyboardMarkup:
     role = _role(c, uid)
     _prune(c)
-    rows = [[_btn("Участники", "cl:mem:0", emoji="👥"), _btn("Казна", "cl:don", emoji=EM_TREASURY)]]
+    _prune_wd(c)
+    nwd = len(c["wd"]) if role == "leader" else 0
+    rows = [[_btn("Участники", "cl:mem:0", emoji="👥"),
+             _btn(f"Казна ({nwd})" if nwd else "Казна", "cl:don", emoji=EM_TREASURY)]]
     if role != "member":
         n = len(c["requests"])
         rows.append([_btn(f"Заявки ({n})" if n else "Заявки", "cl:req",
@@ -912,20 +1127,111 @@ def requests_screen(c: dict):
                  _tree("Игроки", lines)), _kb(*rows))
 
 
-def donate_screen(c: dict, user: dict, uid: int | str = ""):
+def donate_screen(c: dict, user: dict, uid: int | str = "", note: str = ""):
     me = str(uid)
+    leader = c["leader"] == me
+    _prune_wd(c)
+    mine = c["wd"].get(me)
+
+    def contrib(key: str) -> int:
+        return int(c.get(key, {}).get(me, 0))
+
+    mine_line = ""
+    if mine and not leader and mine.get("res") in RES_KEYS:
+        mine_line = (f"<p><i>Твоя заявка на вывод ждёт ответа лидера: "
+                     f"{_res_emoji(mine['res'])} {_n(mine['amount'])}.</i></p>")
     html = lambda wi: (
         f"{_img(wi)}<p><b>{_e(EM_TREASURY)} КАЗНА КЛАНА</b></p>"
         f"<blockquote><i>За каждые {_n(COINS_PER_POINT)} монет клан получает очко {_e(EM_POINTS)}. "
-        f"Минералы идут на улучшение клана. Сумму вводишь вручную.</i></blockquote>"
+        f"Вносить можно монеты, минералы, мясо и фрукты: на улучшение клана они тратятся. "
+        f"Вывести из казны можно только с одобрения лидера. Сумму вводишь вручную.</i></blockquote>"
         f"<p><b>{_e(EM_TREASURY)} В казне</b></p><blockquote>{_clan_stock(c)}</blockquote>"
         f"<p><b>У тебя</b></p><blockquote>"
         f"{_stock(user['coins'], user.get(_MIN_FIELD, 0) or 0, user.get('meat', 0), user.get('fruit', 0))}"
         f"</blockquote>"
-        f"<p><b>Твой вклад</b></p><blockquote>{_e(EM_COINS)} {_n(c['contrib'].get(me, 0))} · "
-        f"{_MIN_EMOJI} {_n(c.get('contrib_min', {}).get(me, 0))}</blockquote>")
-    return html, _kb([_btn("Внести монеты", "cl:dgi", ButtonStyle.SUCCESS, emoji=EM_COINS),
-                      _btn("Внести минералы", "cl:dmi", ButtonStyle.SUCCESS, emoji=_MIN_EMOJI)], [_back()])
+        f"<p><b>Твой вклад</b></p><blockquote>"
+        f"{_stock(contrib('contrib'), contrib('contrib_min'), contrib('contrib_meat'), contrib('contrib_fruit'))}"
+        f"</blockquote>" + mine_line + (f"<p>{note}</p>" if note else ""))
+    rows = [[_btn("Внести монеты", "cl:dgi", ButtonStyle.SUCCESS, emoji=EM_COINS),
+             _btn("Внести минералы", "cl:dmi", ButtonStyle.SUCCESS, emoji=_MIN_EMOJI)],
+            [_btn("Внести мясо", "cl:dr:e", ButtonStyle.SUCCESS, emoji=_MEAT),
+             _btn("Внести фрукты", "cl:dr:f", ButtonStyle.SUCCESS, emoji=_FRUIT)]]
+    if mine and not leader:
+        rows.append([_btn("Отменить заявку на вывод", "cl:wdc", ButtonStyle.DANGER)])
+    else:
+        rows.append([_btn("Вывести из казны", "cl:wd", emoji="📤")])
+    if leader:
+        n = len(c["wd"])
+        rows.append([_btn("Распределить", "cl:dist:15", ButtonStyle.SUCCESS, emoji="🎁"),
+                     _btn(f"Заявки на вывод ({n})" if n else "Заявки на вывод", "cl:wdq",
+                          ButtonStyle.SUCCESS if n else ButtonStyle.PRIMARY, emoji="📋")])
+    rows.append([_back()])
+    return html, _kb(*rows)
+
+
+def withdraw_screen(c: dict, user: dict, uid: int | str):
+    leader = c["leader"] == str(uid)
+    intro = ("Ты лидер, поэтому вывод сразу, без заявки. Выбери, что вывести." if leader else
+             "Вывод только по заявке: лидер получит запрос и решит. Выбери, что вывести.")
+    body = f"<p><b>{_e(EM_TREASURY)} В казне</b></p><blockquote>{_clan_stock(c)}</blockquote>"
+    kb = _kb([_btn("Монеты", "cl:wdr:c", emoji=EM_COINS), _btn("Минералы", "cl:wdr:m", emoji=_MIN_EMOJI)],
+             [_btn("Мясо", "cl:wdr:e", emoji=_MEAT), _btn("Фрукты", "cl:wdr:f", emoji=_FRUIT)],
+             [_back("cl:don")])
+    return card(f"{_e(EM_TREASURY)} ВЫВОД ИЗ КАЗНЫ", intro, body), kb
+
+
+def wd_requests_screen(c: dict):
+    _prune_wd(c)
+    reqs = sorted(c["wd"].items(), key=lambda kv: float(kv[1].get("ts", 0)))[:PAGE]
+    reqs = [(u, rq) for u, rq in reqs if rq.get("res") in RES_KEYS]
+    if not reqs:
+        return card(f"{_e(EM_TREASURY)} ЗАЯВКИ НА ВЫВОД", "Заявок на вывод нет."), _kb([_back("cl:don")])
+    lines = [f"{_hname(u)} · {_res_emoji(rq['res'])} <b>{_n(rq['amount'])}</b> · {_date(rq['ts'])}"
+             for u, rq in reqs]
+    rows = []
+    for u, rq in reqs:
+        rows.append([_btn(f"✅ {_pname(u)} · {_n(rq['amount'])}", f"cl:wda:{u}", ButtonStyle.SUCCESS),
+                     _btn("❌", f"cl:wdd:{u}", ButtonStyle.DANGER)])
+    rows.append([_back("cl:don")])
+    return (card(f"{_e(EM_TREASURY)} ЗАЯВКИ НА ВЫВОД · {len(c['wd'])}",
+                 "Одобришь заявку, и ресурс сразу уйдёт из казны игроку.",
+                 f"<p><b>{_e(EM_TREASURY)} В казне</b></p><blockquote>{_clan_stock(c)}</blockquote>"
+                 + _tree("Игроки", lines)), _kb(*rows))
+
+
+def distribute_screen(c: dict, mask: int):
+    mask &= 15
+    n = len(_recipients(c))
+    lines = []
+    for i, r in enumerate(RES_KEYS):
+        on = bool((mask >> i) & 1)
+        total = _clan_amount(c, r)
+        share = total // n if n else 0
+        lines.append(f"{_e(EM_OK) if on else '▫️'} {_res_emoji(r)} {_RES_TITLE[r]}: в казне <b>{_n(total)}</b>"
+                     f" → каждому <b>{_n(share)}</b>")
+    lines.append(f"Получателей: <b>{n}</b> (включая тебя)")
+    toggles = [_btn(_RES_TITLE[r], f"cl:dist:{mask ^ (1 << i)}",
+                    ButtonStyle.SUCCESS if (mask >> i) & 1 else ButtonStyle.PRIMARY, emoji=_res_icon(r))
+               for i, r in enumerate(RES_KEYS)]
+    html = card(f"🎁 РАСПРЕДЕЛЕНИЕ КАЗНЫ",
+                "Выбранное делится поровну между всеми участниками. Остаток, который не делится нацело, "
+                "остаётся в казне. Нажми на ресурс, чтобы включить или выключить его.",
+                _tree("Что делим", lines))
+    return html, _kb(toggles[:2], toggles[2:],
+                     [_btn("Выбрать всё", "cl:dist:15"),
+                      _btn("Распределить", f"cl:distc:{mask}", ButtonStyle.SUCCESS, emoji="🎁")],
+                     [_back("cl:don")])
+
+
+def distribute_confirm(c: dict, mask: int):
+    plan = [p for p in distribution_plan(c, mask) if p[2] > 0]
+    n = len(_recipients(c))
+    lines = "<br>".join(
+        f"{_res_emoji(r)} по {_n(share)}" + (f" (остаток {_n(rest)} останется в казне)" if rest else "")
+        for r, _t, share, rest in plan)
+    return _confirm("Распределить казну?",
+                    f"Каждый из {n} участников получит:<br>{lines}<br>Это нельзя отменить.",
+                    f"cl:distok:{mask}", f"cl:dist:{mask}")
 
 
 def upgrade_screen(c: dict):
@@ -945,7 +1251,7 @@ def upgrade_screen(c: dict):
 
     html = card("✨ УЛУЧШЕНИЕ КЛАНА",
                 "Нужно всё сразу. Монеты, минералы, мясо и фрукты при улучшении тратятся, медали не тратятся: "
-                "нужно просто иметь столько. Минералы вносят участники, остальное дают клановые боссы и задания.",
+                "нужно просто иметь столько. Всё это вносят участники в казну, мясо и фрукты ещё падают с клановых боссов, медали дают боссы и задания.",
                 expandable=True, body=_tree(f"✨ Уровень {lvl} → {lvl + 1}", [
                     f"{mark(checks[0])} Монеты в казне: <b>{_n(c['treasury'])}/{_n(cost)}</b> {_e(EM_COINS)}",
                     f"{mark(checks[5])} Минералы в казне: <b>{_n(have_min)}/{_n(need_min)}</b> {_MIN_EMOJI}",
@@ -1054,9 +1360,11 @@ async def cmd_clan(message: Message, state: FSMContext):
                           reply_to=None if private else message.message_id)
 
 
-async def _prompt(cb: CallbackQuery, state: FSMContext, kind: str, title: str, text: str, back: str) -> None:
+async def _prompt(cb: CallbackQuery, state: FSMContext, kind: str, title: str, text: str, back: str,
+                  **extra) -> None:
     await state.set_state(ClanStates.waiting)
-    await state.update_data(kind=kind, card_msg=getattr(cb.message, "message_id", None), until=time.time() + INPUT_TTL)
+    await state.update_data(kind=kind, card_msg=getattr(cb.message, "message_id", None),
+                            until=time.time() + INPUT_TTL, **extra)
     await _show(cb, (card(title, text), _kb([_back(back, "Отмена")])))
 
 
@@ -1192,6 +1500,54 @@ async def on_cb(cb: CallbackQuery, state: FSMContext):
                       f"Напиши сообщением, сколько {what} внести. У тебя: {_n(have)}. "
                       "Можно писать 15000, 15k, 1.5m или «все».", "cl:don")
         return
+    if act == "dr":
+        if await need_clan():
+            return
+        r = _RES_CODE.get(arg)
+        await cb.answer()
+        if r is None:
+            return
+        await _prompt(cb, state, "dres", f"{_e(EM_TREASURY)} ВЗНОС В КАЗНУ",
+                      f"Напиши сообщением, сколько {_res_emoji(r)} {_RES_GEN[r]} внести. "
+                      f"У тебя: {_n(_user_amount(user, r))}. Можно писать 1500, 1.5k или «все».",
+                      "cl:don", res=arg)
+        return
+    if act == "wd":
+        if await need_clan():
+            return
+        await cb.answer()
+        await _show(cb, withdraw_screen(c, user, uid))
+        return
+    if act == "wdr":
+        if await need_clan():
+            return
+        r = _RES_CODE.get(arg)
+        if r is None:
+            await cb.answer()
+            return
+        _prune_wd(c)
+        if role != "leader" and str(uid) in c["wd"]:
+            await alert("У тебя уже есть заявка на вывод. Дождись ответа лидера или отмени её в казне.")
+            return
+        if _clan_amount(c, r) <= 0:
+            await alert("В казне этого сейчас нет.")
+            return
+        await cb.answer()
+        await _prompt(cb, state, "wd", f"{_e(EM_TREASURY)} ВЫВОД ИЗ КАЗНЫ",
+                      f"Напиши сообщением, сколько {_res_emoji(r)} {_RES_GEN[r]} вывести. "
+                      f"В казне: {_n(_clan_amount(c, r))}. Можно писать 1500, 1.5k или «все». "
+                      + ("Ты лидер: вывод пройдёт сразу." if role == "leader"
+                         else "Заявка уйдёт лидеру, он решит."), "cl:wd", res=arg)
+        return
+    if act == "wdc":
+        if await need_clan():
+            return
+        if cancel_withdraw(uid):
+            await cb.answer("Заявка отменена")
+        else:
+            await cb.answer()
+        await _show(cb, donate_screen(c, user, uid))
+        return
     if act == "lv":
         if await need_clan():
             return
@@ -1271,7 +1627,8 @@ async def on_cb(cb: CallbackQuery, state: FSMContext):
         return
 
     # ---- только лидер ----
-    if act in ("dep", "depoff", "xf", "xfok", "up", "upgo", "set", "jm", "ml", "desc", "ds", "dsok"):
+    if act in ("dep", "depoff", "xf", "xfok", "up", "upgo", "set", "jm", "ml", "desc", "ds", "dsok",
+               "wdq", "wda", "wdd", "dist", "distc", "distok"):
         if await need_leader():
             return
     if act == "dep":
@@ -1320,6 +1677,58 @@ async def on_cb(cb: CallbackQuery, state: FSMContext):
         await cb.answer(msg, show_alert=True)
         if ok:
             await _show(cb, upgrade_screen(c))
+        return
+    if act == "wdq":
+        await cb.answer()
+        await _show(cb, wd_requests_screen(c))
+        return
+    if act in ("wda", "wdd"):
+        _prune_wd(c)
+        req = dict(c["wd"].get(arg) or {})
+        ok, msg = answer_withdraw(uid, arg, act == "wda")
+        if not ok:
+            await alert(msg)
+        else:
+            await cb.answer(msg)
+            r = req.get("res")
+            if r in RES_KEYS:
+                what = f"{_res_emoji(r)} {_n(req['amount'])}"
+                name = escape(c["name"])
+                await _notify(cb.bot, arg,
+                              f"{_e(EM_OK)} Лидер клана «{name}» одобрил вывод: ты получил {what}." if act == "wda"
+                              else f"{_e(EM_CLAN)} Лидер клана «{name}» отклонил заявку на вывод {what}.")
+        await _show(cb, wd_requests_screen(c))
+        return
+    if act in ("dist", "distc", "distok"):
+        mask = _mask_of(arg)
+        if act == "dist":
+            await cb.answer()
+            await _show(cb, distribute_screen(c, mask))
+            return
+        if not _mask_res(mask):
+            await alert("Выбери, что распределять.")
+            return
+        plan = [p for p in distribution_plan(c, mask) if p[2] > 0]
+        if not plan:
+            await alert("Нечего делить: в казне меньше, чем участников.")
+            return
+        if act == "distc":
+            await cb.answer()
+            await _show(cb, distribute_confirm(c, mask))
+            return
+        rec = _recipients(c)
+        ok, msg = distribute(uid, mask)
+        if not ok:
+            await alert(msg)
+            return
+        await cb.answer(msg, show_alert=True)
+        await _show(cb, donate_screen(c, user, uid))
+        got = " / ".join(f"{_res_emoji(r)} {_n(share)}" for r, _t, share, _x in plan)
+        for m in rec:
+            if m != str(uid):
+                await _notify(cb.bot, m, f"{_e(EM_TREASURY)} Лидер клана «{escape(c['name'])}» распределил казну "
+                                         f"поровну. Тебе: {got}")
+                await asyncio.sleep(0.05)
         return
     if act == "tsk":
         if await need_clan():
@@ -1422,21 +1831,34 @@ async def on_input(message: Message, state: FSMContext):
         _log(c, f"{_pname(uid)} отправил объявление")
         _save()
         note = f"<b>{_e(EM_OK)} Объявление доставлено: {sent}.</b>"
-    elif kind in ("dcoin", "dmin"):
+    elif kind in ("dcoin", "dmin", "dres", "wd"):
         if c is None:
             await state.clear()
             return
-        coins = kind == "dcoin"
-        have = user["coins"] if coins else int(user.get(_MIN_FIELD, 0) or 0)
+        r = "coins" if kind == "dcoin" else "minerals" if kind == "dmin" else _RES_CODE.get(data.get("res"))
+        if r is None:
+            await state.clear()
+            return
+        have = _clan_amount(c, r) if kind == "wd" else _user_amount(user, r)
         amount = parse_amount(text, have)
         if amount is None:
             await message.answer("<i>Не понял сумму. Пример: 15000, 15k, 1.5m или «все». "
                                  "Или нажми «Отмена» на карточке.</i>")
             return
-        ok, res = (donate if coins else donate_minerals)(uid, amount)
+        ok, res = request_withdraw(uid, r, amount) if kind == "wd" else _deposit(uid, r, amount)
         if not ok:
             await message.answer(f"<i>{escape(res)} Пришли другую сумму или нажми «Отмена».</i>")
             return
+        wnote = ""
+        if kind == "wd":
+            what = f"{_res_emoji(r)} {_n(amount)}"
+            if res == "request":
+                wnote = f"<b>{_e(EM_OK)} Заявка на вывод {what} отправлена лидеру.</b> Ответ придёт сообщением."
+                await _notify(message.bot, c["leader"],
+                              f"{_e(EM_TREASURY)} {_hname(uid)} просит вывести из казны клана: {what}.",
+                              _kb([_btn("Открыть заявки на вывод", "cl:wdq", ButtonStyle.SUCCESS)]))
+            else:
+                wnote = f"<b>{_e(EM_OK)} Выведено из казны: {what}.</b>"
         await state.clear()
         try:
             await message.delete()
@@ -1448,7 +1870,7 @@ async def on_input(message: Message, state: FSMContext):
             except TelegramAPIError:
                 pass
         user, c = _my(uid)
-        html_fn, kb = donate_screen(c, user, uid)
+        html_fn, kb = donate_screen(c, user, uid, wnote)
         await _send_rich_card(message.bot, message.chat.id, "clan", html_fn, kb)
         return
     else:
