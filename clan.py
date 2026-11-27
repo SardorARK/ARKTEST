@@ -152,7 +152,14 @@ EM_POINTS = ("", "⚜️")
 EM_OK = ("5390846416530716134", "✅")      # галочка
 EM_NO = ("5328093774650293878", "🌟")      # не хватает
 EM_MEDAL = ("", "🎖")
-EM_TASK = ("", "📜")
+EM_MEMBERS = ("6032594876506312598", "👥")    # участники
+EM_JOIN = ("5197288647275071607", "🛡")       # вход
+EM_ANN = ("5424818078833715060", "📣")        # объявление
+EM_LOG = ("5316834492114038584", "📅")        # события
+EM_TOP = ("5413566144986503832", "🏆")        # топ кланов
+EM_TASK = ("5343970701080546628", "✔️")       # задания
+EM_SETTINGS = ("5341715473882955310", "⚙️")   # настройки
+EM_DEL = ("6048429811041308419", "🗑")        # распустить клан
 EM_BOSS = ("5305580419373085129", "🤟")     # кнопка «Боссы»
 
 ROLE_TITLES = {"leader": "Лидер", "deputy": "Заместитель", "member": "Участник"}
@@ -1038,8 +1045,14 @@ def _gap() -> str:
     return f"<p><code>{DOTS}</code></p>"
 
 
-def _btn(text: str, data: str, style: ButtonStyle = ButtonStyle.PRIMARY, emoji=None) -> InlineKeyboardButton:
-    """emoji: пара (id, запасной) или просто строка. С id эмодзи ставится значком кнопки, иначе перед текстом."""
+RED_BUTTONS = ("cl:ds", "cl:dsok")      # единственные цветные (красные) кнопки: роспуск клана и его подтверждение
+
+
+def _btn(text: str, data: str, style: ButtonStyle | None = None, emoji=None) -> InlineKeyboardButton:
+    """emoji: пара (id, запасной) или просто строка. С id эмодзи ставится значком кнопки, иначе перед текстом.
+    Кнопки без цвета: style учитывается только у кнопок из RED_BUTTONS."""
+    if data not in RED_BUTTONS:
+        style = None
     icon = None
     if emoji:
         eid, fb = emoji if isinstance(emoji, tuple) else ("", emoji)
@@ -1051,8 +1064,7 @@ def _btn(text: str, data: str, style: ButtonStyle = ButtonStyle.PRIMARY, emoji=N
 
 
 def _back(data: str = "cl:home", text: str = "Назад") -> InlineKeyboardButton:
-    return InlineKeyboardButton(text=text, callback_data=data, style=ButtonStyle.PRIMARY,
-                                icon_custom_emoji_id=_BACK_ID)
+    return InlineKeyboardButton(text=text, callback_data=data, icon_custom_emoji_id=_BACK_ID)
 
 
 def _kb(*rows) -> InlineKeyboardMarkup:
@@ -1088,8 +1100,8 @@ def clan_html(c: dict, uid: int, wi: bool = False, note: str = "") -> str:
     lines_main = [
         f"<b>{_e(EM_LEADER)} Лидер:</b> {_hname(c['leader'])}",
         f"<b>{_e(EM_DEPUTY)} Заместитель:</b> {dep}",
-        f"<b>Участники: {len(c['members'])}/{_cap(c)}</b>",
-        f"<b>Вход: {JOIN_TITLES[c['join']]}</b>" + (f"<b> · от {c['min_level']} ур.</b>" if c["min_level"] > 1 else ""),
+        f"<b>{_e(EM_MEMBERS)} Участники: {len(c['members'])}/{_cap(c)}</b>",
+        f"<b>{_e(EM_JOIN)} Вход: {JOIN_TITLES[c['join']]}</b>" + (f"<b> · от {c['min_level']} ур.</b>" if c["min_level"] > 1 else ""),
     ]
     lines_stat = [
         f"<b>Уровень клана: {c['level']}/{MAX_CLAN_LEVEL}</b>",
@@ -1110,19 +1122,19 @@ def clan_kb(c: dict, uid: int) -> InlineKeyboardMarkup:
     _prune(c)
     _prune_wd(c)
     nwd = len(c["wd"]) if role == "leader" else 0
-    rows = [[_btn("Участники", "cl:mem:0", emoji="👥"),
+    rows = [[_btn("Участники", "cl:mem:0", emoji=EM_MEMBERS),
              _btn(f"Казна ({nwd})" if nwd else "Казна", "cl:don", emoji=EM_TREASURY)]]
     if role != "member":
         n = len(c["requests"])
         rows.append([_btn(f"Заявки ({n})" if n else "Заявки", "cl:req",
                           ButtonStyle.SUCCESS if n else ButtonStyle.PRIMARY, emoji="📥"),
-                     _btn("Объявление", "cl:ann", emoji="📢")])
+                     _btn("Объявление", "cl:ann", emoji=EM_ANN)])
     if role == "leader":
         rows.append([_btn("Улучшить клан", "cl:up", ButtonStyle.SUCCESS, emoji="✨"),
-                     _btn("Настройки", "cl:set", emoji="⚙️")])
-    rows.append([_btn("Боссы", "cb:open", ButtonStyle.SUCCESS, emoji=EM_BOSS), _btn("Задания", "cl:tsk", emoji="📜")])
-    rows.append([_btn("Топ кланов", "cl:top:0", emoji="🏆"), _btn("События", "cl:log", emoji="🕓")])
-    rows.append([_btn("Распустить клан", "cl:ds", ButtonStyle.DANGER, emoji="🗑") if role == "leader"
+                     _btn("Настройки", "cl:set", emoji=EM_SETTINGS)])
+    rows.append([_btn("Боссы", "cb:open", ButtonStyle.SUCCESS, emoji=EM_BOSS), _btn("Задания", "cl:tsk", emoji=EM_TASK)])
+    rows.append([_btn("Топ кланов", "cl:top:0", emoji=EM_TOP), _btn("События", "cl:log", emoji=EM_LOG)])
+    rows.append([_btn("Распустить клан", "cl:ds", ButtonStyle.DANGER, emoji=EM_DEL) if role == "leader"
                  else _btn("Покинуть клан", "cl:lv", ButtonStyle.DANGER, emoji="🚪")])
     rows.append([_back("menu:back")])
     return _kb(*rows)
@@ -1145,7 +1157,7 @@ def noclan_html(user: dict, uid: int, wi: bool = False, note: str = "") -> str:
 
 def noclan_kb(uid: int) -> InlineKeyboardMarkup:
     rows = [[_btn("Создать клан", "cl:new", ButtonStyle.SUCCESS), _btn("Найти клан", "cl:list:0")],
-            [_btn("Топ кланов", "cl:top:0")]]
+            [_btn("Топ кланов", "cl:top:0", emoji=EM_TOP)]]
     for c in _pending(uid):
         rows.append([_btn(f"Отменить заявку в «{c['name']}»", f"cl:cr:{c['id']}", ButtonStyle.DANGER)])
     rows.append([_back("menu:back")])
@@ -1184,7 +1196,7 @@ def members_screen(c: dict, uid: int, page: int):
     chunk = ids[page * PAGE:(page + 1) * PAGE]
     manage = _role(c, uid) != "member"
     lines = [f"{_who(c, u)} · ур. {_plevel(u)} · вклад <b>{_n(c['contrib'].get(u, 0))}</b>" for u in chunk]
-    html = card(f"{_e(EM_CLAN)} УЧАСТНИКИ · {len(ids)}/{_cap(c)}",
+    html = card(f"{_e(EM_MEMBERS)} УЧАСТНИКИ · {len(ids)}/{_cap(c)}",
                 "Нажми на участника, чтобы управлять им." if manage else "Состав клана и вклад каждого в казну.",
                 _tree(f"Страница {page + 1}/{pages}", lines))
     rows = []
@@ -1374,12 +1386,12 @@ def upgrade_screen(c: dict):
 
 
 def settings_screen(c: dict):
-    lines = [f"Вход: <b>{JOIN_TITLES[c['join']]}</b>", f"Мин. уровень игрока: <b>{c['min_level']}</b>",
+    lines = [f"{_e(EM_JOIN)} Вход: <b>{JOIN_TITLES[c['join']]}</b>", f"Мин. уровень игрока: <b>{c['min_level']}</b>",
              f"Описание: <i>{escape(c['desc']) if c.get('desc') else 'нет'}</i>",
              f"Заместитель: {_who(c, c['deputy']) if c.get('deputy') else '<i>не назначен</i>'}"]
-    html = card(f"{_e(EM_CLAN)} НАСТРОЙКИ КЛАНА", "Только для лидера. Заместителя назначай в списке участников.",
+    html = card(f"{_e(EM_SETTINGS)} НАСТРОЙКИ КЛАНА", "Только для лидера. Заместителя назначай в списке участников.",
                 _tree("Сейчас", lines))
-    rows = [[_btn(f"Вход: {JOIN_TITLES[c['join']]}", "cl:jm")],
+    rows = [[_btn(f"Вход: {JOIN_TITLES[c['join']]}", "cl:jm", emoji=EM_JOIN)],
             [_btn("−5", "cl:ml:-5"), _btn(f"Мин. ур.: {c['min_level']}", "cl:noop"), _btn("+5", "cl:ml:5")],
             [_btn("Изменить описание", "cl:desc")]]
     if c.get("deputy"):
@@ -1398,7 +1410,7 @@ def top_screen(page: int):
              f"{_n(c['points'])} оч. · {len(c['members'])}/{_cap(c)}" for i, c in enumerate(chunk, 1)]
     body = _tree("Рейтинг", lines) if lines else "<p><i>Кланов пока нет.</i></p>"
     rows = [_nav("cl:top", page, pages), [_back()]]
-    return card(f"{_e(EM_POINTS)} ТОП КЛАНОВ", "Рейтинг по очкам: их приносят вклады в казну.", body), _kb(*rows)
+    return card(f"{_e(EM_TOP)} ТОП КЛАНОВ", "Рейтинг по очкам: их приносят вклады в казну.", body), _kb(*rows)
 
 
 def list_screen(page: int):
@@ -1415,9 +1427,9 @@ def list_screen(page: int):
 
 def view_screen(c: dict, uid: int):
     lines = [f"{_e(EM_LEADER)} Лидер: {_hname(c['leader'])}",
-             f"Участники: <b>{len(c['members'])}/{_cap(c)}</b> · уровень клана <b>{c['level']}</b>",
+             f"{_e(EM_MEMBERS)} Участники: <b>{len(c['members'])}/{_cap(c)}</b> · уровень клана <b>{c['level']}</b>",
              f"{_e(EM_POINTS)} Очки: <b>{_n(c['points'])}</b> · место <b>{_rank_of(c)}</b>",
-             f"Вход: <b>{JOIN_TITLES[c['join']]}</b>, от <b>{c['min_level']}</b> ур."]
+             f"{_e(EM_JOIN)} Вход: <b>{JOIN_TITLES[c['join']]}</b>, от <b>{c['min_level']}</b> ур."]
     html = card(f"{_e(EM_CLAN)} {escape(c['name'])}", escape(c["desc"]) if c.get("desc") else "Описания нет.",
                 _tree("Клан", lines))
     _prune(c)
@@ -1432,7 +1444,7 @@ def view_screen(c: dict, uid: int):
 
 def log_screen(c: dict):
     rows = [f"<i>{time.strftime('%d.%m %H:%M', time.localtime(ts))}</i> <i>{escape(t)}</i>" for ts, t in reversed(c["log"][-15:])]
-    return card(f"{_e(EM_CLAN)} СОБЫТИЯ", "Последние события клана."), None, rows
+    return card(f"{_e(EM_LOG)} СОБЫТИЯ", "Последние события клана."), None, rows
 
 
 # ---------- Уведомления ----------
@@ -1589,7 +1601,7 @@ async def on_cb(cb: CallbackQuery, state: FSMContext):
         await cb.answer()
         head, _kb_none, lines = log_screen(c)
         body = _tree("Журнал", lines) if lines else "<p><i>Пока пусто.</i></p>"
-        await _show(cb, (card(f"{_e(EM_CLAN)} СОБЫТИЯ", "Последние события клана.", body), _kb([_back()])))
+        await _show(cb, (card(f"{_e(EM_LOG)} СОБЫТИЯ", "Последние события клана.", body), _kb([_back()])))
         return
     if act == "don":
         if await need_clan():
@@ -1731,7 +1743,7 @@ async def on_cb(cb: CallbackQuery, state: FSMContext):
             await alert(f"Следующее объявление можно через {_dur(left)}.")
             return
         await cb.answer()
-        await _prompt(cb, state, "ann", f"{_e(EM_CLAN)} ОБЪЯВЛЕНИЕ",
+        await _prompt(cb, state, "ann", f"{_e(EM_ANN)} ОБЪЯВЛЕНИЕ",
                       f"Пришли текст до {ANNOUNCE_MAX} символов: его получат все участники клана в личку.", "cl:home")
         return
 
@@ -1870,7 +1882,7 @@ async def on_cb(cb: CallbackQuery, state: FSMContext):
         return
     if act == "ds":
         await cb.answer()
-        await _show(cb, _confirm("Распустить клан?", f"Клан «{escape(c['name'])}» исчезнет вместе с казной "
+        await _show(cb, _confirm(f"{_e(EM_DEL)} Распустить клан?", f"Клан «{escape(c['name'])}» исчезнет вместе с казной "
                                                      f"({_n(c['treasury'])} монет). Это нельзя отменить.",
                                  "cl:dsok", "cl:set"))
         return
@@ -1930,7 +1942,7 @@ async def on_input(message: Message, state: FSMContext):
             return
         c["ann_at"] = time.time()
         _save()
-        body = (f"<b>{_e(EM_CLAN)} Объявление клана «{escape(c['name'])}»</b>\n"
+        body = (f"<b>{_e(EM_ANN)} Объявление клана «{escape(c['name'])}»</b>\n"
                 f"<i>от {ROLE_TITLES[_role(c, uid)].lower()}: {_hname(uid)}</i>\n\n{escape(text)}")
         sent = 0
         for m in list(c["members"]):
