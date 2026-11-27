@@ -88,6 +88,7 @@ WD_TTL = 2 * 86400                # заявка на вывод из казны
 MAX_WD_REQUESTS = 30              # заявок на вывод одновременно
 LOG_KEEP = 30
 PAGE = 8
+LIST_PAGE = 8                      # кланов на странице поиска
 COINS_PER_POINT = 1_000           # столько монет вклада = 1 очко клана
 MAX_CLAN_LEVEL = 8
 MEMBER_CAP = {lv: 5 + 5 * lv for lv in range(1, MAX_CLAN_LEVEL + 1)}      # 10, 15, ... 45
@@ -517,6 +518,9 @@ def answer_request(actor: int, tid: str, accept: bool) -> tuple[bool, str]:
     if tuser is None or tuser.get("clan"):
         _save()
         return False, "Игрок уже в другом клане."
+    if _plevel(tid) < int(c["min_level"]):
+        _save()
+        return False, f"Заявка удалена: уровень игрока ниже минимального ({c['min_level']})."
     if len(c["members"]) >= _cap(c):
         c["requests"][tid] = time.time()
         _save()
@@ -1079,8 +1083,8 @@ def _nav(prefix: str, page: int, total: int) -> list:
             _btn("›", f"{prefix}:{(page + 1) % total}")]
 
 
-def _pages(total: int) -> int:
-    return max(1, -(-total // PAGE))
+def _pages(total: int, per: int = PAGE) -> int:
+    return max(1, -(-total // per))
 
 
 def _rank_of(c: dict) -> int:
@@ -1416,14 +1420,14 @@ def top_screen(page: int):
 
 def list_screen(page: int):
     ranked = _ranked()
-    pages = _pages(len(ranked))
+    pages = _pages(len(ranked), LIST_PAGE)
     page = max(0, min(page, pages - 1))
-    chunk = ranked[page * PAGE:(page + 1) * PAGE]
-    rows = [[_btn(f"{c['name']} · {len(c['members'])}/{_cap(c)} · {JOIN_TITLES[c['join']]}", f"cl:view:{c['id']}")]
-            for c in chunk]
+    chunk = ranked[page * LIST_PAGE:(page + 1) * LIST_PAGE]
+    rows = [[_btn(f"{c['name']} | {len(c['members'])}/{_cap(c)}👥 | {c['level']} ✨", f"cl:view:{c['id']}",
+                  emoji=EM_CLAN)] for c in chunk]
     rows += [_nav("cl:list", page, pages), [_back()]]
     body = "" if chunk else "<p><i>Кланов пока нет. Создай первый!</i></p>"
-    return card(f"{_e(EM_CLAN)} НАЙТИ КЛАН", "Выбери клан, чтобы посмотреть и вступить.", body), _kb(*rows)
+    return card(f"{_e(EM_CLAN)} НАЙТИ КЛАН", "Выбери клан, чтобы посмотреть и вступить. На кнопке: название | участники | уровень клана.", body), _kb(*rows)
 
 
 def view_screen(c: dict, uid: int):
@@ -1432,6 +1436,9 @@ def view_screen(c: dict, uid: int):
              f"{_e(EM_LEVEL)} Уровень: <b>{c['level']}</b>✨",
              f"{_e(EM_POINTS)} Очки: <b>{_n(c['points'])}</b> · место <b>{_rank_of(c)}</b>",
              f"{_e(EM_JOIN)} Вход: <b>{JOIN_TITLES[c['join']]}</b>, от <b>{c['min_level']}</b> ур."]
+    low = _plevel(uid) < int(c["min_level"])
+    if low:
+        lines.append(f"Твой уровень: <b>{_plevel(uid)}</b> · нужен <b>{c['min_level']}</b>")
     html = card(f"{_e(EM_CLAN)} {escape(c['name'])}", escape(c["desc"]) if c.get("desc") else "Описания нет.",
                 _tree("Клан", lines))
     _prune(c)
@@ -1439,6 +1446,8 @@ def view_screen(c: dict, uid: int):
         act = _btn("Отменить заявку", f"cl:cr:{c['id']}", ButtonStyle.DANGER)
     elif c["join"] == "closed":
         act = _btn("Клан закрыт", "cl:noop", ButtonStyle.DANGER)
+    elif low:
+        act = _btn(f"Нужен уровень {c['min_level']}", "cl:noop", ButtonStyle.DANGER)
     else:
         act = _btn("Вступить" if c["join"] == "open" else "Подать заявку", f"cl:jn:{c['id']}", ButtonStyle.SUCCESS)
     return html, _kb([act], [_back("cl:list:0")])
@@ -1873,6 +1882,8 @@ async def on_cb(cb: CallbackQuery, state: FSMContext):
         return
     if act == "ml":
         c["min_level"] = max(1, min(_PLAYER_MAX, int(c["min_level"]) + int(arg)))
+        for u in [u for u in c["requests"] if _plevel(u) < c["min_level"]]:
+            c["requests"].pop(u, None)
         _save()
         await cb.answer(f"Минимальный уровень: {c['min_level']}")
         await _show(cb, settings_screen(c))
