@@ -1204,7 +1204,9 @@ def menu_kb() -> InlineKeyboardMarkup:
             # Достижения: 60 заданий в шести разделах, награды монетами, мясом и фруктами
             [btn("Достижения", "menu:ach", ButtonStyle.SUCCESS, ACH_EMOJI[0])],
             # Кланы (clan.py): откроется экран создания или вступления, либо свой клан
-            [btn("Клан", "cl:home", ButtonStyle.PRIMARY, clan.EM_CLAN[0])],
+            # у замка 🏰 нет кастомного id, поэтому он идёт обычным эмодзи в тексте кнопки (появится id: станет значком)
+            [btn("Клан" if clan.EM_CLAN[0] else f"{clan.EM_CLAN[1]} Клан", "cl:home", ButtonStyle.PRIMARY,
+                 clan.EM_CLAN[0])],
             # Донат и Бонус (+10% к урону за юзернейм бота в описании): внизу меню в одном ряду
             [
                 btn("Донат", "menu:donate", ButtonStyle.PRIMARY, DONATE_EMOJI[0]),
