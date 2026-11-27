@@ -665,13 +665,17 @@ async def _show(callback: CallbackQuery, html, back: str) -> None:
 
 @router.message(F.text == "Рынок")
 async def on_text_market(message: Message):
-    """Кнопка «Рынок» на нижней клавиатуре: открывает рынок новым сообщением."""
+    """Команда «рынок» (и кнопка «Рынок» на нижней клавиатуре): открывает рынок новым сообщением, ОТВЕТОМ на
+    сообщение игрока. Так нужно, чтобы кастомные эмодзи не пропадали при правках экрана: баг Telegram, когда
+    editMessageText с rich-сообщением в группе превращает их в обычные, если исходное сообщение не было ответом
+    (см. send_rich_card в main.py, параметр reply_to)."""
     uid = message.from_user.id
     if donate._cfg["get_user"](uid) is None:
         await message.answer("Сначала выбери питомца: /start")
         return
     await donate._cfg["send_rich_card"](
-        message.bot, message.chat.id, _img(), lambda wi: home_html(uid, wi), _close_kb())
+        message.bot, message.chat.id, _img(), lambda wi: home_html(uid, wi), _close_kb(),
+        reply_to=message.message_id)
 
 
 @router.callback_query(F.data == "market:close")
