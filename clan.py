@@ -159,6 +159,8 @@ EM_ANN = ("5424818078833715060", "📣")        # объявление
 EM_LOG = ("5316834492114038584", "📅")        # события
 EM_TOP = ("5413566144986503832", "🏆")        # топ кланов
 EM_LEVEL = ("5408869739982246969", "⭐")       # уровень клана
+EM_FIND = ("5231012545799666522", "🔍")        # найти клан
+EM_REQUEST = ("", "📨")                        # кинуть заявку (поставь id кастомного эмодзи, если нужен)
 EM_TASK = ("5343970701080546628", "✔️")       # задания
 EM_SETTINGS = ("5341715473882955310", "⚙️")   # настройки
 EM_DEL = ("6048429811041308419", "🗑")        # распустить клан
@@ -1147,13 +1149,10 @@ def clan_kb(c: dict, uid: int) -> InlineKeyboardMarkup:
 
 def noclan_html(user: dict, uid: int, wi: bool = False, note: str = "") -> str:
     pend = _pending(uid)
-    lines = [f"Создать клан: <b>{_n(CREATE_PRICE)}</b> {_e(EM_COINS)}, от <b>{CREATE_MIN_LEVEL}</b> уровня игрока",
-             "Вступить: открытые сразу, остальные по заявке"]
     return (
         f"{_img(wi)}<p><b>{_e(EM_CLAN)} КЛАНЫ</b></p>"
         "<blockquote><i>Собери команду: вноси монеты в общую казну, расти уровень клана и поднимайся "
         "в рейтинге. Создатель сам выбирает себе заместителя.</i></blockquote>"
-        + _gap() + _tree("Как это работает", lines)
         + (f"<p><i>Ждёт ответа заявка в «{escape(pend[0]['name'])}».</i></p>" if pend else "")
         + (f"<p><i>Вступать в кланы можно через {_dur(_cooldown_left(user))}.</i></p>" if _cooldown_left(user) else "")
         + (f"<p>{note}</p>" if note else "")
@@ -1161,7 +1160,7 @@ def noclan_html(user: dict, uid: int, wi: bool = False, note: str = "") -> str:
 
 
 def noclan_kb(uid: int) -> InlineKeyboardMarkup:
-    rows = [[_btn("Создать клан", "cl:new", ButtonStyle.SUCCESS), _btn("Найти клан", "cl:list:0")],
+    rows = [[_btn("Создать клан", "cl:new", emoji=EM_CLAN), _btn("Найти клан", "cl:list:0", emoji=EM_FIND)],
             [_btn("Топ кланов", "cl:top:0", emoji=EM_TOP)]]
     for c in _pending(uid):
         rows.append([_btn(f"Отменить заявку в «{c['name']}»", f"cl:cr:{c['id']}", ButtonStyle.DANGER)])
@@ -1427,7 +1426,7 @@ def list_screen(page: int):
                   emoji=EM_CLAN)] for c in chunk]
     rows += [_nav("cl:list", page, pages), [_back()]]
     body = "" if chunk else "<p><i>Кланов пока нет. Создай первый!</i></p>"
-    return card(f"{_e(EM_CLAN)} НАЙТИ КЛАН", "Выбери клан, чтобы посмотреть и вступить. На кнопке: название | участники | уровень клана.", body), _kb(*rows)
+    return card(f"{_e(EM_FIND)} НАЙТИ КЛАН", "Выбери клан, чтобы посмотреть и вступить. На кнопке: название | участники | уровень клана.", body), _kb(*rows)
 
 
 def view_screen(c: dict, uid: int):
@@ -1438,7 +1437,7 @@ def view_screen(c: dict, uid: int):
              f"{_e(EM_JOIN)} Вход: <b>{JOIN_TITLES[c['join']]}</b>, от <b>{c['min_level']}</b> ур."]
     low = _plevel(uid) < int(c["min_level"])
     if low:
-        lines.append(f"Твой уровень: <b>{_plevel(uid)}</b> · нужен <b>{c['min_level']}</b>")
+        lines.extend(["", f"<i>Твой уровень: {_plevel(uid)} · нужен {c['min_level']}</i>"])
     html = card(f"{_e(EM_CLAN)} {escape(c['name'])}", escape(c["desc"]) if c.get("desc") else "Описания нет.",
                 _tree("Клан", lines))
     _prune(c)
@@ -1446,10 +1445,10 @@ def view_screen(c: dict, uid: int):
         act = _btn("Отменить заявку", f"cl:cr:{c['id']}", ButtonStyle.DANGER)
     elif c["join"] == "closed":
         act = _btn("Клан закрыт", "cl:noop", ButtonStyle.DANGER)
-    elif low:
-        act = _btn(f"Нужен уровень {c['min_level']}", "cl:noop", ButtonStyle.DANGER)
+    elif c["join"] == "open":
+        act = _btn("Вступить", f"cl:jn:{c['id']}", emoji=EM_CLAN)
     else:
-        act = _btn("Вступить" if c["join"] == "open" else "Подать заявку", f"cl:jn:{c['id']}", ButtonStyle.SUCCESS)
+        act = _btn("Кинуть заявку", f"cl:jn:{c['id']}", emoji=EM_REQUEST)
     return html, _kb([act], [_back("cl:list:0")])
 
 
