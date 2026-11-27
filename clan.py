@@ -157,6 +157,7 @@ EM_JOIN = ("5197288647275071607", "🛡")       # вход
 EM_ANN = ("5424818078833715060", "📣")        # объявление
 EM_LOG = ("5316834492114038584", "📅")        # события
 EM_TOP = ("5413566144986503832", "🏆")        # топ кланов
+EM_LEVEL = ("5408869739982246969", "⭐")       # уровень клана
 EM_TASK = ("5343970701080546628", "✔️")       # задания
 EM_SETTINGS = ("5341715473882955310", "⚙️")   # настройки
 EM_DEL = ("6048429811041308419", "🗑")        # распустить клан
@@ -966,36 +967,36 @@ def _common_task_add(c: dict, kind: str, n: int = 1, uid=None) -> list[str]:
     return done_now
 
 
+def _task_block(items: list[dict], pool: dict, personal: bool) -> str:
+    """Свёртываемая цитата с заданиями. Внутри только <br> и точки (без <p>), весь текст курсивом."""
+    sep = f"<br><code>{DOTS}</code><br>"
+    parts = []
+    for it in items:
+        spec = pool[it["k"]]
+        mark = "✅" if it["done"] else "▫️"
+        title = spec["title"].format(n=_n(spec["target"]))
+        if personal:
+            reward = (f"Награда: {_e(EM_COINS)} {_n(spec['coins'])} тебе · {_e(EM_COINS)} {_n(spec['treasury'])} "
+                      f"в казну · {_e(EM_POINTS)} {spec['points']}")
+        else:
+            reward = (f"Награда: {_e(EM_COINS)} {_n(spec['coins'])} в казну · {_e(EM_MEDAL)} {spec['medals']} · "
+                      f"{_e(EM_POINTS)} {spec['points']}")
+        parts.append(f"<i>{mark} {title}</i><br><i>Прогресс: {_n(it['n'])}/{_n(spec['target'])}</i><br><i>{reward}</i>")
+    return f"<blockquote expandable>{sep.join(parts)}</blockquote>"
+
+
 def tasks_screen(c: dict, uid=None):
     t = _tasks(c)
-    common = ""
-    for it in t["items"]:
-        spec = TASK_POOL[it["k"]]
-        mark = "✅" if it["done"] else "▫️"
-        title = spec["title"].format(n=_n(spec["target"]))
-        common += _tree(f"{mark} {title}", [
-            f"Прогресс: <b>{_n(it['n'])}/{_n(spec['target'])}</b>",
-            f"Награда: {_e(EM_COINS)} <b>{_n(spec['coins'])}</b> в казну · {_e(EM_MEDAL)} <b>{spec['medals']}</b> · "
-            f"{_e(EM_POINTS)} <b>{spec['points']}</b>"])
     mine = _ptasks(c, uid) if uid is not None else []
-    personal = ""
-    for it in mine:
-        spec = PTASK_POOL[it["k"]]
-        mark = "✅" if it["done"] else "▫️"
-        title = spec["title"].format(n=_n(spec["target"]))
-        personal += _tree(f"{mark} {title}", [
-            f"Прогресс: <b>{_n(it['n'])}/{_n(spec['target'])}</b>",
-            f"Награда: {_e(EM_COINS)} <b>{_n(spec['coins'])}</b> тебе · {_e(EM_COINS)} <b>{_n(spec['treasury'])}</b> "
-            f"в казну · {_e(EM_POINTS)} <b>{spec['points']}</b>"])
-    body = ""
-    if mine:
-        body += (f"<p><b>👤 ЛИЧНЫЕ ЗАДАНИЯ</b> · выполнено {sum(1 for i in mine if i['done'])}/{len(mine)}</p>"
-                 + personal + _gap())
-    body += (f"<p><b>👥 ОБЩИЕ ЗАДАНИЯ</b> · выполнено {sum(1 for i in t['items'] if i['done'])}/{len(t['items'])}</p>"
-             + common)
-    html = card(f"{_e(EM_TASK)} ЗАДАНИЯ КЛАНА",
-                "Личные у каждого свои: монеты получаешь ты, в казну идёт немного. Общие выполняет весь клан вместе, "
-                "за них награда намного больше и она идёт в казну. Новые задания каждый день.", body)
+    intro = ("Личные у каждого свои: монеты получаешь ты, в казну идёт немного. Общие выполняет весь клан вместе, "
+             "за них награда намного больше и она идёт в казну. Новые задания каждый день.")
+    done = lambda items: sum(1 for i in items if i["done"])
+    html = lambda wi: (
+        f"{_img(wi)}<p><i>{_e(EM_TASK)} ЗАДАНИЯ КЛАНА</i></p><p><i>{intro}</i></p>"
+        + ((_gap() + f"<p><i>👤 ЛИЧНЫЕ ЗАДАНИЯ · выполнено {done(mine)}/{len(mine)}</i></p>"
+            + _task_block(mine, PTASK_POOL, True)) if mine else "")
+        + _gap() + f"<p><i>👥 ОБЩИЕ ЗАДАНИЯ · выполнено {done(t['items'])}/{len(t['items'])}</i></p>"
+        + _task_block(t["items"], TASK_POOL, False))
     return html, _kb([_back()])
 
 
@@ -1104,7 +1105,7 @@ def clan_html(c: dict, uid: int, wi: bool = False, note: str = "") -> str:
         f"<b>{_e(EM_JOIN)} Вход: {JOIN_TITLES[c['join']]}</b>" + (f"<b> · от {c['min_level']} ур.</b>" if c["min_level"] > 1 else ""),
     ]
     lines_stat = [
-        f"<b>Уровень клана: {c['level']}/{MAX_CLAN_LEVEL}</b>",
+        f"<b>{_e(EM_LEVEL)} Уровень: {c['level']}✨</b>",
         f"<b>{_e(EM_TREASURY)} Казна: {_clan_stock(c)}</b>",
         f"<b>{_e(EM_POINTS)} Очки: {_n(c['points'])} · место {_rank_of(c)}</b>",
         f"<b>{_e(EM_MEDAL)} Медали: {_n(c.get('medals', 0))}</b>",
@@ -1373,7 +1374,7 @@ def upgrade_screen(c: dict):
     html = card("✨ УЛУЧШЕНИЕ КЛАНА",
                 "Нужно всё сразу. Монеты, минералы, мясо и фрукты при улучшении тратятся, медали не тратятся: "
                 "нужно просто иметь столько. Всё это вносят участники в казну, мясо и фрукты ещё падают с клановых боссов, медали дают боссы и задания.",
-                expandable=True, body=_tree(f"✨ Уровень {lvl} → {lvl + 1}", [
+                expandable=True, body=_tree(f"{_e(EM_LEVEL)} Уровень: {lvl}✨ → {lvl + 1}✨", [
                     f"{mark(checks[0])} Монеты в казне: <b>{_n(c['treasury'])}/{_n(cost)}</b> {_e(EM_COINS)}",
                     f"{mark(checks[5])} Минералы в казне: <b>{_n(have_min)}/{_n(need_min)}</b> {_MIN_EMOJI}",
                     f"{mark(checks[1])} Медали (не тратятся): <b>{_n(have_medals)}/{_n(need_medals)}</b> {_e(EM_MEDAL)}",
@@ -1427,7 +1428,8 @@ def list_screen(page: int):
 
 def view_screen(c: dict, uid: int):
     lines = [f"{_e(EM_LEADER)} Лидер: {_hname(c['leader'])}",
-             f"{_e(EM_MEMBERS)} Участники: <b>{len(c['members'])}/{_cap(c)}</b> · уровень клана <b>{c['level']}</b>",
+             f"{_e(EM_MEMBERS)} Участники: <b>{len(c['members'])}/{_cap(c)}</b>",
+             f"{_e(EM_LEVEL)} Уровень: <b>{c['level']}</b>✨",
              f"{_e(EM_POINTS)} Очки: <b>{_n(c['points'])}</b> · место <b>{_rank_of(c)}</b>",
              f"{_e(EM_JOIN)} Вход: <b>{JOIN_TITLES[c['join']]}</b>, от <b>{c['min_level']}</b> ур."]
     html = card(f"{_e(EM_CLAN)} {escape(c['name'])}", escape(c["desc"]) if c.get("desc") else "Описания нет.",
