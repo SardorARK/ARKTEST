@@ -17,6 +17,8 @@
     Вывести из казны можно только по заявке: решает лидер (сам лидер выводит сразу). Лидер также
     может «Распределить» казну: всё или выбранное (монеты, минералы, мясо, фрукты) делится поровну
     между всеми участниками, остаток, который не делится нацело, остаётся в казне.
+  * Задания: общие (весь клан вместе, награда большая, идёт в казну, очки и медали клану) и личные (у каждого
+    игрока свои на день, награда поменьше: монеты игроку, немного в казну и очки клану).
   * Объявление: лидер или заместитель шлёт сообщение всем участникам в личку (пауза ANNOUNCE_COOLDOWN).
   * Журнал событий клана, список кланов с заявками, топ кланов.
 
@@ -107,13 +109,33 @@ UPGRADE_MEMBERS = {1: 5, 2: 8, 3: 11, 4: 15, 5: 20, 6: 26, 7: 32}     # не б�
 # Награда (медали, очки клана, монеты) идёт клану: монеты в казну. unique: считаются разные участники.
 TASK_PER_DAY = 3
 TASK_POOL: dict[str, dict] = {
-    "donate": {"title": "Внести в казну монет: {n}", "target": 50_000, "medals": 5, "points": 20, "coins": 10_000},
-    "boss_kills": {"title": "Победить клановых боссов: {n}", "target": 3, "medals": 10, "points": 30, "coins": 25_000},
-    "boss_hard": {"title": "Победить сложного клан-босса: {n}", "target": 1, "medals": 12, "points": 40, "coins": 50_000},
-    "boss_dmg": {"title": "Нанести клановым боссам урона: {n}", "target": 500_000, "medals": 8, "points": 25, "coins": 20_000},
-    "fighters": {"title": "Разных бойцов у клановых боссов: {n}", "target": 3, "medals": 6, "points": 20,
-                 "coins": 10_000, "unique": True},
+    "donate": {"title": "Внести в казну монет: {n}", "target": 50_000, "medals": 8, "points": 30, "coins": 25_000},
+    "boss_kills": {"title": "Победить клановых боссов: {n}", "target": 3, "medals": 15, "points": 45, "coins": 60_000},
+    "boss_hard": {"title": "Победить сложного клан-босса: {n}", "target": 1, "medals": 18, "points": 60,
+                  "coins": 120_000},
+    "boss_dmg": {"title": "Нанести клановым боссам урона: {n}", "target": 500_000, "medals": 12, "points": 38,
+                 "coins": 50_000},
+    "fighters": {"title": "Разных бойцов у клановых боссов: {n}", "target": 3, "medals": 9, "points": 30,
+                 "coins": 25_000, "unique": True},
 }
+
+# Личные задания: у каждого игрока свои PTASK_PER_DAY на день, прогресс только от его действий.
+# Награда: coins игроку лично, treasury монет в казну клана, points очков клану. Общие задания дают
+# клану намного больше. Задания «boss» работают, если clan_boss.py передаёт uid в task_add(клан, вид, n, uid):
+# проверь это и поставь PERSONAL_BOSS_TASKS = True.
+PTASK_PER_DAY = 3
+PERSONAL_BOSS_TASKS = False
+PTASK_POOL: dict[str, dict] = {
+    "p_donate": {"title": "Внести в казну монет: {n}", "target": 5_000, "coins": 1_000, "treasury": 1_000, "points": 2},
+    "p_min": {"title": "Внести в казну минералов: {n}", "target": 20_000, "coins": 1_500, "treasury": 1_000, "points": 2},
+    "p_meat": {"title": "Внести в казну мяса: {n}", "target": 30, "coins": 1_000, "treasury": 1_000, "points": 2},
+    "p_fruit": {"title": "Внести в казну фруктов: {n}", "target": 30, "coins": 1_000, "treasury": 1_000, "points": 2},
+    "p_boss_dmg": {"title": "Нанести клановым боссам урона: {n}", "target": 50_000, "coins": 2_000,
+                   "treasury": 1_500, "points": 3, "boss": True},
+    "p_boss_kills": {"title": "Победить клановых боссов: {n}", "target": 1, "coins": 3_000,
+                     "treasury": 2_000, "points": 4, "boss": True},
+}
+_PTASK_OF = {"donate": "p_donate", "boss_dmg": "p_boss_dmg", "boss_kills": "p_boss_kills"}
 JOIN_MODES = ("open", "request", "closed")
 JOIN_TITLES = {"open": "открытый", "request": "по заявкам", "closed": "закрытый"}
 RESERVED_BUTTONS = ("Меню", "Арена", "Рынок", "Настройки", "Заработать", "Мастерская", "Друзья")
@@ -131,6 +153,7 @@ EM_OK = ("5390846416530716134", "✅")      # галочка
 EM_NO = ("5328093774650293878", "🌟")      # не хватает
 EM_MEDAL = ("", "🎖")
 EM_TASK = ("", "📜")
+EM_BOSS = ("5305580419373085129", "🤟")     # кнопка «Боссы»
 
 ROLE_TITLES = {"leader": "Лидер", "deputy": "Заместитель", "member": "Участник"}
 ROLE_EMOJI = {"leader": EM_LEADER, "deputy": EM_DEPUTY, "member": EM_MEMBER}
@@ -582,12 +605,13 @@ def donate(uid: int, amount: int) -> tuple[bool, str]:
     c["treasury"] += amount
     c["contrib"][str(uid)] = int(c["contrib"].get(str(uid), 0)) + amount
     c["points"] += amount // COINS_PER_POINT
-    task_add(c, "donate", amount, uid)
+    pt: list[str] = []
+    task_add(c, "donate", amount, uid, pt)
     _log(c, f"{_pname(uid)} внёс {_n(amount)} монет")
     _save()
     _save_users()
     _led("clan_donate", user=uid, clan=c["id"], amount=amount)
-    return True, f"В казну внесено {_n(amount)}."
+    return True, f"В казну внесено {_n(amount)}." + _ptask_note(pt)
 
 
 def donate_minerals(uid: int, amount: int) -> tuple[bool, str]:
@@ -602,11 +626,13 @@ def donate_minerals(uid: int, amount: int) -> tuple[bool, str]:
     c["minerals"] = int(c.get("minerals", 0)) + amount
     cm = c.setdefault("contrib_min", {})
     cm[str(uid)] = int(cm.get(str(uid), 0)) + amount
+    pt: list[str] = []
+    _ptask_add(c, "p_min", amount, uid, pt)
     _log(c, f"{_pname(uid)} внёс {_n(amount)} минералов")
     _save()
     _save_users()
     _led("clan_donate_minerals", user=uid, clan=c["id"], amount=amount)
-    return True, f"В казну внесено минералов: {_n(amount)}."
+    return True, f"В казну внесено минералов: {_n(amount)}." + _ptask_note(pt)
 
 
 def donate_item(uid: int, r: str, amount: int) -> tuple[bool, str]:
@@ -624,11 +650,13 @@ def donate_item(uid: int, r: str, amount: int) -> tuple[bool, str]:
     c[r] = int(c.get(r, 0)) + amount
     cm = c.setdefault(f"contrib_{r}", {})
     cm[str(uid)] = int(cm.get(str(uid), 0)) + amount
+    pt: list[str] = []
+    _ptask_add(c, f"p_{r}", amount, uid, pt)
     _log(c, f"{_pname(uid)} внёс {_n(amount)} {_RES_GEN[r]}")
     _save()
     _save_users()
     _led(f"clan_donate_{r}", user=uid, clan=c["id"], amount=amount)
-    return True, f"В казну внесено {_n(amount)} {_RES_GEN[r]}."
+    return True, f"В казну внесено {_n(amount)} {_RES_GEN[r]}." + _ptask_note(pt)
 
 
 def _deposit(uid: int, r: str, amount: int) -> tuple[bool, str]:
@@ -849,10 +877,65 @@ def _tasks(c: dict) -> dict:
     return t
 
 
-def task_add(c: dict, kind: str, n: int = 1, uid=None) -> list[str]:
-    """Двигает прогресс задания клана. kind: donate, boss_kills, boss_hard, boss_dmg, fighters (uid обязателен).
-    Награду за выполненное задание выдаёт сама. Возвращает названия заданий, выполненных сейчас.
-    Сохранение остаётся за вызывающим."""
+def _ptasks(c: dict, uid) -> list[dict]:
+    """Личные задания игрока на сегодня. На новый день набор меняется, у каждого игрока свой."""
+    day = datetime.date.today().isoformat()
+    pt = c.get("ptasks")
+    if not isinstance(pt, dict) or pt.get("day") != day or not isinstance(pt.get("u"), dict):
+        pt = {"day": day, "u": {}}
+        c["ptasks"] = pt
+    items = pt["u"].get(str(uid))
+    if not items:
+        pool = [k for k, sp in PTASK_POOL.items() if PERSONAL_BOSS_TASKS or not sp.get("boss")]
+        items = [{"k": k, "n": 0, "done": False} for k in random.sample(pool, min(PTASK_PER_DAY, len(pool)))]
+        pt["u"][str(uid)] = items
+    return items
+
+
+def _ptask_add(c: dict, kind: str, n: int, uid, out: list | None = None) -> list[str]:
+    """Двигает прогресс личного задания игрока. Награда: монеты игроку, монеты в казну, очки клану.
+    Названия выполненных сейчас заданий возвращает и добавляет в out."""
+    spec = PTASK_POOL.get(kind)
+    if spec is None or uid is None or int(n) <= 0:
+        return []
+    done_now: list[str] = []
+    for it in _ptasks(c, uid):
+        if it["k"] != kind or it["done"]:
+            continue
+        it["n"] = min(spec["target"], int(it["n"]) + int(n))
+        if it["n"] >= spec["target"]:
+            it["done"] = True
+            user = _get_user(int(uid))
+            if user is not None:
+                user["coins"] = int(user.get("coins", 0) or 0) + spec["coins"]
+            c["treasury"] = int(c.get("treasury", 0)) + spec["treasury"]
+            c["points"] = int(c.get("points", 0)) + spec["points"]
+            done_now.append(spec["title"].format(n=_n(spec["target"])))
+    if done_now:
+        _save()
+        _save_users()
+    if out is not None:
+        out.extend(done_now)
+    return done_now
+
+
+def _ptask_note(done: list[str]) -> str:
+    return f" ✨ Личное задание выполнено: {'; '.join(done)}." if done else ""
+
+
+def task_add(c: dict, kind: str, n: int = 1, uid=None, ptitles: list | None = None) -> list[str]:
+    """Двигает прогресс общих заданий клана, а если передан uid, то и личного задания этого игрока.
+    kind: donate, boss_kills, boss_hard, boss_dmg, fighters (для fighters uid обязателен).
+    Награду за выполненное задание выдаёт сама. Возвращает названия общих заданий, выполненных сейчас
+    (названия личных попадают в ptitles, если список передан). Сохранение остаётся за вызывающим."""
+    done = _common_task_add(c, kind, n, uid)
+    pk = _PTASK_OF.get(kind)
+    if pk and uid is not None:
+        _ptask_add(c, pk, n, uid, ptitles)
+    return done
+
+
+def _common_task_add(c: dict, kind: str, n: int = 1, uid=None) -> list[str]:
     spec = TASK_POOL.get(kind)
     if spec is None or int(n) <= 0 and not spec.get("unique"):
         return []
@@ -876,18 +959,36 @@ def task_add(c: dict, kind: str, n: int = 1, uid=None) -> list[str]:
     return done_now
 
 
-def tasks_screen(c: dict):
+def tasks_screen(c: dict, uid=None):
     t = _tasks(c)
-    body = ""
+    common = ""
     for it in t["items"]:
         spec = TASK_POOL[it["k"]]
         mark = "✅" if it["done"] else "▫️"
         title = spec["title"].format(n=_n(spec["target"]))
-        body += _tree(f"{mark} {title}", [
+        common += _tree(f"{mark} {title}", [
             f"Прогресс: <b>{_n(it['n'])}/{_n(spec['target'])}</b>",
-            f"Награда: {_e(EM_MEDAL)} <b>{spec['medals']}</b> · {_e(EM_POINTS)} <b>{spec['points']}</b> · "
-            f"{_e(EM_COINS)} <b>{_n(spec['coins'])}</b> в казну"])
-    html = card(f"{_e(EM_TASK)} ЗАДАНИЯ КЛАНА", "Выполняет весь клан вместе. Новые задания каждый день.", body)
+            f"Награда: {_e(EM_COINS)} <b>{_n(spec['coins'])}</b> в казну · {_e(EM_MEDAL)} <b>{spec['medals']}</b> · "
+            f"{_e(EM_POINTS)} <b>{spec['points']}</b>"])
+    mine = _ptasks(c, uid) if uid is not None else []
+    personal = ""
+    for it in mine:
+        spec = PTASK_POOL[it["k"]]
+        mark = "✅" if it["done"] else "▫️"
+        title = spec["title"].format(n=_n(spec["target"]))
+        personal += _tree(f"{mark} {title}", [
+            f"Прогресс: <b>{_n(it['n'])}/{_n(spec['target'])}</b>",
+            f"Награда: {_e(EM_COINS)} <b>{_n(spec['coins'])}</b> тебе · {_e(EM_COINS)} <b>{_n(spec['treasury'])}</b> "
+            f"в казну · {_e(EM_POINTS)} <b>{spec['points']}</b>"])
+    body = ""
+    if mine:
+        body += (f"<p><b>👤 ЛИЧНЫЕ ЗАДАНИЯ</b> · выполнено {sum(1 for i in mine if i['done'])}/{len(mine)}</p>"
+                 + personal + _gap())
+    body += (f"<p><b>👥 ОБЩИЕ ЗАДАНИЯ</b> · выполнено {sum(1 for i in t['items'] if i['done'])}/{len(t['items'])}</p>"
+             + common)
+    html = card(f"{_e(EM_TASK)} ЗАДАНИЯ КЛАНА",
+                "Личные у каждого свои: монеты получаешь ты, в казну идёт немного. Общие выполняет весь клан вместе, "
+                "за них награда намного больше и она идёт в казну. Новые задания каждый день.", body)
     return html, _kb([_back()])
 
 
@@ -929,8 +1030,12 @@ def _tree(title: str, lines: list[str]) -> str:
     return f"<p><b>{title}</b><br>{body}</p>"
 
 
+DOTS = "·" * 25      # точки-разделитель блоков, как в экспедиции (моно: нажатие копирует)
+
+
 def _gap() -> str:
-    return "<p>\u2800</p>"
+    """Разделитель блоков: ряд точек в <code>, как в экспедиции."""
+    return f"<p><code>{DOTS}</code></p>"
 
 
 def _btn(text: str, data: str, style: ButtonStyle = ButtonStyle.PRIMARY, emoji=None) -> InlineKeyboardButton:
@@ -995,7 +1100,7 @@ def clan_html(c: dict, uid: int, wi: bool = False, note: str = "") -> str:
     return (
         f"{_img(wi)}<p><b>{_e(EM_CLAN)} {escape(c['name'])}</b> · ты: <i>{ROLE_TITLES[role].lower()}</i></p>"
         + (f"<blockquote><i>{escape(c['desc'])}</i></blockquote>" if c.get("desc") else "")
-        + _tree("Состав", lines_main) + _tree("Клан", lines_stat)
+        + _gap() + _tree("Состав", lines_main) + _gap() + _tree("Клан", lines_stat)
         + (f"<p>{note}</p>" if note else "")
     )
 
@@ -1015,7 +1120,7 @@ def clan_kb(c: dict, uid: int) -> InlineKeyboardMarkup:
     if role == "leader":
         rows.append([_btn("Улучшить клан", "cl:up", ButtonStyle.SUCCESS, emoji="✨"),
                      _btn("Настройки", "cl:set", emoji="⚙️")])
-    rows.append([_btn("Боссы", "cb:open", ButtonStyle.SUCCESS, emoji="👹"), _btn("Задания", "cl:tsk", emoji="📜")])
+    rows.append([_btn("Боссы", "cb:open", ButtonStyle.SUCCESS, emoji=EM_BOSS), _btn("Задания", "cl:tsk", emoji="📜")])
     rows.append([_btn("Топ кланов", "cl:top:0", emoji="🏆"), _btn("События", "cl:log", emoji="🕓")])
     rows.append([_btn("Распустить клан", "cl:ds", ButtonStyle.DANGER, emoji="🗑") if role == "leader"
                  else _btn("Покинуть клан", "cl:lv", ButtonStyle.DANGER, emoji="🚪")])
@@ -1031,7 +1136,7 @@ def noclan_html(user: dict, uid: int, wi: bool = False, note: str = "") -> str:
         f"{_img(wi)}<p><b>{_e(EM_CLAN)} КЛАНЫ</b></p>"
         "<blockquote><i>Собери команду: вноси монеты в общую казну, расти уровень клана и поднимайся "
         "в рейтинге. Создатель сам выбирает себе заместителя.</i></blockquote>"
-        + _tree("Как это работает", lines)
+        + _gap() + _tree("Как это работает", lines)
         + (f"<p><i>Ждёт ответа заявка в «{escape(pend[0]['name'])}».</i></p>" if pend else "")
         + (f"<p><i>Вступать в кланы можно через {_dur(_cooldown_left(user))}.</i></p>" if _cooldown_left(user) else "")
         + (f"<p>{note}</p>" if note else "")
@@ -1057,7 +1162,8 @@ def home_screen(uid: int, note: str = ""):
 
 def card(title: str, intro: str, body: str = "", expandable: bool = False) -> "callable":
     bq = "<blockquote expandable>" if expandable else "<blockquote>"
-    return lambda wi: f"{_img(wi)}<p><b>{title}</b></p>{bq}<i>{intro}</i></blockquote>{body}"
+    return lambda wi: (f"{_img(wi)}<p><b>{title}</b></p>{bq}<i>{intro}</i></blockquote>"
+                       + (_gap() + body if body else ""))
 
 
 def _confirm(title: str, text: str, ok: str, cancel: str):
@@ -1145,10 +1251,13 @@ def donate_screen(c: dict, user: dict, uid: int | str = "", note: str = ""):
         f"<blockquote><i>За каждые {_n(COINS_PER_POINT)} монет клан получает очко {_e(EM_POINTS)}. "
         f"Вносить можно монеты, минералы, мясо и фрукты: на улучшение клана они тратятся. "
         f"Вывести из казны можно только с одобрения лидера. Сумму вводишь вручную.</i></blockquote>"
+        f"{_gap()}"
         f"<p><b>{_e(EM_TREASURY)} В казне</b></p><blockquote>{_clan_stock(c)}</blockquote>"
+        f"{_gap()}"
         f"<p><b>У тебя</b></p><blockquote>"
         f"{_stock(user['coins'], user.get(_MIN_FIELD, 0) or 0, user.get('meat', 0), user.get('fruit', 0))}"
         f"</blockquote>"
+        f"{_gap()}"
         f"<p><b>Твой вклад</b></p><blockquote>"
         f"{_stock(contrib('contrib'), contrib('contrib_min'), contrib('contrib_meat'), contrib('contrib_fruit'))}"
         f"</blockquote>" + mine_line + (f"<p>{note}</p>" if note else ""))
@@ -1196,7 +1305,7 @@ def wd_requests_screen(c: dict):
     return (card(f"{_e(EM_TREASURY)} ЗАЯВКИ НА ВЫВОД · {len(c['wd'])}",
                  "Одобришь заявку, и ресурс сразу уйдёт из казны игроку.",
                  f"<p><b>{_e(EM_TREASURY)} В казне</b></p><blockquote>{_clan_stock(c)}</blockquote>"
-                 + _tree("Игроки", lines)), _kb(*rows))
+                 + _gap() + _tree("Игроки", lines)), _kb(*rows))
 
 
 def distribute_screen(c: dict, mask: int):
@@ -1734,7 +1843,7 @@ async def on_cb(cb: CallbackQuery, state: FSMContext):
         if await need_clan():
             return
         await cb.answer()
-        await _show(cb, tasks_screen(c))
+        await _show(cb, tasks_screen(c, uid))
         _save()      # набор заданий на новый день создаётся при открытии: сохраняем
         return
     if act == "set":
@@ -1859,6 +1968,8 @@ async def on_input(message: Message, state: FSMContext):
                               _kb([_btn("Открыть заявки на вывод", "cl:wdq", ButtonStyle.SUCCESS)]))
             else:
                 wnote = f"<b>{_e(EM_OK)} Выведено из казны: {what}.</b>"
+        else:
+            wnote = f"<b>{_e(EM_OK)} {escape(res)}</b>"
         await state.clear()
         try:
             await message.delete()
